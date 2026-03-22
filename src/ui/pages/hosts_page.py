@@ -227,12 +227,11 @@ class HostsPage(BasePage):
         self._service_group_chips_scrolls = []
         self._service_group_chip_buttons = []
         self._open_hosts_button = None
-        self._close_error_button = None
         self._info_text_label = None
         self._browser_warning_label = None
         self._adobe_desc_label = None
         self._adobe_title_label = None
-        self._restoring_permissions = False
+        self._hosts_error_bar = None  # Текущий InfoBar ошибки доступа к hosts
 
         self._services_container = None
         self._services_layout = None
@@ -245,7 +244,6 @@ class HostsPage(BasePage):
         self._applying = False
         self._active_domains_cache = None  # Кеш активных доменов
         self._last_error = None  # Последняя ошибка
-        self.error_panel = None  # Панель ошибок
         self._current_operation = None
         self._startup_initialized = False
         self._service_dns_selection = load_user_hosts_selection()
@@ -306,24 +304,6 @@ class HostsPage(BasePage):
             except Exception:
                 pass
 
-        # Close-error icon button (tiny 20x20, stays plain QPushButton).
-        if self._close_error_button is not None:
-            try:
-                self._close_error_button.setIcon(qta.icon('fa5s.times', color=tokens.fg_faint))
-                self._close_error_button.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background: transparent;
-                        border: none;
-                    }}
-                    QPushButton:hover {{
-                        background: {tokens.surface_bg_hover};
-                        border-radius: 10px;
-                    }}
-                    """
-                )
-            except Exception:
-                pass
 
         try:
             self._update_ui()
@@ -411,16 +391,6 @@ class HostsPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-
-        if hasattr(self, "restore_btn") and self.restore_btn is not None:
-            if self._restoring_permissions:
-                self.restore_btn.setText(
-                    self._tr("page.hosts.button.restoring_access", " Восстановление...")
-                )
-            else:
-                self.restore_btn.setText(
-                    self._tr("page.hosts.button.restore_access", " Восстановить права доступа")
-                )
 
         if hasattr(self, "clear_btn") and self.clear_btn is not None:
             self.clear_btn.setText(self._tr("page.hosts.button.clear", " Очистить"))
@@ -657,9 +627,6 @@ class HostsPage(BasePage):
         return set()
 
     def _build_ui(self):
-        # Панель ошибок (скрыта по умолчанию)
-        self._build_error_panel()
-
         # Информационная заметка
         self._build_info_note()
         self.add_spacing(4)
@@ -793,146 +760,106 @@ class HostsPage(BasePage):
         except Exception:
             self._catalog_sig = None
 
-    def _build_error_panel(self):
-        """Панель для отображения ошибок доступа к hosts"""
-        semantic = get_semantic_palette()
-        self.error_panel = QWidget()
-        error_layout = QVBoxLayout(self.error_panel)
-        error_layout.setContentsMargins(12, 10, 12, 10)
-        error_layout.setSpacing(8)
+    def _show_error(self, message: str):
+        """Показывает InfoBar с ошибкой доступа и кнопкой восстановления прав."""
+        if self._last_error == message:
+            return  # Не дублируем одну и ту же ошибку
+        self._dismiss_hosts_error_bar()
+        self._last_error = message
 
-        # Верхняя строка с иконкой, текстом и кнопкой закрытия
-        top_row = QHBoxLayout()
-        top_row.setSpacing(10)
-
-        # Иконка ошибки (QLabel с pixmap — оставляем как есть)
-        icon_label = QLabel()
-        icon_label.setPixmap(qta.icon('fa5s.exclamation-triangle', color=semantic.error).pixmap(20, 20))
-        top_row.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignTop)
-
-        # Текст ошибки
-        self.error_text = BodyLabel()
-        self.error_text.setWordWrap(True)
-        self.error_text.setStyleSheet(f"color: {semantic.error}; font-size: 12px; background: transparent;")
-        top_row.addWidget(self.error_text, 1)
-
-        # Кнопка закрыть (иконочная, 20x20 — plain QPushButton)
-        close_btn = QPushButton()
-        self._close_error_button = close_btn
-        tokens = get_theme_tokens()
-        close_btn.setIcon(qta.icon('fa5s.times', color=tokens.fg_faint))
-        close_btn.setFixedSize(20, 20)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: transparent;
-                border: none;
-            }}
-            QPushButton:hover {{
-                background: {tokens.surface_bg_hover};
-                border-radius: 10px;
-            }}
-            """
-        )
-        close_btn.clicked.connect(lambda: self.error_panel.hide() if self.error_panel is not None else None)
-        top_row.addWidget(close_btn, 0, Qt.AlignmentFlag.AlignTop)
-
-        error_layout.addLayout(top_row)
-
-        # Кнопка восстановления прав
-        btn_row = QHBoxLayout()
-        btn_row.setContentsMargins(30, 0, 0, 0)  # Отступ слева под иконку
-
-        self.restore_btn = PushButton()
-        self.restore_btn.setText(
-            self._tr("page.hosts.button.restore_access", " Восстановить права доступа")
-        )
-        self.restore_btn.setIcon(qta.icon('fa5s.wrench', color=tokens.fg))
-        self.restore_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.restore_btn.setFixedHeight(32)
-        self.restore_btn.clicked.connect(self._restore_hosts_permissions)
-        btn_row.addWidget(self.restore_btn)
-        btn_row.addStretch()
-
-        error_layout.addLayout(btn_row)
-
-        if self.error_panel is None:
+        if not InfoBar:
+            log(f"hosts access error (no InfoBar): {message}", "WARNING")
             return
 
-        self.error_panel.setStyleSheet(
-            f"""
-            QWidget {{
-                background-color: {semantic.error_soft_bg};
-                border: 1px solid {semantic.error_soft_border};
-                border-radius: 8px;
-            }}
-            """
-        )
+        try:
+            from qfluentwidgets import InfoBarPosition
 
-        self.error_panel.hide()  # Скрыта по умолчанию
-        self.add_widget(self.error_panel)
+            bar = InfoBar.error(
+                title=self._tr("page.hosts.error.title", "Нет доступа к hosts"),
+                content=message,
+                orient=Qt.Orientation.Vertical,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                duration=-1,  # Не исчезает автоматически
+                parent=self.window(),
+            )
 
-    def _show_error(self, message: str):
-        """Показывает ошибку на панели"""
-        self._last_error = message
-        self.error_text.setText(message)
-        if self.error_panel is not None:
-            self.error_panel.show()
+            # Кнопка "Восстановить права"
+            restore_btn = PushButton(
+                self._tr("page.hosts.button.restore_access", "Восстановить права доступа")
+            )
+            restore_btn.setFixedWidth(220)
+
+            def _on_restore():
+                restore_btn.setEnabled(False)
+                restore_btn.setText(
+                    self._tr("page.hosts.button.restoring_access", "Восстановление...")
+                )
+                self._restore_hosts_permissions(bar, restore_btn)
+
+            restore_btn.clicked.connect(_on_restore)
+            bar.addWidget(restore_btn)
+            self._hosts_error_bar = bar
+        except Exception as e:
+            log(f"Ошибка показа InfoBar: {e}", "DEBUG")
+
+    def _dismiss_hosts_error_bar(self):
+        """Закрывает текущий InfoBar ошибки доступа к hosts."""
+        self._last_error = None
+        if self._hosts_error_bar is not None:
+            try:
+                self._hosts_error_bar.close()
+            except Exception:
+                pass
+            self._hosts_error_bar = None
 
     def _hide_error(self):
-        """Скрывает панель ошибок"""
-        self._last_error = None
-        if self.error_panel is not None:
-            self.error_panel.hide()
+        """Скрывает ошибку доступа к hosts."""
+        self._dismiss_hosts_error_bar()
 
-    def _restore_hosts_permissions(self):
-        """Восстанавливает права доступа к файлу hosts"""
-        self._restoring_permissions = True
-        self.restore_btn.setEnabled(False)
-        self.restore_btn.setText(
-            self._tr("page.hosts.button.restoring_access", " Восстановление...")
-        )
-
+    def _restore_hosts_permissions(self, bar=None, btn=None):
+        """Восстанавливает стандартные права доступа к файлу hosts."""
         try:
             from hosts.hosts import restore_hosts_permissions
             success, message = restore_hosts_permissions()
 
             if success:
-                self._hide_error()
+                self._dismiss_hosts_error_bar()
                 self._invalidate_cache()
                 self._update_ui()
                 self._sync_selections_from_hosts()
                 if InfoBar:
+                    from qfluentwidgets import InfoBarPosition
                     InfoBar.success(
-                        title=self._tr("page.hosts.permissions.restore.success.title", "Успех"),
+                        title=self._tr("page.hosts.permissions.restore.success.title", "Готово"),
                         content=self._tr(
                             "page.hosts.permissions.restore.success.content",
-                            "Права доступа к файлу hosts успешно восстановлены!",
+                            "Права доступа к файлу hosts восстановлены",
                         ),
+                        isClosable=True,
+                        position=InfoBarPosition.TOP,
+                        duration=5000,
                         parent=self.window(),
                     )
             else:
+                if bar is not None:
+                    try:
+                        bar.close()
+                    except Exception:
+                        pass
+                self._hosts_error_bar = None
+                self._last_error = None
                 self._show_error(message)
-                if InfoBar:
-                    InfoBar.warning(
-                        title=self._tr("page.hosts.permissions.restore.fail.title", "Ошибка"),
-                        content=self._tr(
-                            "page.hosts.permissions.restore.fail.content",
-                            "Не удалось восстановить права:\n{message}\n\nПопробуйте временно отключить защиту файла hosts в настройках антивируса (Kaspersky, Dr.Web и т.д.)",
-                            message=message,
-                        ),
-                        parent=self.window(),
-                    )
         except Exception as e:
             log(f"Ошибка при восстановлении прав: {e}", "ERROR")
-            self._show_error(self._tr("page.hosts.error.generic", "Ошибка: {error}", error=e))
-        finally:
-            self._restoring_permissions = False
-            self.restore_btn.setEnabled(True)
-            self.restore_btn.setText(
-                self._tr("page.hosts.button.restore_access", " Восстановить права доступа")
-            )
+            if bar is not None:
+                try:
+                    bar.close()
+                except Exception:
+                    pass
+            self._hosts_error_bar = None
+            self._last_error = None
+            self._show_error(str(e))
 
     def _check_hosts_access(self):
         """Проверяет доступ к hosts файлу при загрузке страницы"""
