@@ -11,7 +11,10 @@ from .crypto import verify_signed_response
 from .storage import PremiumStorage
 from .types import ActivationStatus
 
-API_BASE_URL = "http://185.114.116.232:6666/api"
+try:
+    from config._build_secrets import PREMIUM_API_BASE_URL as API_BASE_URL
+except ImportError:
+    API_BASE_URL = ""
 REQUEST_TIMEOUT = 10
 
 

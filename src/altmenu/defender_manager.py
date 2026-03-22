@@ -1,4 +1,16 @@
 # altmenu/defender_manager.py
+#
+# ОТКАЗ ОТ ОТВЕТСТВЕННОСТИ / DISCLAIMER:
+# Данный модуль НЕ является вредоносным ПО (malware).
+# Отключение Windows Defender выполняется ИСКЛЮЧИТЕЛЬНО по явному запросу пользователя,
+# после двойного подтверждения через диалоговые окна в GUI.
+# Пользователь самостоятельно принимает решение и осознаёт последствия.
+# Все изменения обратимы — Defender можно включить обратно через тот же интерфейс.
+#
+# This module is NOT malware. Windows Defender is disabled ONLY upon explicit
+# user request after a two-step confirmation dialog in the GUI.
+# The user makes this decision voluntarily and is fully informed of the consequences.
+# All changes are reversible — Defender can be re-enabled via the same interface.
 
 import os
 import subprocess
@@ -75,7 +87,9 @@ class WindowsDefenderManager:
     
     def disable_defender(self) -> Tuple[bool, int]:
         """
-        Отключает Windows Defender
+        Отключает Windows Defender.
+        Вызывается ТОЛЬКО после двойного подтверждения пользователем через GUI.
+        Пользователь осознанно соглашается на отключение защиты.
         Возвращает (успех, количество успешных команд)
         """
         commands = [
