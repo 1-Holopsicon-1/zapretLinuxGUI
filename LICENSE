@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2025 censorliber
+Copyright (c) 2025-2026 censorliber
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+This project incorporates components from the following open-source projects:
+
+1. bol-van/zapret (https://github.com/bol-van/zapret)
+   Copyright (c) 2016-2026 bol-van
+   Licensed under the MIT License.
