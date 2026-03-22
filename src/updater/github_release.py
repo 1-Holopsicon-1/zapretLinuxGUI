@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any, Tuple
 from packaging import version
 from datetime import datetime
-import base64
 import time
 import json
 import os
@@ -20,56 +19,23 @@ from .proxy_bypass import request_get_bypass_proxy
 from config import LOGS_FOLDER
 
 # ────────────────────────────────────────────────────────────────
-#  ОБФУСКАЦИЯ GITHUB ТОКЕНА
+#  GITHUB ТОКЕН (из _build_secrets при сборке, иначе env)
 # ────────────────────────────────────────────────────────────────
-_PARTS = [
-    ("PTIqBQ8VGBUuPQ==", 0x5A, 0),
-    ("aW8NWE8EbmlTWw==", 0x3D, 10),
-    ("HXpbYXVDZVl9eQ==", 0x2C, 20),
-    ("LAkkB08IDkwuKA==", 0x7E, 30),
-]
-_CHECKSUM = 942
-_CACHE = ""
-
-
-def _rebuild_token() -> str:
-    """Собирает токен из обфусцированных частей"""
-    global _CACHE
-    
-    if _CACHE:
-        return _CACHE
-    
-    try:
-        result = [''] * 40
-        
-        for encoded, xor_key, offset in _PARTS:
-            decoded = base64.b64decode(encoded)
-            for i, byte in enumerate(decoded):
-                if offset + i < len(result):
-                    result[offset + i] = chr(byte ^ xor_key)
-        
-        value = ''.join(result).rstrip('\x00')
-        
-        checksum = sum(ord(c) for c in value[:10])
-        if checksum != _CHECKSUM:
-            return ""
-        
-        _CACHE = value
-        return _CACHE
-    except:
-        return ""
+try:
+    from config._build_secrets import GITHUB_UPDATE_TOKEN as _BUILD_GH_TOKEN
+except ImportError:
+    _BUILD_GH_TOKEN = ""
 
 
 def _get_token() -> str:
-    """Получает токен (из обфускации/env)"""
-    token = _rebuild_token()
-    if token and len(token) > 20:
-        return token
-    
+    """Получает GitHub токен (из _build_secrets/env)"""
+    if _BUILD_GH_TOKEN:
+        return _BUILD_GH_TOKEN
+
     env_token = os.getenv('GITHUB_TOKEN')
     if env_token:
         return env_token
-    
+
     return ""
 
 

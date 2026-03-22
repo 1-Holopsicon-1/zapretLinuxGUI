@@ -23,42 +23,15 @@ def _no_proxy_get(url: str, **kwargs) -> requests.Response:
     finally:
         s.close()
 
-# Обфусцированные встроенные данные
-_INLINE_PARTS = [
-    ("eHp7f397eXZ+fnU=", 0x4F, 0),
-    ("amptXw==", 0x2B, 11),
-    ("WEooTm00dltXSihhWFFeKQ==", 0x19, 15),
-    ("k4C5iIutlZeIu7qS+vqG", 0xC3, 31),
-]
+# ────────────────────────────────────────────────────────────────
+#  ТОКЕН TELEGRAM BOT API (из _build_secrets при сборке, иначе env/файл)
+# ────────────────────────────────────────────────────────────────
+try:
+    from config._build_secrets import TG_UPDATE_BOT_TOKEN as _BUILD_TOKEN
+except ImportError:
+    _BUILD_TOKEN = ""
 
-# Контрольная сумма первых символов
-_INLINE_CHECKSUM = 517
-
-
-def _rebuild_inline_value() -> str:
-    """Собирает встроенную строку из частей"""
-    import base64
-    
-    try:
-        result = [''] * 46
-        
-        for encoded, xor_key, offset in _INLINE_PARTS:
-            decoded = base64.b64decode(encoded)
-            for i, byte in enumerate(decoded):
-                if offset + i < len(result):
-                    result[offset + i] = chr(byte ^ xor_key)
-        
-        value = ''.join(result).rstrip('\x00')
-        
-        checksum = sum(ord(c) for c in value[:10])
-        if checksum != _INLINE_CHECKSUM:
-            return ""
-        
-        return value
-    except:
-        return ""
-
-_INLINE_CACHE = ""
+_TOKEN_CACHE = ""
 
 # Каналы для разных веток (username без @)
 TELEGRAM_CHANNELS = {
@@ -77,32 +50,31 @@ _API_URL_TEMPLATE = "https://api.telegram.org/bot{value}/{method}"
 
 
 def get_inline_value() -> str:
-    """Возвращает встроенное значение (из obf/env/файла)"""
-    global _INLINE_CACHE
-    
-    if _INLINE_CACHE:
-        return _INLINE_CACHE
-    
-    embedded = _rebuild_inline_value()
-    if embedded and len(embedded) > 20:
-        _INLINE_CACHE = embedded
-        return _INLINE_CACHE
-    
+    """Возвращает токен бота (из _build_secrets/env/файла)"""
+    global _TOKEN_CACHE
+
+    if _TOKEN_CACHE:
+        return _TOKEN_CACHE
+
+    if _BUILD_TOKEN:
+        _TOKEN_CACHE = _BUILD_TOKEN
+        return _TOKEN_CACHE
+
     env_value = os.getenv('ZAPRET_TG_BOT_TOKEN')
     if env_value:
-        _INLINE_CACHE = env_value
-        return _INLINE_CACHE
-    
+        _TOKEN_CACHE = env_value
+        return _TOKEN_CACHE
+
     try:
         from config import LOGS_FOLDER
         token_file = os.path.join(LOGS_FOLDER, '.tg_bot_token')
         if os.path.exists(token_file):
             with open(token_file, 'r') as f:
-                _INLINE_CACHE = f.read().strip()
-                return _INLINE_CACHE
-    except:
+                _TOKEN_CACHE = f.read().strip()
+                return _TOKEN_CACHE
+    except Exception:
         pass
-    
+
     return ""
 
 

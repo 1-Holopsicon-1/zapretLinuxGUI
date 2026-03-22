@@ -2037,8 +2037,6 @@ def main():
             )
         sys.exit(0)
     
-    # Примечание: установка сертификата выполняется вручную из GUI (кнопка в настройках).
-
     # ---------------- Проверка single instance ----------------
     from startup.single_instance import create_mutex, release_mutex
     from startup.ipc_manager import IPCManager

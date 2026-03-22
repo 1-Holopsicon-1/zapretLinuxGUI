@@ -132,20 +132,6 @@ _LIST_FILE_ARG_RE = re.compile(r"--(?:hostlist|ipset|hostlist-exclude|ipset-excl
 _HOSTLIST_DISPLAY_RE = re.compile(r"--(?:hostlist|hostlist-exclude)=([^\s]+)")
 
 
-class _CertificateInstallWorker(QObject):
-    finished = pyqtSignal(bool, str)  # success, message
-
-    def run(self) -> None:
-        try:
-            from startup.certificate_installer import reset_certificate_declined_flag, auto_install_certificate
-
-            reset_certificate_declined_flag()
-            success, message = auto_install_certificate(silent=True)
-            self.finished.emit(bool(success), str(message))
-        except Exception as e:
-            self.finished.emit(False, str(e))
-
-
 class BigActionButton(PrimaryActionButton):
     """Большая кнопка запуска (акцентная, PrimaryPushButton)."""
 
@@ -177,9 +163,6 @@ class Zapret2DirectControlPage(BasePage):
             title_key="page.z2_control.title",
             subtitle_key="page.z2_control.subtitle",
         )
-
-        self._cert_install_thread: QThread | None = None
-        self._cert_install_worker: _CertificateInstallWorker | None = None
 
         self._build_ui()
         self._update_stop_winws_button_text()
@@ -468,27 +451,6 @@ class Zapret2DirectControlPage(BasePage):
         reset_row.set_control(self.reset_program_btn)
         program_settings_card.add_widget(reset_row)
 
-        cert_row = SettingsRow(
-            "fa5s.certificate",
-            tr_catalog(
-                "page.z2_control.setting.certificate.title",
-                language=self._ui_language,
-                default="Установить сертификат",
-            ),
-            tr_catalog(
-                "page.z2_control.setting.certificate.desc",
-                language=self._ui_language,
-                default="Необязательно. Добавляет корневой сертификат Zapret Developer в доверенные (текущий пользователь)",
-            ),
-        )
-        self.install_cert_btn = ActionButton(
-            tr_catalog("page.z2_control.button.install", language=self._ui_language, default="Установить")
-        )
-        self.install_cert_btn.setProperty("noDrag", True)
-        self.install_cert_btn.clicked.connect(self._on_install_certificate_clicked)
-        cert_row.set_control(self.install_cert_btn)
-        program_settings_card.add_widget(cert_row)
-
         self.add_widget(program_settings_card)
 
         self.add_spacing(16)
@@ -610,89 +572,6 @@ class Zapret2DirectControlPage(BasePage):
 
         # Advanced settings initial state
         self._load_advanced_settings()
-
-    def _on_install_certificate_clicked(self) -> None:
-        try:
-            from startup.certificate_installer import is_certificate_installed
-        except Exception as e:
-            InfoBar.error(title="Сертификат", content=f"Не удалось загрузить установщик сертификата: {e}", parent=self.window())
-            return
-
-        thumbprint = "F507DDA6CB772F4332ECC2C5686623F39D9DA450"
-        if is_certificate_installed(thumbprint):
-            InfoBar.info(title="Сертификат", content="Сертификат уже установлен.", parent=self.window())
-            return
-
-        box = MessageBox(
-            tr_catalog(
-                "page.z2_control.dialog.certificate_install.title",
-                language=self._ui_language,
-                default="Установка сертификата",
-            ),
-            "Установить корневой сертификат Zapret Developer?\n\n"
-            "Это необязательно. После установки Windows будет доверять сертификатам, "
-            "выпущенным этим центром сертификации, для текущего пользователя.\n\n"
-            "Продолжить?",
-            self.window(),
-        )
-        if not box.exec():
-            return
-
-        if self._cert_install_thread is not None:
-            return
-
-        old_text = self.install_cert_btn.text()
-        self.install_cert_btn.setEnabled(False)
-        self.install_cert_btn.setText(
-            tr_catalog(
-                "page.z2_control.status.installing",
-                language=self._ui_language,
-                default="Установка...",
-            )
-        )
-        self._set_status("Установка сертификата...")
-
-        self._cert_install_thread = QThread()
-        self._cert_install_worker = _CertificateInstallWorker()
-        self._cert_install_worker.moveToThread(self._cert_install_thread)
-        self._cert_install_thread.started.connect(self._cert_install_worker.run)
-
-        def _finish(success: bool, message: str) -> None:
-            try:
-                self.install_cert_btn.setEnabled(True)
-                self.install_cert_btn.setText(old_text)
-
-                if success:
-                    self._set_status("Сертификат установлен")
-                    InfoBar.success(title="Сертификат", content=message or "Сертификат установлен", parent=self.window())
-                else:
-                    self._set_status("Не удалось установить сертификат")
-                    InfoBar.error(title="Сертификат", content=message or "Не удалось установить сертификат", parent=self.window())
-            finally:
-                thr = self._cert_install_thread
-                worker = self._cert_install_worker
-
-                try:
-                    if thr is not None:
-                        thr.quit()
-                        thr.wait(3000)
-                except Exception:
-                    pass
-                try:
-                    if worker is not None:
-                        worker.deleteLater()
-                except Exception:
-                    pass
-                try:
-                    if thr is not None:
-                        thr.deleteLater()
-                except Exception:
-                    pass
-                self._cert_install_thread = None
-                self._cert_install_worker = None
-
-        self._cert_install_worker.finished.connect(_finish)
-        self._cert_install_thread.start()
 
     def _load_advanced_settings(self) -> None:
         """Sync advanced toggles from registry."""

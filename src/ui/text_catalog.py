@@ -259,18 +259,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Очистить кэш проверок запуска (без удаления пресетов/настроек)",
         "en": "Clear launch checks cache (without deleting presets/settings)",
     },
-    "page.control.setting.certificate.title": {
-        "ru": "Сертификаты Zapret",
-        "en": "Zapret Certificates",
-    },
-    "page.control.setting.certificate.desc": {
-        "ru": "Установить сертификаты для HTTPS-интерцепта",
-        "en": "Install certificates for HTTPS interception",
-    },
-    "page.control.button.install": {
-        "ru": "Установить",
-        "en": "Install",
-    },
     "page.control.button.connection_test": {
         "ru": "Тест соединения",
         "en": "Connection Test",
@@ -5721,14 +5709,6 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
         "ru": "Рекомендуется",
         "en": "Recommended",
     },
-    "page.control.dialog.certificate_install.title": {
-        "ru": "Установка сертификата",
-        "en": "Certificate Installation",
-    },
-    "page.control.status.installing": {
-        "ru": "Установка...",
-        "en": "Installing...",
-    },
     "page.control.dialog.defender_disable.title": {
         "ru": "Отключение Windows Defender",
         "en": "Disable Windows Defender",
@@ -5972,26 +5952,6 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
     "page.z2_control.button.reset_confirm": {
         "ru": "Сбросить?",
         "en": "Reset?",
-    },
-    "page.z2_control.setting.certificate.title": {
-        "ru": "Установить сертификат",
-        "en": "Install Certificate",
-    },
-    "page.z2_control.setting.certificate.desc": {
-        "ru": "Необязательно. Добавляет корневой сертификат Zapret Developer в доверенные (текущий пользователь)",
-        "en": "Optional. Adds Zapret Developer root certificate to trusted certificates (current user)",
-    },
-    "page.z2_control.button.install": {
-        "ru": "Установить",
-        "en": "Install",
-    },
-    "page.z2_control.dialog.certificate_install.title": {
-        "ru": "Установка сертификата",
-        "en": "Certificate Installation",
-    },
-    "page.z2_control.status.installing": {
-        "ru": "Установка...",
-        "en": "Installing...",
     },
     "page.z2_control.dialog.defender_disable.title": {
         "ru": "Отключение Windows Defender",
