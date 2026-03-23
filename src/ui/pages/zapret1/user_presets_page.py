@@ -2092,7 +2092,7 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             from config.telegram_links import open_telegram_link
 
-            open_telegram_link("zapret_support_bot")
+            open_telegram_link("bypassblock", post=1359)
         except Exception as e:
             log(f"Ошибка открытия Telegram: {e}", "ERROR")
             InfoBar.warning(

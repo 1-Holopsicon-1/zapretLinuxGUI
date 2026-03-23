@@ -1128,11 +1128,11 @@ class AboutPage(BasePage):
     def _open_forum_for_beginners(self):
         try:
             from config.telegram_links import open_telegram_link
-            open_telegram_link("zapret_support_bot")
-            log("Открыт Telegram-бот: zapret_support_bot", "INFO")
+            open_telegram_link("bypassblock", post=1359)
+            log("Открыт пост: bypassblock/1359", "INFO")
         except Exception as e:
             if InfoBar:
-                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram-бота:\n{e}",
+                InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{e}",
                                 parent=self.window())
 
     def _open_help_folder(self):

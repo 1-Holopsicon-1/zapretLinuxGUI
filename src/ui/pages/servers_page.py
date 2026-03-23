@@ -510,8 +510,16 @@ class ServerCheckWorker(QThread):
                 'is_current': False,
             })
 
-        # Если режим telegram_only - пропускаем VPS и GitHub
+        # Если режим telegram_only - показываем VPS серверы без проверки
         if self._telegram_only:
+            for server in pool.servers:
+                self.server_checked.emit(server['name'], {
+                    'status': 'skipped',
+                    'response_time': 0,
+                    'error': self._tr("page.servers.status.rate_limited", "Ожидание"),
+                    'is_current': False,
+                })
+                _time.sleep(0.02)
             self.all_complete.emit()
             return
 
@@ -1245,6 +1253,9 @@ class ServersPage(BasePage):
         elif status.get('status') == 'blocked':
             status_item.setText(self._tr("page.servers.table.status.blocked", "● Блок"))
             status_item.setForeground(QColor(230, 180, 100))
+        elif status.get('status') == 'skipped':
+            status_item.setText(self._tr("page.servers.table.status.waiting", "● Ожидание"))
+            status_item.setForeground(QColor(160, 160, 160))
         else:
             status_item.setText(self._tr("page.servers.table.status.offline", "● Офлайн"))
             status_item.setForeground(QColor(220, 130, 130))
@@ -1702,6 +1713,7 @@ class ServersPage(BasePage):
         invalidate_cache(CHANNEL)
 
         self.changelog_card.start_download(self._remote_version)
+        self.update_card.hide()
 
         try:
             from updater.update import UpdateWorker
@@ -1741,6 +1753,7 @@ class ServersPage(BasePage):
             self.changelog_card.download_failed(str(e)[:50])
 
     def _on_download_failed(self, error: str):
+        self.update_card.show()
         self.update_card.show_download_error()
 
     def _dismiss_update(self):

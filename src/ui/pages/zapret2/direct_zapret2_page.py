@@ -574,6 +574,6 @@ class Zapret2StrategiesPageNew(BasePage):
         self._update_current_strategies_display()
 
     def _open_custom_domains(self):
-        """Открывает Telegram-бота для запроса добавления сайтов"""
+        """Открывает пост в Telegram для запроса добавления сайтов"""
         from config.telegram_links import open_telegram_link
-        open_telegram_link("zapret_support_bot")
+        open_telegram_link("bypassblock", post=1359)
