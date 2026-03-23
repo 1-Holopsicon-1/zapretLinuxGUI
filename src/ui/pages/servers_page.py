@@ -1743,6 +1743,7 @@ class ServersPage(BasePage):
             self._update_worker.download_complete.connect(self.changelog_card.download_complete)
             self._update_worker.download_failed.connect(self.changelog_card.download_failed)
             self._update_worker.download_failed.connect(self._on_download_failed)
+            self._update_worker.dpi_restart_needed.connect(self._restart_dpi_after_update)
             self._update_worker.progress.connect(lambda m: log(f'{m}', "🔁 UPDATE"))
 
             self._update_thread.start()
@@ -1758,6 +1759,16 @@ class ServersPage(BasePage):
     def _on_download_failed(self, error: str):
         self.update_card.show()
         self.update_card.show_download_error()
+
+    def _restart_dpi_after_update(self):
+        """Перезапуск DPI после временной остановки для скачивания обновления."""
+        try:
+            win = self.window()
+            if hasattr(win, 'dpi_controller') and win.dpi_controller:
+                log("🔄 Перезапуск DPI после скачивания обновления", "🔁 UPDATE")
+                win.dpi_controller.restart_dpi_async()
+        except Exception as e:
+            log(f"Не удалось перезапустить DPI: {e}", "❌ ERROR")
 
     def _dismiss_update(self):
         log("Обновление отложено пользователем", "🔄 UPDATE")

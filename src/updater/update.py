@@ -326,6 +326,7 @@ class UpdateWorker(QObject):
     show_no_updates = pyqtSignal(str)
     download_complete = pyqtSignal()
     download_failed = pyqtSignal(str)
+    dpi_restart_needed = pyqtSignal()
 
     def __init__(self, parent=None, silent: bool = False, skip_rate_limit: bool = False):
         super().__init__()
@@ -412,7 +413,33 @@ class UpdateWorker(QObject):
 
         log(f"Сформировано {len(urls)} URL для скачивания", "🔁 UPDATE")
         return urls
-    
+
+    def _test_download_connectivity(self, url: str, verify_ssl: bool) -> bool:
+        """Быстрый тест связи с сервером скачивания (HEAD, таймаут 5с)."""
+        try:
+            s = _make_session(verify_ssl)
+            try:
+                resp = s.head(url, timeout=(5, 5), verify=verify_ssl, allow_redirects=True)
+                return resp.status_code < 500
+            finally:
+                s.close()
+        except Exception:
+            return False
+
+    def _stop_dpi_for_download(self) -> bool:
+        """Останавливает winws/winws2 если запущены. Возвращает True если что-то остановили."""
+        from utils.process_killer import is_process_running, kill_winws_force
+
+        if not is_process_running("winws.exe") and not is_process_running("winws2.exe"):
+            return False
+
+        log("⚠️ DPI (winws) мешает скачиванию — временно останавливаем", "🔁 UPDATE")
+        self._emit("Остановка DPI для скачивания...")
+
+        kill_winws_force()
+        time.sleep(0.5)
+        return True
+
     def _run_installer(self, setup_exe: str, version: str, tmp_dir: str) -> bool:
         """
         Запускает установщик через ShellExecuteW с правами администратора.
@@ -493,7 +520,13 @@ class UpdateWorker(QObject):
             self._emit(f"Скачивание… {percent}%")
         
         download_urls = self._get_download_urls(release_info)
-        
+
+        # ── Проверяем, не блокирует ли DPI скачивание ──
+        dpi_was_stopped = False
+        first_url = next(((u, s) for u, s in download_urls if not u.startswith("telegram://")), None)
+        if first_url and not self._test_download_connectivity(first_url[0], first_url[1]):
+            dpi_was_stopped = self._stop_dpi_for_download()
+
         download_error = None
         for idx, (url, verify_ssl) in enumerate(download_urls):
             if url.startswith("telegram://"):
@@ -528,6 +561,9 @@ class UpdateWorker(QObject):
                     time.sleep(1)
         
         if download_error:
+            if dpi_was_stopped:
+                self.dpi_restart_needed.emit()
+
             error_msg = str(download_error)
             if "ConnectionPool" in error_msg or "Connection" in error_msg:
                 error_msg = "Ошибка подключения. Проверьте интернет."
@@ -538,6 +574,8 @@ class UpdateWorker(QObject):
             return False
 
         if not os.path.exists(setup_exe):
+            if dpi_was_stopped:
+                self.dpi_restart_needed.emit()
             error_msg = "Нет доступных источников для скачивания обновления"
             log(f"❌ {error_msg}", "🔁❌ ERROR")
             self.download_failed.emit(error_msg)
@@ -550,7 +588,10 @@ class UpdateWorker(QObject):
         log(f"   Файл существует: {os.path.exists(setup_exe)}", "🔁 UPDATE")
         if os.path.exists(setup_exe):
             log(f"   Размер: {os.path.getsize(setup_exe)} байт", "🔁 UPDATE")
-        return self._run_installer(setup_exe, new_ver, tmp_dir)
+        result = self._run_installer(setup_exe, new_ver, tmp_dir)
+        if not result and dpi_was_stopped:
+            self.dpi_restart_needed.emit()
+        return result
 
     def run(self):
         try:
