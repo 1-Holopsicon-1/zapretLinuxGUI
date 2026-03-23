@@ -1546,7 +1546,7 @@ class ServersPage(BasePage):
         else:
             self.update_card.show_manual_hint()
 
-    def start_checks(self, telegram_only: bool = False):
+    def start_checks(self, telegram_only: bool = False, skip_server_rate_limit: bool = False):
         """Запускает проверку серверов"""
         if self._checking:
             return
@@ -1558,12 +1558,14 @@ class ServersPage(BasePage):
         keep_existing_rows = False
 
         if not telegram_only:
-            can_full, msg = UpdateRateLimiter.can_check_servers_full()
-            if not can_full:
-                telegram_only = True
-                keep_existing_rows = True
-                log(f"⏱️ Полная проверка VPS заблокирована: {msg}. fallback=telegram-only", "🔄 UPDATE")
-            else:
+            if not skip_server_rate_limit:
+                can_full, msg = UpdateRateLimiter.can_check_servers_full()
+                if not can_full:
+                    telegram_only = True
+                    keep_existing_rows = True
+                    log(f"⏱️ Полная проверка VPS заблокирована: {msg}. fallback=telegram-only", "🔄 UPDATE")
+
+            if not telegram_only:
                 UpdateRateLimiter.record_servers_full_check()
                 self._last_check_time = time.time()
 
@@ -1708,18 +1710,11 @@ class ServersPage(BasePage):
         self._remote_version = ""
         self._release_notes = ""
 
-        current_time = time.time()
-        elapsed = current_time - self._last_check_time
-        telegram_only = elapsed < self._check_cooldown
+        from updater import invalidate_cache
+        invalidate_cache(CHANNEL)
+        log("🔄 Полная проверка всех серверов (ручная)", "🔄 UPDATE")
 
-        if telegram_only:
-            log(f"🔄 Быстрая проверка через Telegram ({int(elapsed)}с с последней)", "🔄 UPDATE")
-        else:
-            from updater import invalidate_cache
-            invalidate_cache(CHANNEL)
-            log("🔄 Полная проверка всех серверов", "🔄 UPDATE")
-
-        self.start_checks(telegram_only=telegram_only)
+        self.start_checks(telegram_only=False, skip_server_rate_limit=True)
 
     def _install_update(self):
         if self._update_in_progress:
