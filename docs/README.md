@@ -2,7 +2,7 @@
 
 ### Документация доступна здесь https://publish.obsidian.md/zapret
 
-### Поддержка по багам и идея доступна здесь https://t.me/nozapretinrussia_bot
+### Поддержка по багам и идея доступна здесь https://t.me/zapret_support_bot
 
 Один из самых популярных GUI лаунчеров для программы Запрет.
 
@@ -25,7 +25,7 @@
 
 
 > [!IMPORTANT]  
-> Есть вопросы? Задай их здесь на нашем форуме https://t.me/nozapretinrussia_bot или же в группе https://t.me/youtubenotwork или https://discord.gg/kkcBDG2uws
+> Есть вопросы? Задай их здесь на нашем форуме https://t.me/zapret_support_bot или же в группе https://t.me/youtubenotwork или https://discord.gg/kkcBDG2uws
 
 > [!CAUTION]  
 > Совсем никак не работает Запрет?

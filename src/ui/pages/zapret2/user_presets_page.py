@@ -2140,7 +2140,7 @@ class Zapret2UserPresetsPage(BasePage):
         try:
             from config.telegram_links import open_telegram_link
 
-            open_telegram_link("nozapretinrussia_bot")
+            open_telegram_link("zapret_support_bot")
         except Exception as e:
             log(f"Ошибка открытия Telegram: {e}", "ERROR")
             InfoBar.warning(

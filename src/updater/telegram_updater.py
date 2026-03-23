@@ -9,7 +9,7 @@ import os
 import re
 import time as _time
 import requests
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any
 from log import log
 from .network_hints import maybe_log_disable_dpi_for_update
 from .proxy_bypass import session_bypass_proxy
@@ -338,19 +338,3 @@ def is_telegram_available() -> bool:
     return bool(get_inline_value())
 
 
-def download_from_telegram(
-    channel: str = 'stable',
-    save_path: str = None,
-    progress_callback: Callable[[int, int], None] = None,
-    file_id: str = None
-) -> Optional[str]:
-    """
-    Скачивание через Bot API ограничено 20MB.
-    Для больших файлов используйте VPS серверы.
-    
-    Returns:
-        None - скачивание через Telegram отключено для больших файлов
-    """
-    log("⚠️ Telegram: скачивание больших файлов недоступно (лимит 20MB)", "📱 TG")
-    log("ℹ️ Используйте VPS серверы для скачивания", "📱 TG")
-    return None

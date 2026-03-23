@@ -409,57 +409,6 @@ class UpdateWorker(QObject):
         if self._last_release_info:
             self._download_update(self._last_release_info, is_retry=True)
     
-    def _download_from_telegram(self, release_info: dict, save_dir: str, progress_callback) -> Optional[str]:
-        """
-        Скачивает обновление из Telegram
-        
-        Args:
-            release_info: Информация о релизе с telegram_info
-            save_dir: Директория для сохранения
-            progress_callback: Функция прогресса (done, total)
-            
-        Returns:
-            Путь к скачанному файлу или None
-        """
-        try:
-            from .telegram_updater import download_from_telegram, is_telegram_available
-            
-            if not is_telegram_available():
-                log("❌ Telegram недоступен для скачивания", "🔁 UPDATE")
-                return None
-            
-            tg_info = release_info.get("telegram_info", {})
-            channel = tg_info.get("channel", "zapretnetdiscordyoutube")
-            file_id = tg_info.get("file_id")  # ID файла для быстрого скачивания
-            
-            # Определяем тип канала
-            tg_channel = 'test' if 'dev' in channel or 'test' in channel.lower() else 'stable'
-            
-            log(f"📱 Скачивание из Telegram @{channel}...", "🔁 UPDATE")
-            
-            # Обёртка для прогресса с emit сигналами
-            def tg_progress(current, total):
-                if progress_callback:
-                    progress_callback(current, total)
-            
-            result = download_from_telegram(
-                channel=tg_channel,
-                save_path=save_dir,
-                progress_callback=tg_progress,
-                file_id=file_id
-            )
-            
-            if result and os.path.exists(result):
-                log(f"✅ Telegram скачивание завершено: {result}", "🔁 UPDATE")
-                return result
-            
-            log("❌ Telegram скачивание не удалось", "🔁 UPDATE")
-            return None
-            
-        except Exception as e:
-            log(f"❌ Ошибка Telegram скачивания: {e}", "🔁 UPDATE")
-            return None
-    
     def _get_download_urls(self, release_info: dict) -> list:
         """Формирует список URL в порядке приоритета со всеми доступными серверами"""
         urls = []
@@ -507,7 +456,18 @@ class UpdateWorker(QObject):
                     
         except Exception as e:
             log(f"Не удалось добавить fallback серверы: {e}", "🔁 UPDATE")
-        
+
+        # 3. GitHub как финальный fallback (если нет ни одного URL)
+        if not urls:
+            try:
+                from .github_release import get_latest_release as github_get_latest
+                gh_release = github_get_latest(CHANNEL)
+                if gh_release and gh_release.get("update_url"):
+                    urls.append((gh_release["update_url"], True))
+                    log(f"📥 GitHub fallback: {gh_release['update_url']}", "🔁 UPDATE")
+            except Exception as e:
+                log(f"⚠️ Не удалось добавить GitHub fallback: {e}", "🔁 UPDATE")
+
         log(f"Сформировано {len(urls)} URL для скачивания", "🔁 UPDATE")
         return urls
     
@@ -594,15 +554,6 @@ class UpdateWorker(QObject):
             percent = done * 100 // total if total > 0 else 0
             self.progress_bytes.emit(percent, done, total)
             self._emit(f"Скачивание… {percent}%")
-        
-        # Проверяем, есть ли информация о Telegram
-        if release_info.get("telegram_info"):
-            result = self._download_from_telegram(release_info, tmp_dir, _prog)
-            if result:
-                setup_exe = result
-                self.download_complete.emit()
-                return self._run_installer(setup_exe, new_ver, tmp_dir)
-            log("⚠️ Telegram скачивание не удалось, пробуем другие источники", "🔁 UPDATE")
         
         download_urls = self._get_download_urls(release_info)
         

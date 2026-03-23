@@ -576,4 +576,4 @@ class Zapret2StrategiesPageNew(BasePage):
     def _open_custom_domains(self):
         """Открывает Telegram-бота для запроса добавления сайтов"""
         from config.telegram_links import open_telegram_link
-        open_telegram_link("nozapretinrussia_bot")
+        open_telegram_link("zapret_support_bot")
