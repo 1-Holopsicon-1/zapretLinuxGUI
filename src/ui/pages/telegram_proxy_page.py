@@ -1226,20 +1226,21 @@ class TelegramProxyPage(BasePage):
         return target_index
 
     def _apply_upstream_preset_ui(self, index: int) -> None:
+        upstream_enabled = self._upstream_toggle.toggle.isChecked()
         preset = self._upstream_catalog.preset_at(index)
-        if preset is None:
-            return
-
         has_bundled_presets = self._upstream_catalog.has_bundled_presets()
-        is_manual = self._upstream_catalog.is_manual(index)
-        is_mtproxy = self._upstream_catalog.is_mtproxy(index)
+        is_manual = bool(preset is not None and self._upstream_catalog.is_manual(index))
+        is_mtproxy = bool(preset is not None and self._upstream_catalog.is_mtproxy(index))
 
-        self._upstream_preset_row.setVisible(has_bundled_presets)
-        self._upstream_catalog_hint.setVisible(not has_bundled_presets)
-        self._upstream_manual_widget.setVisible(is_manual)
-        self._mtproxy_action_widget.setVisible(is_mtproxy)
+        self._upstream_preset_row.setVisible(upstream_enabled and has_bundled_presets)
+        self._upstream_catalog_hint.setVisible(upstream_enabled and not has_bundled_presets)
+        self._upstream_manual_widget.setVisible(upstream_enabled and is_manual)
+        self._mtproxy_action_widget.setVisible(upstream_enabled and is_mtproxy)
+        self._upstream_mode_toggle.setVisible(upstream_enabled)
+        self._upstream_mode_toggle.setEnabled(upstream_enabled)
+        self._upstream_mode_toggle.toggle.setEnabled(upstream_enabled)
 
-        if is_mtproxy:
+        if preset is not None and is_mtproxy:
             self._current_mtproxy_link = self._upstream_catalog.mtproxy_link(index)
         else:
             self._current_mtproxy_link = ""
@@ -1857,6 +1858,7 @@ class TelegramProxyPage(BasePage):
             set_tg_proxy_upstream_enabled(checked)
         except Exception:
             pass
+        self._apply_upstream_preset_ui(self._upstream_preset_row.combo.currentIndex())
         self._restart_if_running()
 
     def _on_upstream_preset_changed(self, index: int):
