@@ -170,7 +170,7 @@ class Zapret2StrategiesPageNew(BasePage):
                 return
 
             from strategy_menu.strategies_registry import registry
-            from strategy_menu import get_direct_strategy_selections
+            from strategy_menu.direct_selection_store import get_direct_strategy_selections
             from preset_zapret2.preset_store import get_preset_store
 
             # Загружаем выборы из selected source preset
@@ -403,7 +403,7 @@ class Zapret2StrategiesPageNew(BasePage):
         Вызывается асинхронно из MainWindow после активации пресета.
         """
         try:
-            from strategy_menu import get_direct_strategy_selections
+            from strategy_menu.direct_selection_store import get_direct_strategy_selections
             from strategy_menu.strategies_registry import registry
             from preset_zapret2.preset_store import get_preset_store
 
@@ -466,7 +466,7 @@ class Zapret2StrategiesPageNew(BasePage):
     def _update_current_strategies_display(self):
         """Совместимость: обновляет отображение текущих стратегий"""
         try:
-            from strategy_menu import get_direct_strategy_selections
+            from strategy_menu.direct_selection_store import get_direct_strategy_selections
 
             selections = get_direct_strategy_selections() or {}
             active_count = sum(1 for s in selections.values() if s and s != 'none')

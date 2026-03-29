@@ -9,7 +9,7 @@ from ui.pages.preset_subpage_base import PresetSubpageBase
 class Zapret2PresetDetailPage(PresetSubpageBase):
     def _default_title(self) -> str:
         try:
-            from strategy_menu import get_strategy_launch_method
+            from strategy_menu.launch_method_store import get_strategy_launch_method
 
             if (get_strategy_launch_method() or "").strip().lower() == "direct_zapret2_orchestra":
                 return "Пресет Оркестра Zapret 2"
@@ -19,7 +19,7 @@ class Zapret2PresetDetailPage(PresetSubpageBase):
 
     def _get_preset_path(self, name: str) -> Path:
         try:
-            from strategy_menu import get_strategy_launch_method
+            from strategy_menu.launch_method_store import get_strategy_launch_method
 
             if (get_strategy_launch_method() or "").strip().lower() == "direct_zapret2_orchestra":
                 from preset_orchestra_zapret2 import get_preset_path
@@ -33,7 +33,7 @@ class Zapret2PresetDetailPage(PresetSubpageBase):
 
     def _direct_launch_method(self) -> str | None:
         try:
-            from strategy_menu import get_strategy_launch_method
+            from strategy_menu.launch_method_store import get_strategy_launch_method
 
             if (get_strategy_launch_method() or "").strip().lower() == "direct_zapret2_orchestra":
                 return None
@@ -43,7 +43,7 @@ class Zapret2PresetDetailPage(PresetSubpageBase):
 
     def _preset_hierarchy_scope_key(self) -> str | None:
         try:
-            from strategy_menu import get_strategy_launch_method
+            from strategy_menu.launch_method_store import get_strategy_launch_method
 
             if (get_strategy_launch_method() or "").strip().lower() == "direct_zapret2_orchestra":
                 return "preset_orchestra_zapret2"

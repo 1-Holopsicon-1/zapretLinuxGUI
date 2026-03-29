@@ -60,7 +60,7 @@ from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTre
 from strategy_menu.args_preview_dialog import ArgsPreviewDialog
 from launcher_common.blobs import get_blobs_info
 from preset_zapret2 import PresetManager, SyndataSettings
-from ui.zapret2_strategy_marks import DirectZapret2MarksStore, DirectZapret2FavoritesStore
+from strategy_menu.marks_store_bridge import DirectZapret2MarksStore, DirectZapret2FavoritesStore
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log

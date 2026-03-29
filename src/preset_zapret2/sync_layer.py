@@ -250,7 +250,8 @@ class Zapret2PresetSyncLayer:
     @staticmethod
     def _is_basic_direct() -> bool:
         try:
-            from strategy_menu import get_direct_zapret2_ui_mode, get_strategy_launch_method
+            from strategy_menu.launch_method_store import get_strategy_launch_method
+            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
 
             return (
                 (get_strategy_launch_method() or "").strip().lower() == "direct_zapret2"

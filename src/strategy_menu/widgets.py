@@ -111,8 +111,8 @@ class CompactStrategyItem(QFrame):
 
     def _get_rating_style(self):
         """Возвращает стиль на основе рейтинга стратегии"""
-        from strategy_menu import get_strategy_rating
-        # Для CompactStrategyItem category_key не доступен, используем legacy формат
+        from .marks_store_bridge import get_strategy_rating
+        # У компактного элемента нет category_key, поэтому ищем оценку по strategy_id во всех категориях.
         rating = get_strategy_rating(self.strategy_id, category_key=None)
         if rating == 'working':
             return _STYLE_RATING_WORKING

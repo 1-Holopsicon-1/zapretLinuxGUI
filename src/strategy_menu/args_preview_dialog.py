@@ -23,7 +23,7 @@ class ArgsPreviewDialog(QDialog):
     """
     Обычное окно с информацией о стратегии, открывается у курсора.
 
-    Backward-compatible API:
+    Публичный интерфейс окна:
         dlg = ArgsPreviewDialog(parent_window)
         dlg.closed.connect(handler)
         dlg.set_strategy_data(data, strategy_id=..., ...)
@@ -144,7 +144,7 @@ class ArgsPreviewDialog(QDialog):
         self.setMaximumWidth(520)
 
     # ------------------------------------------------------------------
-    # Backward-compatible API
+    # Публичный интерфейс окна
     # ------------------------------------------------------------------
 
     def set_pinned(self, pinned: bool) -> None:

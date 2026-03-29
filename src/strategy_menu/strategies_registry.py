@@ -36,7 +36,8 @@ def get_current_strategy_set() -> Optional[str]:
         "zapret1" для direct_zapret1 и т.д.
     """
     try:
-        from strategy_menu import get_strategy_launch_method, get_direct_zapret2_ui_mode
+        from .launch_method_store import get_strategy_launch_method
+        from .ui_prefs_store import get_direct_zapret2_ui_mode
         method = get_strategy_launch_method()
 
         # direct_zapret2 supports an additional UI mode selector (Basic/Advanced)
@@ -51,7 +52,7 @@ def get_current_strategy_set() -> Optional[str]:
 
         # Маппинг метода запуска на набор стратегий
         method_to_set = {
-            "direct_zapret2": None,           # fallback: стандартный набор (legacy)
+            "direct_zapret2": None,           # стандартный direct набор без отдельного strategy_set
             "direct_zapret2_orchestra": "orchestra",  # tcp_orchestra.json
             "direct_zapret1": "zapret1",      # tcp_zapret1.json (Zapret 1 прямой режим)
             "orchestra": None,        # Orchestra использует свой механизм
@@ -466,8 +467,8 @@ class StrategiesRegistry:
         if not strategy and category_info.strategy_type == "tcp":
             try:
                 from strategy_menu.strategy_loader import load_strategies_as_dict
-                # In advanced mode tcp_fake is loaded from advanced_strategies;
-                # in other modes we keep legacy lookup (None).
+                # В advanced-режиме tcp_fake берётся из advanced_strategies;
+                # в остальных режимах используем обычный набор без отдельного strategy_set.
                 current_set = get_current_strategy_set()
                 fake_set = "advanced" if current_set == "advanced" else None
                 fake_strategies = load_strategies_as_dict("tcp_fake", fake_set)

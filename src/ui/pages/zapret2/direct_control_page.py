@@ -623,7 +623,7 @@ class Zapret2DirectControlPage(BasePage):
 
     def _get_direct_launch_mode_setting(self) -> str:
         try:
-            from strategy_menu import get_direct_zapret2_ui_mode
+            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
 
             mode = (get_direct_zapret2_ui_mode() or "").strip().lower()
             if mode in ("basic", "advanced"):
@@ -637,7 +637,7 @@ class Zapret2DirectControlPage(BasePage):
 
     def _open_direct_mode_dialog(self) -> None:
         try:
-            from strategy_menu import get_direct_zapret2_ui_mode
+            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
         except ImportError:
             return
         current = get_direct_zapret2_ui_mode()
@@ -650,7 +650,7 @@ class Zapret2DirectControlPage(BasePage):
 
     def _refresh_direct_mode_label(self) -> None:
         try:
-            from strategy_menu import get_direct_zapret2_ui_mode
+            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
             mode = get_direct_zapret2_ui_mode()
             key = "page.z2_control.mode.basic" if mode == "basic" else "page.z2_control.mode.advanced"
             default = "Basic" if mode == "basic" else "Advanced"
@@ -669,7 +669,7 @@ class Zapret2DirectControlPage(BasePage):
             return
 
         try:
-            from strategy_menu import set_direct_zapret2_ui_mode
+            from strategy_menu.ui_prefs_store import set_direct_zapret2_ui_mode
 
             set_direct_zapret2_ui_mode(wanted)
         except Exception:
@@ -940,7 +940,7 @@ class Zapret2DirectControlPage(BasePage):
 
     def _update_stop_winws_button_text(self):
         try:
-            from strategy_menu import get_strategy_launch_method
+            from strategy_menu.launch_method_store import get_strategy_launch_method
             from config import get_winws_exe_for_method
 
             method = get_strategy_launch_method()
@@ -1008,12 +1008,12 @@ class Zapret2DirectControlPage(BasePage):
             active_preset_name = ""
 
         try:
-            from strategy_menu import get_strategy_launch_method
+            from strategy_menu.launch_method_store import get_strategy_launch_method
 
             method = get_strategy_launch_method()
             if method in ("direct_zapret2", "direct_zapret2_orchestra", "direct_zapret1"):
                 show_filter_lists = True
-                from strategy_menu import get_direct_strategy_selections
+                from strategy_menu.direct_selection_store import get_direct_strategy_selections
                 from strategy_menu.strategies_registry import registry
 
                 selections = get_direct_strategy_selections() or {}

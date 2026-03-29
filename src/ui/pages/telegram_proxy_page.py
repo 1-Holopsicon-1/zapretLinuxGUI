@@ -24,6 +24,7 @@ from .base_page import BasePage, ScrollBlockingPlainTextEdit
 from ui.compat_widgets import SettingsCard, ActionButton
 from ui.theme import get_theme_tokens
 from log import log
+from telegram_proxy.upstream_catalog import UpstreamCatalog
 
 try:
     from qfluentwidgets import (
@@ -61,31 +62,6 @@ def _get_proxy_manager():
 
 # How often (ms) the GUI reads new log lines from the ring buffer
 _LOG_REFRESH_MS = 500
-
-def _load_upstream_presets() -> list[dict]:
-    """Load proxy presets (SOCKS5 + MTProxy) from build secrets."""
-    manual = [{"name": "Ручной ввод", "type": "socks5", "host": "", "port": 0, "username": "", "password": ""}]
-    presets = []
-    try:
-        from config._build_secrets import PROXY_PRESETS
-        if isinstance(PROXY_PRESETS, list) and PROXY_PRESETS:
-            for p in PROXY_PRESETS:
-                preset = dict(p)
-                if "type" not in preset:
-                    preset["type"] = "socks5"
-                presets.append(preset)
-    except Exception as exc:
-        log(f"TelegramProxy: failed to load PROXY_PRESETS: {type(exc).__name__}: {exc}", "WARNING")
-
-    # Convert legacy MTPROXY_LINK to preset (if not already in presets)
-    try:
-        from config._build_secrets import MTPROXY_LINK
-        if MTPROXY_LINK and not any(p.get("type") == "mtproxy" for p in presets):
-            presets.append({"name": "MTProxy", "type": "mtproxy", "link": MTPROXY_LINK})
-    except Exception:
-        pass
-
-    return manual + presets
 
 
 
@@ -307,29 +283,25 @@ class TelegramProxyPage(BasePage):
         self._upstream_toggle.toggle.setChecked(False)
         self._upstream_card.add_widget(self._upstream_toggle)
 
-        # Preset selector using styled Win11ComboRow
-        self._upstream_presets = _load_upstream_presets()
-        has_presets = len(self._upstream_presets) > 1
+        # Upstream server selector: manual + bundled presets from source secrets
+        self._upstream_catalog = UpstreamCatalog.load_from_runtime()
+        self._upstream_preset_row = Win11ComboRow(
+            icon_name="mdi.server-network",
+            title="Сервер",
+            description="Выберите сервер из списка или переключитесь на ручной ввод",
+            items=self._upstream_catalog.items(),
+        )
+        self._upstream_preset_row.combo.setFixedWidth(250)
+        self._upstream_card.add_widget(self._upstream_preset_row)
+        self._upstream_catalog_hint = CaptionLabel(
+            "В этой сборке список предустановленных прокси не загружен. "
+            "Доступен только ручной ввод."
+        )
+        self._upstream_catalog_hint.setWordWrap(True)
+        self._upstream_catalog_hint.setVisible(False)
+        self._upstream_card.add_widget(self._upstream_catalog_hint)
 
-        if has_presets:
-            combo_items = []
-            for preset in self._upstream_presets:
-                ptype = preset.get("type", "socks5")
-                suffix = " (MTProxy)" if ptype == "mtproxy" else ""
-                combo_items.append((preset["name"] + suffix, preset))
-            self._upstream_preset_row = Win11ComboRow(
-                icon_name="mdi.server-network",
-                title="Прокси",
-                description="Выберите SOCKS5 или MTProxy прокси из списка",
-                items=combo_items,
-            )
-            self._upstream_preset_row.combo.setFixedWidth(250)
-            self._upstream_preset_row.combo.setCurrentIndex(1)  # First real preset
-            self._upstream_card.add_widget(self._upstream_preset_row)
-        else:
-            self._upstream_preset_row = None
-
-        # Manual input container (always visible if no presets, otherwise only for "Ручной ввод")
+        # Manual input container: shown only for "Ручной ввод"
         self._upstream_manual_widget = QWidget()
         manual_layout = QVBoxLayout(self._upstream_manual_widget)
         manual_layout.setContentsMargins(0, 0, 0, 0)
@@ -369,8 +341,7 @@ class TelegramProxyPage(BasePage):
         upstream_auth_row.addStretch()
         manual_layout.addLayout(upstream_auth_row)
 
-        # If no presets file → always show manual fields; with presets → hide (preset selected)
-        self._upstream_manual_widget.setVisible(not has_presets)
+        self._upstream_manual_widget.setVisible(True)
         self._upstream_card.add_widget(self._upstream_manual_widget)
 
         # MTProxy action (visible only when MTProxy preset selected)
@@ -395,6 +366,8 @@ class TelegramProxyPage(BasePage):
         )
         self._upstream_mode_toggle.toggle.setChecked(True)
         self._upstream_card.add_widget(self._upstream_mode_toggle)
+
+        self._refresh_upstream_preset_combo(select_index=0)
 
         layout.addWidget(self._upstream_card)
 
@@ -1228,6 +1201,49 @@ class TelegramProxyPage(BasePage):
                 except Exception:
                     pass
 
+    def _refresh_upstream_preset_combo(self, *, select_index: int | None = None) -> int:
+        combo = self._upstream_preset_row.combo
+        combo.blockSignals(True)
+        combo.clear()
+        for label, preset in self._upstream_catalog.items():
+            combo.addItem(label, userData=preset)
+
+        if not self._upstream_catalog.choices:
+            target_index = -1
+        elif select_index is None:
+            target_index = combo.currentIndex()
+            if target_index < 0:
+                target_index = 0
+            target_index = min(target_index, len(self._upstream_catalog.choices) - 1)
+        else:
+            target_index = min(max(select_index, 0), len(self._upstream_catalog.choices) - 1)
+
+        combo.setCurrentIndex(target_index)
+        combo.blockSignals(False)
+
+        if target_index >= 0:
+            self._apply_upstream_preset_ui(target_index)
+        return target_index
+
+    def _apply_upstream_preset_ui(self, index: int) -> None:
+        preset = self._upstream_catalog.preset_at(index)
+        if preset is None:
+            return
+
+        has_bundled_presets = self._upstream_catalog.has_bundled_presets()
+        is_manual = self._upstream_catalog.is_manual(index)
+        is_mtproxy = self._upstream_catalog.is_mtproxy(index)
+
+        self._upstream_preset_row.setVisible(has_bundled_presets)
+        self._upstream_catalog_hint.setVisible(not has_bundled_presets)
+        self._upstream_manual_widget.setVisible(is_manual)
+        self._mtproxy_action_widget.setVisible(is_mtproxy)
+
+        if is_mtproxy:
+            self._current_mtproxy_link = self._upstream_catalog.mtproxy_link(index)
+        else:
+            self._current_mtproxy_link = ""
+
     def _connect_signals(self):
         mgr = _get_proxy_manager()
         mgr.status_changed.connect(self._on_status_changed)
@@ -1239,10 +1255,9 @@ class TelegramProxyPage(BasePage):
 
         # Upstream proxy signals
         self._upstream_toggle.toggled.connect(self._on_upstream_changed)
-        if self._upstream_preset_row is not None:
-            self._upstream_preset_row.currentIndexChanged.connect(
-                self._on_upstream_preset_changed
-            )
+        self._upstream_preset_row.currentIndexChanged.connect(
+            self._on_upstream_preset_changed
+        )
         self._upstream_host_edit.editingFinished.connect(self._on_upstream_host_changed)
         self._upstream_port_spin.valueChanged.connect(self._on_upstream_port_changed)
         self._upstream_user_edit.editingFinished.connect(self._on_upstream_user_changed)
@@ -1272,47 +1287,46 @@ class TelegramProxyPage(BasePage):
             self._update_manual_instructions()
 
             # Load upstream proxy settings
-            from config.reg import (get_tg_proxy_upstream_enabled, get_tg_proxy_upstream_host,
-                                     get_tg_proxy_upstream_port, get_tg_proxy_upstream_mode,
-                                     get_tg_proxy_upstream_user, get_tg_proxy_upstream_pass)
+            from config.reg import (
+                get_tg_proxy_upstream_enabled,
+                get_tg_proxy_upstream_host,
+                get_tg_proxy_upstream_mode,
+                get_tg_proxy_upstream_pass,
+                get_tg_proxy_upstream_port,
+                get_tg_proxy_upstream_user,
+            )
             self._upstream_toggle.toggle.blockSignals(True)
             self._upstream_toggle.toggle.setChecked(get_tg_proxy_upstream_enabled())
             self._upstream_toggle.toggle.blockSignals(False)
 
-            # Determine which preset matches saved host/port (or fall back to manual)
             saved_host = get_tg_proxy_upstream_host()
             saved_port = get_tg_proxy_upstream_port()
-            preset_idx = 0  # default: manual
-            for i, preset in enumerate(self._upstream_presets):
-                if i == 0 or preset.get("type") == "mtproxy":
-                    continue
-                if preset.get("host") == saved_host and preset.get("port") == saved_port:
-                    preset_idx = i
-                    break
+            saved_user = get_tg_proxy_upstream_user()
+            saved_password = get_tg_proxy_upstream_pass()
 
-            if self._upstream_preset_row is not None:
-                self._upstream_preset_row.combo.blockSignals(True)
-                self._upstream_preset_row.combo.setCurrentIndex(preset_idx)
-                self._upstream_preset_row.combo.blockSignals(False)
-
-            # Fill manual fields
             self._upstream_host_edit.setText(saved_host)
             upstream_port = saved_port
             if upstream_port > 0:
                 self._upstream_port_spin.blockSignals(True)
                 self._upstream_port_spin.setValue(upstream_port)
                 self._upstream_port_spin.blockSignals(False)
-            self._upstream_user_edit.setText(get_tg_proxy_upstream_user())
-            self._upstream_pass_edit.setText(get_tg_proxy_upstream_pass())
+            self._upstream_user_edit.setText(saved_user)
+            self._upstream_pass_edit.setText(saved_password)
 
-            # Show/hide manual fields and MTProxy action
-            has_presets = len(self._upstream_presets) > 1
-            is_mtproxy = preset_idx > 0 and self._upstream_presets[preset_idx].get("type") == "mtproxy"
-            self._upstream_manual_widget.setVisible(not has_presets or preset_idx == 0)
-            if hasattr(self, '_mtproxy_action_widget'):
-                self._mtproxy_action_widget.setVisible(is_mtproxy)
-                if is_mtproxy:
-                    self._current_mtproxy_link = self._upstream_presets[preset_idx].get("link", "")
+            preset_idx = self._upstream_catalog.find_choice_index(
+                host=saved_host,
+                port=saved_port,
+                username=saved_user,
+                password=saved_password,
+            )
+            self._refresh_upstream_preset_combo(select_index=preset_idx)
+            if preset_idx == 0:
+                self._upstream_host_edit.clear()
+                self._upstream_port_spin.blockSignals(True)
+                self._upstream_port_spin.setValue(1080)
+                self._upstream_port_spin.blockSignals(False)
+                self._upstream_user_edit.clear()
+                self._upstream_pass_edit.clear()
 
             self._upstream_mode_toggle.toggle.blockSignals(True)
             self._upstream_mode_toggle.toggle.setChecked(
@@ -1846,29 +1860,32 @@ class TelegramProxyPage(BasePage):
         self._restart_if_running()
 
     def _on_upstream_preset_changed(self, index: int):
-        """Handle preset selection. Auto-fill fields or show MTProxy action."""
-        if index < 0 or index >= len(self._upstream_presets):
+        """Handle upstream server selection."""
+        preset = self._upstream_catalog.preset_at(index)
+        if preset is None:
             return
-        preset = self._upstream_presets[index]
-        is_manual = (index == 0)
-        is_mtproxy = preset.get("type") == "mtproxy"
 
-        # Show/hide manual fields and MTProxy action
-        self._upstream_manual_widget.setVisible(is_manual)
-        self._mtproxy_action_widget.setVisible(is_mtproxy)
+        self._apply_upstream_preset_ui(index)
+
+        is_manual = self._upstream_catalog.is_manual(index)
+        is_mtproxy = self._upstream_catalog.is_mtproxy(index)
 
         if is_manual:
-            # Clear fields for manual entry
             self._upstream_host_edit.clear()
+            self._upstream_port_spin.blockSignals(True)
             self._upstream_port_spin.setValue(1080)
+            self._upstream_port_spin.blockSignals(False)
             self._upstream_user_edit.clear()
             self._upstream_pass_edit.clear()
+            self._save_upstream_fields("", 1080, "", "")
+            self._restart_if_running()
         elif is_mtproxy:
             self._current_mtproxy_link = preset.get("link", "")
         else:
-            # SOCKS5 preset — auto-fill fields
             self._upstream_host_edit.setText(preset.get("host", ""))
+            self._upstream_port_spin.blockSignals(True)
             self._upstream_port_spin.setValue(preset.get("port", 1080))
+            self._upstream_port_spin.blockSignals(False)
             self._upstream_user_edit.setText(preset.get("username", ""))
             self._upstream_pass_edit.setText(preset.get("password", ""))
             self._save_upstream_fields(

@@ -120,7 +120,7 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
         self.category_key = category_key
         self._current_fav_style = None  # Кэш стиля кнопки избранного
 
-        from strategy_menu import is_favorite_strategy
+        from .marks_store_bridge import is_favorite_strategy
         self.is_favorite = is_favorite_strategy(strategy_id, category_key)
 
         super().__init__(strategy_id, strategy_data, parent)
@@ -132,7 +132,7 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
 
     def _get_rating_style(self):
         """Возвращает стиль на основе рейтинга стратегии"""
-        from strategy_menu import get_strategy_rating
+        from .marks_store_bridge import get_strategy_rating
         # Используем category_key для правильной привязки рейтинга
         rating = get_strategy_rating(self.strategy_id, self.category_key)
         if rating == 'working':
@@ -204,7 +204,7 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
     
     def _toggle_favorite(self):
         """Переключает избранное"""
-        from strategy_menu import toggle_favorite_strategy
+        from .marks_store_bridge import toggle_favorite_strategy
         
         self.is_favorite = toggle_favorite_strategy(self.strategy_id, self.category_key)
         self.favorite_btn.setChecked(self.is_favorite)

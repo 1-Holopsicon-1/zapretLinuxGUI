@@ -1645,7 +1645,7 @@ class Zapret2UserPresetsPage(BasePage):
 
     def _preset_backend_module(self) -> str:
         try:
-            from strategy_menu import get_strategy_launch_method
+            from strategy_menu.launch_method_store import get_strategy_launch_method
 
             if get_strategy_launch_method() == "direct_zapret2_orchestra":
                 return "preset_orchestra_zapret2"

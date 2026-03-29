@@ -45,12 +45,65 @@ from ui.main_window_navigation import (
     open_zapret1_preset_folders,
     open_zapret2_preset_detail,
     open_zapret2_preset_folders,
+    navigate_to_control,
+    navigate_to_strategies,
     redirect_to_strategies_page_for_method,
     refresh_active_zapret2_user_presets_page,
     refresh_page_if_possible,
     refresh_zapret1_user_presets_page,
+    show_active_zapret2_control_page,
+    show_autostart_page as show_main_window_autostart_page,
+    show_hosts_page as show_main_window_hosts_page,
+    show_servers_page as show_main_window_servers_page,
     show_active_zapret2_user_presets_page,
     show_zapret1_user_presets_page,
+)
+from ui.main_window_navigation_build import (
+    add_nav_item,
+    apply_nav_visibility_filter,
+    apply_ui_language_to_page,
+    attach_sidebar_search_to_titlebar,
+    get_nav_label,
+    get_sidebar_search_pages,
+    init_navigation,
+    on_sidebar_search_changed,
+    on_sidebar_search_result_activated,
+    on_sidebar_search_result_text_activated,
+    on_ui_language_changed as on_main_window_ui_language_changed,
+    refresh_navigation_texts,
+    refresh_pages_language,
+    resolve_ui_language,
+    route_search_result,
+    route_sidebar_search_by_text,
+    setup_sidebar_search_completer,
+    sync_nav_visibility,
+    update_sidebar_search_suggestions,
+    update_titlebar_search_width,
+)
+from ui.main_window_pages import (
+    connect_lazy_page_signals,
+    connect_signal_once,
+    create_pages,
+    ensure_page,
+    ensure_page_in_stacked_widget,
+    get_eager_page_names,
+    resolve_page_name,
+)
+from ui.main_window_mode_switch import (
+    auto_start_after_main_window_method_switch,
+    complete_main_window_method_switch,
+    handle_main_window_launch_method_changed,
+)
+from ui.main_window_display import (
+    get_direct_strategy_summary,
+    on_autostart_disabled,
+    on_autostart_enabled,
+    on_subscription_updated,
+    open_subscription_dialog,
+    set_status_text as set_main_window_status_text,
+    update_autostart_display as update_main_window_autostart_display,
+    update_current_strategy_display as update_main_window_current_strategy_display,
+    update_subscription_display as update_main_window_subscription_display,
 )
 from ui.main_window_refresh import refresh_main_window_pages_after_preset_switch
 from ui.main_window_signals import connect_main_window_page_signals
@@ -346,6 +399,15 @@ class MainWindowUI:
         """
         self.pages: dict[PageName, QWidget] = {}
         self._page_aliases: dict[PageName, PageName] = dict(_PAGE_ALIASES)
+        self._page_class_specs = _PAGE_CLASS_SPECS
+        self._eager_page_names_base = _EAGER_PAGE_NAMES_BASE
+        self._eager_mode_entry_page = _EAGER_MODE_ENTRY_PAGE
+        self._nav_icons = _NAV_ICONS
+        self._nav_labels = _NAV_LABELS
+        self._default_nav_icon = FluentIcon.APPLICATION if HAS_FLUENT else None
+        self._has_fluent_nav = HAS_FLUENT
+        self._nav_scroll_position = NavigationItemPosition.SCROLL if HAS_FLUENT else None
+        self._sidebar_search_widget_cls = _SidebarSearchNavWidget if HAS_FLUENT else None
         self._lazy_signal_connections: set[str] = set()
         self._startup_ui_pump_counter = 0
         self._nav_search_query = ""
@@ -355,7 +417,7 @@ class MainWindowUI:
         self._sidebar_search_model: QStandardItemModel | None = None
         self._sidebar_search_completer: QCompleter | None = None
         self._sidebar_search_titlebar_attached = False
-        self._ui_language = self._resolve_ui_language()
+        self._ui_language = resolve_ui_language(self)
         self._startup_page_init_metrics: list[tuple[str, int]] = []
         self._preset_runtime_coordinator = PresetRuntimeCoordinator(
             self,
@@ -371,10 +433,10 @@ class MainWindowUI:
         )
 
         self._page_signal_bootstrap_complete = False
-        self._create_pages()
+        create_pages(self)
 
         # Register pages in navigation sidebar
-        self._init_navigation()
+        init_navigation(self)
 
         # Wire up signals
         connect_main_window_page_signals(self)
@@ -458,957 +520,94 @@ class MainWindowUI:
         return method or "direct_zapret2"
 
     def _add_nav_item(self, page_name: PageName, position) -> None:
-        if not HAS_FLUENT:
-            return
-
-        if page_name in getattr(self, "_nav_items", {}):
-            return
-
-        from log import log as _log
-
-        page = self._ensure_page(page_name)
-        if page is None:
-            _log(f"[NAV] _add {page_name.name}: page is None - skip", "DEBUG")
-            return
-
-        icon = _NAV_ICONS.get(page_name, FluentIcon.APPLICATION)
-        text = self._get_nav_label(page_name)
-
-        if page_name == PageName.ZAPRET2_ORCHESTRA_CONTROL and page.__class__.__name__ == "Zapret2DirectControlPage":
-            page.setObjectName("Zapret2DirectControlPage_Orchestra")
-        elif not page.objectName():
-            page.setObjectName(page.__class__.__name__)
-
-        _log(f"[NAV] addSubInterface {page_name.name} objectName={page.objectName()!r}", "DEBUG")
-        item = self.addSubInterface(page, icon, text, position=position)
-        _log(f"[NAV] addSubInterface {page_name.name} item={item}", "DEBUG")
-        if item is not None:
-            self._nav_items[page_name] = item
-        else:
-            _log(f"[NAV] addSubInterface returned None for {page_name.name} - not in _nav_items!", "WARNING")
-
-        self._pump_startup_ui()
+        add_nav_item(self, page_name, position)
 
     # ------------------------------------------------------------------
     # Navigation setup (FluentWindow sidebar)
     # ------------------------------------------------------------------
 
     def _init_navigation(self):
-        """Populate FluentWindow's NavigationInterface with pages.
-
-        Flat layout — no tree hierarchy, no expand/collapse groups.
-        All items are top-level; mode-specific items are simply hidden/shown
-        via setVisible() in _sync_nav_visibility() with no parent-size hacks.
-        """
-        if not HAS_FLUENT:
-            return
-
-        POS_SCROLL = NavigationItemPosition.SCROLL
-        current_method = self._get_launch_method()
-
-        self._nav_items: dict = {}
-        self._nav_search_query = ""
-        self._nav_mode_visibility = {}
-        self._nav_headers = []
-        self._sidebar_search_nav_widget = None
-        self._sidebar_search_model = None
-        self._sidebar_search_completer = None
-        self._sidebar_search_titlebar_attached = False
-
-        def _add(page_name, position=POS_SCROLL):
-            if not should_add_nav_page_on_init(page_name, current_method):
-                return
-            self._add_nav_item(page_name, position)
-
-        nav = self.navigationInterface  # shorthand
-
-        if HAS_FLUENT:
-            self._sidebar_search_nav_widget = _SidebarSearchNavWidget()
-            self._sidebar_search_nav_widget.textChanged.connect(self._on_sidebar_search_changed)
-            self._sidebar_search_nav_widget.set_placeholder_text(
-                tr_catalog("sidebar.search.placeholder", language=self._ui_language)
-            )
-            self._setup_sidebar_search_completer()
-            self._attach_sidebar_search_to_titlebar()
-            self._update_titlebar_search_width()
-
-        # ── Верхние ──────────────────────────────────────────────────────────
-        _add(PageName.HOME)
-        _add(PageName.CONTROL)
-        _add(PageName.ZAPRET2_DIRECT_CONTROL)
-        _add(PageName.ZAPRET2_ORCHESTRA_CONTROL)
-        _add(PageName.ZAPRET1_DIRECT_CONTROL)
-        _add(PageName.ORCHESTRA)
-
-        # ── Стратегии (под-раздел) ────────────────────────────────────────────
-        settings_header_key = "nav.header.settings"
-        settings_header = nav.addItemHeader(tr_catalog(settings_header_key, language=self._ui_language), POS_SCROLL)
-        settings_pages = (
-            PageName.HOSTLIST,
-            PageName.ORCHESTRA_SETTINGS,
-            PageName.DPI_SETTINGS,
-        )
-        for page_name in settings_pages:
-            _add(page_name)
-        self._nav_headers.append((settings_header, settings_pages, settings_header_key))
-
-        # BLOBS removed from nav — accessible via direct_control_page card
-
-        # ── Система ───────────────────────────────────────────────────────────
-        system_header_key = "nav.header.system"
-        system_header = nav.addItemHeader(tr_catalog(system_header_key, language=self._ui_language), POS_SCROLL)
-        system_pages = (PageName.AUTOSTART, PageName.NETWORK, PageName.TELEGRAM_PROXY)
-        for page_name in system_pages:
-            _add(page_name)
-        self._nav_headers.append((system_header, system_pages, system_header_key))
-
-        # ── Диагностика ───────────────────────────────────────────────────────
-        diagnostics_header_key = "nav.header.diagnostics"
-        diagnostics_header = nav.addItemHeader(tr_catalog(diagnostics_header_key, language=self._ui_language), POS_SCROLL)
-        diagnostics_pages = (
-            PageName.HOSTS,
-            PageName.BLOCKCHECK,
-        )
-        for page_name in diagnostics_pages:
-            _add(page_name)
-        self._nav_headers.append((diagnostics_header, diagnostics_pages, diagnostics_header_key))
-
-        # ── Оформление / Донат / Логи ─────────────────────────────────────────
-        appearance_header_key = "nav.header.appearance"
-        appearance_header = nav.addItemHeader(tr_catalog(appearance_header_key, language=self._ui_language), POS_SCROLL)
-        appearance_pages = (
-            PageName.APPEARANCE,
-            PageName.PREMIUM,
-            PageName.LOGS,
-            PageName.ABOUT,
-        )
-        for page_name in appearance_pages:
-            _add(page_name)
-        self._nav_headers.append((appearance_header, appearance_pages, appearance_header_key))
-
-        # Pages NOT in navigation — reachable only via show_page() / switchTo()
-        for hidden in (
-            PageName.ZAPRET2_DIRECT,
-            PageName.ZAPRET2_ORCHESTRA,
-            PageName.ZAPRET2_USER_PRESETS,
-            PageName.ZAPRET2_ORCHESTRA_USER_PRESETS,
-            PageName.ZAPRET2_STRATEGY_DETAIL,
-            PageName.ZAPRET2_PRESET_DETAIL,
-            PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL,
-            PageName.BLOBS,
-            PageName.ZAPRET1_DIRECT,
-            PageName.ZAPRET1_USER_PRESETS,
-            PageName.ZAPRET1_STRATEGY_DETAIL,
-            PageName.ZAPRET1_PRESET_DETAIL,
-        ):
-            page = self.pages.get(hidden)
-            if page is not None:
-                if not page.objectName():
-                    page.setObjectName(page.__class__.__name__)
-                self.stackedWidget.addWidget(page)
-                self._pump_startup_ui()
-
-        self.navigationInterface.setMinimumExpandWidth(700)
-
-        # Apply initial visibility immediately — flat items need no parent refresh.
-        self._sync_nav_visibility()
+        init_navigation(self)
 
     def _attach_sidebar_search_to_titlebar(self) -> None:
-        widget = self._sidebar_search_nav_widget
-        if widget is None:
-            return
-
-        title_bar = getattr(self, "titleBar", None)
-        if title_bar is None:
-            return
-
-        layout = getattr(title_bar, "hBoxLayout", None)
-        if layout is None:
-            return
-
-        if widget.parent() is not title_bar:
-            widget.setParent(title_bar)
-
-        if layout.indexOf(widget) < 0:
-            insert_index = max(0, layout.count() - 1)
-            layout.insertWidget(insert_index, widget, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        self._sidebar_search_titlebar_attached = True
+        attach_sidebar_search_to_titlebar(self)
 
     def _update_titlebar_search_width(self) -> None:
-        if not bool(getattr(self, "_sidebar_search_titlebar_attached", False)):
-            return
-
-        widget = self._sidebar_search_nav_widget
-        if widget is None:
-            return
-
-        title_bar = getattr(self, "titleBar", None)
-        if title_bar is None:
-            return
-
-        title_bar_width = int(title_bar.width())
-        if title_bar_width <= 0:
-            title_bar_width = max(0, int(self.width()) - 46)
-
-        available_width = max(220, title_bar_width - 340)
-        target_width = int(title_bar_width * 0.42)
-        target_width = max(280, min(560, target_width, available_width))
-        widget.setFixedWidth(target_width)
+        update_titlebar_search_width(self)
 
     def _sync_nav_visibility(self, method: str | None = None) -> None:
-        """Show/hide mode-specific navigation items.
-
-        With a flat (non-tree) navigation layout this reduces to plain
-        setVisible() calls — no parent fixed-size management needed.
-        """
-        if not getattr(self, '_nav_items', None):
-            return
-
-        if method is None:
-            try:
-                from strategy_menu import get_strategy_launch_method
-                method = (get_strategy_launch_method() or "").strip().lower()
-            except Exception:
-                method = "direct_zapret2"
-        if not method:
-            method = "direct_zapret2"
-
-        from ui.nav_mode_config import get_nav_visibility
-        targets = get_nav_visibility(method)
-
-        from log import log as _log
-        _log(f"[NAV] _sync_nav_visibility method={method!r}, _nav_items keys={[p.name for p in self._nav_items]}", "DEBUG")
-        mode_visibility: dict[PageName, bool] = {
-            page_name: True for page_name in self._nav_items
-        }
-        for page_name, should_show in targets.items():
-            item = self._nav_items.get(page_name)
-            if item is None and bool(should_show):
-                self._add_nav_item(page_name, NavigationItemPosition.SCROLL)
-                item = self._nav_items.get(page_name)
-
-            if item is not None:
-                mode_visibility[page_name] = bool(should_show)
-                _log(f"[NAV]   {page_name.name} → modeVisible({should_show})", "DEBUG")
-            elif bool(should_show):
-                _log(f"[NAV]   {page_name.name} → NOT in _nav_items!", "WARNING")
-
-        self._nav_mode_visibility = mode_visibility
-        self._apply_nav_visibility_filter()
-        self._update_sidebar_search_suggestions()
+        sync_nav_visibility(self, method)
 
     def _on_sidebar_search_changed(self, text: str) -> None:
-        self._nav_search_query = (text or "").strip()
-        # Try routing before rebuilding suggestions: when a completer item is
-        # picked, the line edit receives full display text ("title - location"),
-        # which may not match search entries directly and would otherwise clear
-        # the model before we resolve the target.
-        if self._route_sidebar_search_by_text(self._nav_search_query, prefer_first=False):
-            return
-        self._apply_nav_visibility_filter()
-        self._update_sidebar_search_suggestions()
+        on_sidebar_search_changed(self, text)
 
     def _apply_nav_visibility_filter(self) -> None:
-        if not getattr(self, "_nav_items", None):
-            return
-
-        search_query = (getattr(self, "_nav_search_query", "") or "").casefold()
-        mode_visibility = getattr(self, "_nav_mode_visibility", {}) or {}
-        visible_by_page: dict[PageName, bool] = {}
-
-        for page_name, item in self._nav_items.items():
-            mode_visible = bool(mode_visibility.get(page_name, True))
-            label = self._get_nav_label(page_name)
-            matches_query = not search_query or (search_query in label.casefold())
-            final_visible = mode_visible and matches_query
-            item.setVisible(final_visible)
-            visible_by_page[page_name] = final_visible
-
-        for header, grouped_pages, _header_key in getattr(self, "_nav_headers", []):
-            if header is None:
-                continue
-            header.setVisible(any(visible_by_page.get(page_name, False) for page_name in grouped_pages))
+        apply_nav_visibility_filter(self)
 
     def _resolve_ui_language(self) -> str:
-        try:
-            from config.reg import get_ui_language
-
-            return normalize_language(get_ui_language())
-        except Exception:
-            return normalize_language(None)
+        return resolve_ui_language(self)
 
     def _get_nav_label(self, page_name: PageName) -> str:
-        fallback = _NAV_LABELS.get(page_name, page_name.name)
-        return get_nav_page_label(page_name, language=self._ui_language, fallback=fallback)
+        return get_nav_label(self, page_name)
 
     def _get_sidebar_search_pages(self) -> set[PageName]:
-        """Pages allowed for sidebar search suggestions and routing."""
-        return get_sidebar_search_pages_for_method(self._get_launch_method(), set(_PAGE_CLASS_SPECS.keys()))
+        return get_sidebar_search_pages(self)
 
     def _setup_sidebar_search_completer(self) -> None:
-        if self._sidebar_search_nav_widget is None:
-            return
-
-        self._sidebar_search_model = QStandardItemModel(self)
-        completer = QCompleter(self._sidebar_search_model, self)
-        completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        completer.setMaxVisibleItems(10)
-        completer.activated[QModelIndex].connect(self._on_sidebar_search_result_activated)
-        completer.activated[str].connect(self._on_sidebar_search_result_text_activated)
-        # Mouse clicks in completer popup are not guaranteed to emit
-        # `QCompleter.activated[QModelIndex]` on all Qt/Windows stacks.
-        # Wire popup signals directly as a robust fallback.
-        try:
-            popup = completer.popup()
-            if popup is not None:
-                popup.clicked.connect(self._on_sidebar_search_result_activated)
-                popup.activated.connect(self._on_sidebar_search_result_activated)
-        except Exception:
-            pass
-
-        self._sidebar_search_completer = completer
-        self._sidebar_search_nav_widget.set_completer(completer)
+        setup_sidebar_search_completer(self)
 
     def _update_sidebar_search_suggestions(self) -> None:
-        model = self._sidebar_search_model
-        completer = self._sidebar_search_completer
-        if model is None or completer is None:
-            return
-
-        model.clear()
-        query = (getattr(self, "_nav_search_query", "") or "").strip()
-        if not query:
-            try:
-                completer.popup().hide()
-            except Exception:
-                pass
-            return
-
-        visible_pages = self._get_sidebar_search_pages()
-
-        matches = find_search_entries(
-            query,
-            language=self._ui_language,
-            visible_pages=visible_pages,
-            max_results=10,
-        )
-        if not matches:
-            try:
-                completer.popup().hide()
-            except Exception:
-                pass
-            return
-
-        page_role = int(Qt.ItemDataRole.UserRole)
-        tab_role = page_role + 1
-
-        for match in matches:
-            title, location = format_search_result(match.entry, language=self._ui_language)
-            item = QStandardItem(f"{title} - {location}")
-            item.setData(match.entry.page_name.name, page_role)
-            item.setData(match.entry.tab_key or "", tab_role)
-            model.appendRow(item)
-
-        if self._sidebar_search_nav_widget is not None and self._sidebar_search_nav_widget.isVisible():
-            self._sidebar_search_nav_widget.show_completions()
+        update_sidebar_search_suggestions(self)
 
     def _on_sidebar_search_result_activated(self, index: QModelIndex) -> None:
-        if not index.isValid():
-            return
-
-        page_role = int(Qt.ItemDataRole.UserRole)
-        tab_role = page_role + 1
-
-        raw_page_name = index.data(page_role)
-        if not isinstance(raw_page_name, str) or not raw_page_name:
-            display_text = index.data(int(Qt.ItemDataRole.DisplayRole))
-            if isinstance(display_text, str):
-                self._route_sidebar_search_by_text(display_text, prefer_first=False)
-            return
-
-        try:
-            page_name = PageName[raw_page_name]
-        except Exception:
-            return
-
-        tab_key = index.data(tab_role)
-        if not isinstance(tab_key, str):
-            tab_key = ""
-
-        self._route_search_result(page_name, tab_key)
-
-        if self._sidebar_search_nav_widget is not None:
-            self._sidebar_search_nav_widget.clear()
+        on_sidebar_search_result_activated(self, index)
 
     def _on_sidebar_search_result_text_activated(self, text: str) -> None:
-        self._route_sidebar_search_by_text(text, prefer_first=False)
+        on_sidebar_search_result_text_activated(self, text)
 
     def _route_sidebar_search_by_text(self, text: str, prefer_first: bool = False) -> bool:
-        text = (text or "").strip()
-        if not text:
-            return False
-
-        model = self._sidebar_search_model
-        if model is None:
-            return False
-
-        page_role = int(Qt.ItemDataRole.UserRole)
-        tab_role = page_role + 1
-
-        target_item = None
-        text_cf = text.casefold()
-        for row in range(model.rowCount()):
-            item = model.item(row, 0)
-            if item is None:
-                continue
-            if (item.text() or "").strip().casefold() == text_cf:
-                target_item = item
-                break
-
-        if target_item is None and prefer_first and model.rowCount() > 0:
-            target_item = model.item(0, 0)
-
-        if target_item is None:
-            # Fallback path when completer injected full text but model was
-            # already rebuilt/cleared for that text.
-            query = text
-            if " - " in query:
-                query = (query.split(" - ", 1)[0] or "").strip() or query
-
-            visible_pages = self._get_sidebar_search_pages()
-
-            matches = find_search_entries(
-                query,
-                language=self._ui_language,
-                visible_pages=visible_pages,
-                max_results=10,
-            )
-            selected_match = None
-            for match in matches:
-                title, location = format_search_result(match.entry, language=self._ui_language)
-                display = f"{title} - {location}".strip().casefold()
-                title_cf = (title or "").strip().casefold()
-                if display == text_cf or title_cf == text_cf:
-                    selected_match = match
-                    break
-            if selected_match is None and prefer_first and matches:
-                selected_match = matches[0]
-
-            if selected_match is None:
-                return False
-
-            self._route_search_result(selected_match.entry.page_name, selected_match.entry.tab_key or "")
-            if self._sidebar_search_nav_widget is not None:
-                self._sidebar_search_nav_widget.clear()
-            return True
-
-        raw_page_name = target_item.data(page_role)
-        if not isinstance(raw_page_name, str) or not raw_page_name:
-            return False
-
-        tab_key = target_item.data(tab_role)
-        if not isinstance(tab_key, str):
-            tab_key = ""
-
-        try:
-            page_name = PageName[raw_page_name]
-        except Exception:
-            return False
-
-        self._route_search_result(page_name, tab_key)
-        if self._sidebar_search_nav_widget is not None:
-            self._sidebar_search_nav_widget.clear()
-        return True
+        return route_sidebar_search_by_text(self, text, prefer_first=prefer_first)
 
     def _route_search_result(self, page_name: PageName, tab_key: str = "") -> None:
-        if not self.show_page(page_name):
-            return
-
-        if not tab_key:
-            return
-
-        page = self.get_page(page_name)
-        if page is not None and hasattr(page, "switch_to_tab"):
-            try:
-                page.switch_to_tab(tab_key)
-            except Exception:
-                pass
+        route_search_result(self, page_name, tab_key)
 
     def _refresh_navigation_texts(self) -> None:
-        if self._sidebar_search_nav_widget is not None:
-            self._sidebar_search_nav_widget.set_placeholder_text(
-                tr_catalog("sidebar.search.placeholder", language=self._ui_language)
-            )
-
-        for page_name, item in getattr(self, "_nav_items", {}).items():
-            try:
-                item.setText(self._get_nav_label(page_name))
-            except Exception:
-                pass
-
-        for header, _grouped_pages, header_key in getattr(self, "_nav_headers", []):
-            if header is None:
-                continue
-            try:
-                header.setText(tr_catalog(header_key, language=self._ui_language))
-            except Exception:
-                pass
-
-        self._apply_nav_visibility_filter()
-        self._update_sidebar_search_suggestions()
+        refresh_navigation_texts(self)
 
     def _on_ui_language_changed(self, language: str) -> None:
-        self._ui_language = normalize_language(language)
-        self._refresh_navigation_texts()
-        self._refresh_pages_language()
+        on_main_window_ui_language_changed(self, language)
 
     def _apply_ui_language_to_page(self, page: QWidget | None) -> None:
-        if page is None:
-            return
-
-        for method_name in ("set_ui_language", "retranslate_ui", "apply_ui_language"):
-            method = getattr(page, method_name, None)
-            if callable(method):
-                try:
-                    method(self._ui_language)
-                except TypeError:
-                    try:
-                        method()
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-                return
+        apply_ui_language_to_page(self, page)
 
     def _refresh_pages_language(self) -> None:
-        for page in getattr(self, "pages", {}).values():
-            self._apply_ui_language_to_page(page)
+        refresh_pages_language(self)
 
     # ------------------------------------------------------------------
     # Page creation (lazy + eager) — UNCHANGED logic
     # ------------------------------------------------------------------
 
     def _get_eager_page_names(self) -> tuple[PageName, ...]:
-        method = self._get_launch_method()
-
-        names: list[PageName] = [PageName.HOME, PageName.CONTROL]
-        entry_page = _EAGER_MODE_ENTRY_PAGE.get(method)
-        if entry_page is not None and entry_page not in names:
-            names.append(entry_page)
-
-        for page_name in _EAGER_PAGE_NAMES_BASE:
-            if page_name not in names:
-                names.append(page_name)
-
-        return tuple(names)
+        return get_eager_page_names(self)
 
     def _create_pages(self):
-        """Create page registry and initialize critical pages eagerly."""
-        import time as _time
-        from log import log
-
-        _t_pages_total = _time.perf_counter()
-
-        for page_name in self._get_eager_page_names():
-            self._ensure_page(page_name)
-            self._pump_startup_ui()
-
-        log(
-            f"⏱ Startup: _create_pages core {(_time.perf_counter() - _t_pages_total) * 1000:.0f}ms",
-            "DEBUG",
-        )
-        self._pump_startup_ui(force=True)
+        create_pages(self)
 
     def _resolve_page_name(self, name: PageName) -> PageName:
-        return self._page_aliases.get(name, name)
+        return resolve_page_name(self, name)
 
     def _connect_signal_once(self, key: str, signal_obj, slot_obj) -> None:
-        if key in self._lazy_signal_connections:
-            return
-        try:
-            signal_obj.connect(slot_obj)
-            self._lazy_signal_connections.add(key)
-        except Exception:
-            pass
+        connect_signal_once(self, key, signal_obj, slot_obj)
 
     def _connect_lazy_page_signals(self, page_name: PageName, page: QWidget) -> None:
-        if page_name in (
-            PageName.ZAPRET1_DIRECT,
-            PageName.ZAPRET2_DIRECT,
-            PageName.ZAPRET2_ORCHESTRA,
-        ):
-            if hasattr(page, "strategy_selected"):
-                self._connect_signal_once(
-                    f"strategy_selected.{page_name.name}",
-                    page.strategy_selected,
-                    self._on_strategy_selected_from_page,
-                )
-
-        if page_name == PageName.ZAPRET2_DIRECT and hasattr(page, "open_category_detail"):
-            self._connect_signal_once(
-                "z2_direct.open_category_detail",
-                page.open_category_detail,
-                self._on_open_category_detail,
-            )
-
-        if page_name in (PageName.ZAPRET2_DIRECT, PageName.ZAPRET2_USER_PRESETS, PageName.BLOBS) and hasattr(page, "back_clicked"):
-            self._connect_signal_once(
-                f"back_to_control.{page_name.name}",
-                page.back_clicked,
-                self._show_active_zapret2_control_page,
-            )
-
-        if page_name == PageName.ZAPRET2_ORCHESTRA_USER_PRESETS and hasattr(page, "back_clicked"):
-            self._connect_signal_once(
-                "back_to_orchestra_control.user_presets",
-                page.back_clicked,
-                lambda: self.show_page(PageName.ZAPRET2_ORCHESTRA_CONTROL),
-            )
-
-        if page_name in (PageName.ZAPRET1_DIRECT, PageName.ZAPRET1_USER_PRESETS) and hasattr(page, "back_clicked"):
-            self._connect_signal_once(
-                f"back_to_z1_control.{page_name.name}",
-                page.back_clicked,
-                lambda: self.show_page(PageName.ZAPRET1_DIRECT_CONTROL),
-            )
-
-        if page_name in (PageName.ZAPRET2_USER_PRESETS, PageName.ZAPRET2_ORCHESTRA_USER_PRESETS) and hasattr(page, "preset_open_requested"):
-            # User presets pages emit file_name here.
-            self._connect_signal_once(
-                f"{page_name.name}.preset_open_requested",
-                page.preset_open_requested,
-                self._open_zapret2_preset_detail,
-            )
-        if page_name in (PageName.ZAPRET2_USER_PRESETS, PageName.ZAPRET2_ORCHESTRA_USER_PRESETS) and hasattr(page, "folders_open_requested"):
-            self._connect_signal_once(
-                f"{page_name.name}.folders_open_requested",
-                page.folders_open_requested,
-                self._open_zapret2_preset_folders,
-            )
-
-        if page_name == PageName.ZAPRET1_USER_PRESETS and hasattr(page, "preset_open_requested"):
-            # User presets page emits file_name here.
-            self._connect_signal_once(
-                "z1_user_presets.preset_open_requested",
-                page.preset_open_requested,
-                self._open_zapret1_preset_detail,
-            )
-        if page_name == PageName.ZAPRET1_USER_PRESETS and hasattr(page, "folders_open_requested"):
-            self._connect_signal_once(
-                "z1_user_presets.folders_open_requested",
-                page.folders_open_requested,
-                self._open_zapret1_preset_folders,
-            )
-
-        if page_name == PageName.ZAPRET2_PRESET_DETAIL and hasattr(page, "back_clicked"):
-            self._connect_signal_once(
-                "z2_preset_detail.back_clicked",
-                page.back_clicked,
-                self._show_active_zapret2_user_presets_page,
-            )
-
-        if page_name == PageName.ZAPRET1_PRESET_DETAIL and hasattr(page, "back_clicked"):
-            self._connect_signal_once(
-                "z1_preset_detail.back_clicked",
-                page.back_clicked,
-                lambda: self.show_page(PageName.ZAPRET1_USER_PRESETS),
-            )
-        if page_name == PageName.ZAPRET2_PRESET_FOLDERS and hasattr(page, "back_clicked"):
-            self._connect_signal_once(
-                "z2_preset_folders.back_clicked",
-                page.back_clicked,
-                self._show_active_zapret2_user_presets_page,
-            )
-        if page_name == PageName.ZAPRET1_PRESET_FOLDERS and hasattr(page, "back_clicked"):
-            self._connect_signal_once(
-                "z1_preset_folders.back_clicked",
-                page.back_clicked,
-                self._show_zapret1_user_presets_page,
-            )
-        if page_name == PageName.ZAPRET2_PRESET_FOLDERS and hasattr(page, "folders_changed"):
-            self._connect_signal_once(
-                "z2_preset_folders.folders_changed",
-                page.folders_changed,
-                self._refresh_active_zapret2_user_presets_page,
-            )
-        if page_name == PageName.ZAPRET1_PRESET_FOLDERS and hasattr(page, "folders_changed"):
-            self._connect_signal_once(
-                "z1_preset_folders.folders_changed",
-                page.folders_changed,
-                self._refresh_zapret1_user_presets_page,
-            )
-
-        if page_name in (PageName.ZAPRET2_DIRECT_CONTROL, PageName.ZAPRET2_ORCHESTRA_CONTROL):
-            presets_target = (
-                PageName.ZAPRET2_ORCHESTRA_USER_PRESETS
-                if page_name == PageName.ZAPRET2_ORCHESTRA_CONTROL
-                else PageName.ZAPRET2_USER_PRESETS
-            )
-            direct_launch_target = (
-                PageName.ZAPRET2_ORCHESTRA
-                if page_name == PageName.ZAPRET2_ORCHESTRA_CONTROL
-                else PageName.ZAPRET2_DIRECT
-            )
-
-            for button_attr, handler in (
-                ("start_btn", self._proxy_start_click),
-                ("stop_winws_btn", self._proxy_stop_click),
-                ("stop_and_exit_btn", self._proxy_stop_and_exit),
-                ("test_btn", self._proxy_test_click),
-                ("folder_btn", self._proxy_folder_click),
-            ):
-                button = getattr(page, button_attr, None)
-                signal = getattr(button, "clicked", None)
-                if signal is not None:
-                    self._connect_signal_once(
-                        f"{page_name.name}.{button_attr}.clicked",
-                        signal,
-                        handler,
-                    )
-
-            if hasattr(page, "navigate_to_presets"):
-                self._connect_signal_once(
-                    f"{page_name.name}.navigate_to_presets",
-                    page.navigate_to_presets,
-                    lambda target=presets_target: self.show_page(target),
-                )
-
-            if hasattr(page, "navigate_to_direct_launch"):
-                self._connect_signal_once(
-                    f"{page_name.name}.navigate_to_direct_launch",
-                    page.navigate_to_direct_launch,
-                    lambda target=direct_launch_target: self.show_page(target),
-                )
-
-            if hasattr(page, "navigate_to_blobs"):
-                self._connect_signal_once(
-                    f"{page_name.name}.navigate_to_blobs",
-                    page.navigate_to_blobs,
-                    lambda: self.show_page(PageName.BLOBS),
-                )
-
-            if page_name == PageName.ZAPRET2_DIRECT_CONTROL and hasattr(page, "direct_mode_changed"):
-                self._connect_signal_once(
-                    f"{page_name.name}.direct_mode_changed",
-                    page.direct_mode_changed,
-                    self._on_direct_mode_changed,
-                )
-
-        if page_name == PageName.ZAPRET1_DIRECT and hasattr(page, "category_clicked"):
-            self._connect_signal_once(
-                "z1_direct.category_clicked",
-                page.category_clicked,
-                self._open_zapret1_category_detail,
-            )
-
-        if page_name == PageName.ZAPRET1_STRATEGY_DETAIL:
-            if hasattr(page, "back_clicked"):
-                self._connect_signal_once(
-                    "z1_strategy_detail.back_clicked",
-                    page.back_clicked,
-                    lambda: self.show_page(PageName.ZAPRET1_DIRECT),
-                )
-            if hasattr(page, "navigate_to_control"):
-                self._connect_signal_once(
-                    "z1_strategy_detail.navigate_to_control",
-                    page.navigate_to_control,
-                    lambda: self.show_page(PageName.ZAPRET1_DIRECT_CONTROL),
-                )
-            if hasattr(page, "strategy_selected"):
-                self._connect_signal_once(
-                    "z1_strategy_detail.strategy_selected",
-                    page.strategy_selected,
-                    self._on_z1_strategy_detail_selected,
-                )
-
-        if page_name == PageName.ZAPRET1_DIRECT_CONTROL:
-            for button_attr, handler in (
-                ("start_btn", self._proxy_start_click),
-                ("stop_winws_btn", self._proxy_stop_click),
-                ("stop_and_exit_btn", self._proxy_stop_and_exit),
-                ("test_btn", self._proxy_test_click),
-                ("folder_btn", self._proxy_folder_click),
-            ):
-                button = getattr(page, button_attr, None)
-                signal = getattr(button, "clicked", None)
-                if signal is not None:
-                    self._connect_signal_once(
-                        f"z1_control.{button_attr}.clicked",
-                        signal,
-                        handler,
-                    )
-
-            if hasattr(page, "navigate_to_strategies"):
-                self._connect_signal_once(
-                    "z1_control.navigate_to_strategies",
-                    page.navigate_to_strategies,
-                    lambda: self.show_page(PageName.ZAPRET1_DIRECT),
-                )
-            if hasattr(page, "navigate_to_presets"):
-                self._connect_signal_once(
-                    "z1_control.navigate_to_presets",
-                    page.navigate_to_presets,
-                    lambda: self.show_page(PageName.ZAPRET1_USER_PRESETS),
-                )
-
-        if page_name == PageName.ZAPRET2_STRATEGY_DETAIL:
-            if hasattr(page, "back_clicked"):
-                self._connect_signal_once(
-                    "strategy_detail.back_clicked",
-                    page.back_clicked,
-                    self._on_strategy_detail_back,
-                )
-            if hasattr(page, "navigate_to_root"):
-                self._connect_signal_once(
-                    "strategy_detail.navigate_to_root",
-                    page.navigate_to_root,
-                    lambda: self.show_page(PageName.ZAPRET2_DIRECT_CONTROL),
-                )
-            if hasattr(page, "strategy_selected"):
-                self._connect_signal_once(
-                    "strategy_detail.strategy_selected",
-                    page.strategy_selected,
-                    self._on_strategy_detail_selected,
-                )
-            if hasattr(page, "filter_mode_changed"):
-                self._connect_signal_once(
-                    "strategy_detail.filter_mode_changed",
-                    page.filter_mode_changed,
-                    self._on_strategy_detail_filter_mode_changed,
-                )
-
-        if page_name == PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL:
-            if hasattr(page, "back_clicked"):
-                self._connect_signal_once(
-                    "orchestra_strategy_detail.back_clicked",
-                    page.back_clicked,
-                    lambda: self.show_page(PageName.ZAPRET2_ORCHESTRA),
-                )
-            if hasattr(page, "navigate_to_root"):
-                self._connect_signal_once(
-                    "orchestra_strategy_detail.navigate_to_root",
-                    page.navigate_to_root,
-                    lambda: self.show_page(PageName.ZAPRET2_ORCHESTRA_CONTROL),
-                )
-
-        if page_name == PageName.ORCHESTRA and hasattr(page, "clear_learned_requested"):
-            self._connect_signal_once(
-                "orchestra.clear_learned_requested",
-                page.clear_learned_requested,
-                self._on_clear_learned_requested,
-            )
+        connect_lazy_page_signals(self, page_name, page)
 
 
     def _ensure_page_in_stacked_widget(self, page: QWidget | None) -> None:
-        stack = getattr(self, "stackedWidget", None)
-        if page is None or stack is None:
-            return
-        try:
-            if stack.indexOf(page) < 0:
-                stack.addWidget(page)
-        except Exception:
-            pass
+        ensure_page_in_stacked_widget(self, page)
 
     def _ensure_page(self, name: PageName) -> QWidget | None:
-        resolved_name = self._resolve_page_name(name)
-        page = self.pages.get(resolved_name)
-        if page is not None:
-            self._apply_ui_language_to_page(page)
-            if bool(getattr(self, "_page_signal_bootstrap_complete", False)):
-                self._ensure_page_in_stacked_widget(page)
-            return page
-
-        spec = _PAGE_CLASS_SPECS.get(resolved_name)
-        if spec is None:
-            return None
-
-        attr_name, module_name, class_name = spec
-        import time as _time
-        _t_page = _time.perf_counter()
-        try:
-            module = import_module(module_name)
-            page_cls = getattr(module, class_name)
-            page = page_cls(self)
-        except Exception as e:
-            from log import log
-
-            # Robust fallback for orchestra Z2 routes in mixed/old builds where
-            # dedicated wrappers may be absent from package imports.
-            fallback_specs = {
-                PageName.ZAPRET2_ORCHESTRA_CONTROL: (
-                    "ui.pages.zapret2.direct_control_page",
-                    "Zapret2DirectControlPage",
-                ),
-                PageName.ZAPRET2_ORCHESTRA_USER_PRESETS: (
-                    "ui.pages.zapret2.user_presets_page",
-                    "Zapret2UserPresetsPage",
-                ),
-                PageName.ZAPRET2_ORCHESTRA_STRATEGY_DETAIL: (
-                    "ui.pages.zapret2.strategy_detail_page",
-                    "StrategyDetailPage",
-                ),
-            }
-            fallback = fallback_specs.get(resolved_name)
-            if not fallback:
-                log(f"Ошибка lazy-инициализации страницы {resolved_name}: {e}", "ERROR")
-                return None
-
-            log(
-                f"Lazy-инициализация страницы {resolved_name} не удалась: {e}. Пробуем fallback...",
-                "WARNING",
-            )
-            try:
-                fb_module = import_module(fallback[0])
-                fb_cls = getattr(fb_module, fallback[1])
-                page = fb_cls(self)
-                log(f"Использован fallback для страницы {resolved_name}: {fallback[1]}", "WARNING")
-            except Exception as fallback_error:
-                log(
-                    f"Fallback lazy-инициализации страницы {resolved_name} тоже не удался: {fallback_error}",
-                    "ERROR",
-                )
-                return None
-
-        # Ensure unique objectName for FluentWindow route keys.
-        # Two nav pages can share the same class (e.g. user presets for direct/orchestra),
-        # so objectName must be disambiguated explicitly.
-        if resolved_name == PageName.ZAPRET2_USER_PRESETS:
-            page.setObjectName("Zapret2UserPresetsPage_Direct")
-        elif resolved_name == PageName.ZAPRET2_ORCHESTRA_USER_PRESETS:
-            page.setObjectName("Zapret2UserPresetsPage_Orchestra")
-        elif resolved_name == PageName.ZAPRET2_ORCHESTRA_CONTROL:
-            # Ensure unique routeKey even when fallback to Zapret2DirectControlPage is used.
-            # Fallback shares class/objectName with ZAPRET2_DIRECT_CONTROL → duplicate routeKey
-            # → addSubInterface returns None → page never in _nav_items.
-            if not page.objectName():
-                cls_name = page.__class__.__name__
-                if cls_name == "Zapret2DirectControlPage":
-                    page.setObjectName("Zapret2DirectControlPage_Orchestra")
-                else:
-                    page.setObjectName(cls_name)
-        elif not page.objectName():
-            page.setObjectName(page.__class__.__name__)
-
-        self.pages[resolved_name] = page
-        setattr(self, attr_name, page)
-        self._apply_ui_language_to_page(page)
-
-        # Legacy alias
-        if resolved_name == PageName.HOSTLIST:
-            self.ipset_page = page
-
-        if bool(getattr(self, "_page_signal_bootstrap_complete", False)):
-            self._connect_lazy_page_signals(resolved_name, page)
-            # For late-created pages, add to stacked widget
-            self._ensure_page_in_stacked_widget(page)
-
-        elapsed_ms = int((_time.perf_counter() - _t_page) * 1000)
-        self._record_startup_page_init_metric(resolved_name, elapsed_ms)
-
-        return page
+        return ensure_page(self, name)
 
     def get_page(self, name: PageName) -> QWidget:
         return self._ensure_page(name)
@@ -1614,188 +813,16 @@ class MainWindowUI:
             log("Данные обучения очищены", "INFO")
 
     def _on_launch_method_changed(self, method: str):
-        from log import log
-        from config import WINWS_EXE, WINWS2_EXE
-
-        log(f"Метод запуска изменён на: {method}", "INFO")
-
-        if hasattr(self, 'dpi_starter') and self.dpi_starter.check_process_running_wmi(silent=True):
-            log("Останавливаем все процессы winws*.exe перед переключением режима...", "INFO")
-
-            try:
-                from utils.process_killer import kill_winws_all
-                killed = kill_winws_all()
-                if killed:
-                    log("Все процессы winws*.exe остановлены через Win API", "INFO")
-                if hasattr(self, 'dpi_starter'):
-                    self.dpi_starter.cleanup_windivert_service()
-                if hasattr(self, 'ui_manager'):
-                    self.ui_manager.update_ui_state(running=False)
-                if hasattr(self, 'process_monitor_manager'):
-                    self.process_monitor_manager.on_process_status_changed(False)
-                import time
-                time.sleep(0.2)
-            except Exception as e:
-                log(f"Ошибка остановки через Win API: {e}", "WARNING")
-
-        self._complete_method_switch(method)
+        handle_main_window_launch_method_changed(self, method)
 
     def _complete_method_switch(self, method: str):
-        from log import log
-        from config import get_winws_exe_for_method
-
-        try:
-            from utils.service_manager import cleanup_windivert_services
-            cleanup_windivert_services()
-        except Exception:
-            pass
-
-        if hasattr(self, 'dpi_starter'):
-            self.dpi_starter.winws_exe = get_winws_exe_for_method(method)
-
-        try:
-            from launcher_common import invalidate_strategy_runner
-            invalidate_strategy_runner()
-        except Exception as e:
-            log(f"Ошибка инвалидации StrategyRunner: {e}", "WARNING")
-
-        can_autostart = True
-        if method == "direct_zapret2":
-            from preset_zapret2 import ensure_default_preset_exists
-            if not ensure_default_preset_exists():
-                log("direct_zapret2: выбранный source-пресет не подготовлен", "ERROR")
-                try:
-                    self.set_status("Ошибка: отсутствует Default.txt (built-in пресет)")
-                except Exception:
-                    pass
-                can_autostart = False
-
-        elif method == "direct_zapret2_orchestra":
-            from preset_orchestra_zapret2 import ensure_default_preset_exists
-            if not ensure_default_preset_exists():
-                log("direct_zapret2_orchestra: preset-zapret2-orchestra.txt не создан", "ERROR")
-                try:
-                    self.set_status("Ошибка: отсутствует orchestra Default.txt")
-                except Exception:
-                    pass
-                can_autostart = False
-
-        elif method == "direct_zapret1":
-            try:
-                from preset_zapret1 import ensure_default_preset_exists_v1
-                if not ensure_default_preset_exists_v1():
-                    log("direct_zapret1: выбранный source-пресет не подготовлен", "ERROR")
-                    can_autostart = False
-            except Exception as e:
-                log(f"direct_zapret1: ошибка инициализации пресета: {e}", "WARNING")
-
-        try:
-            self._preset_runtime_coordinator.setup_active_preset_file_watcher()
-        except Exception:
-            pass
-
-        # Reload strategy pages
-        for attr in ('zapret2_strategies_page', 'zapret2_orchestra_strategies_page',
-                     'orchestra_zapret2_control_page', 'zapret1_strategies_page'):
-            page = getattr(self, attr, None)
-            if page and hasattr(page, 'reload_for_mode_change'):
-                page.reload_for_mode_change()
-
-        log(f"Переключение на режим '{method}' завершено", "INFO")
-
-        try:
-            self._sync_nav_visibility(method)
-        except Exception:
-            pass
-
-        from PyQt6.QtCore import QTimer
-        if can_autostart:
-            QTimer.singleShot(500, lambda: self._auto_start_after_method_switch(method))
-
-        try:
-            self._redirect_to_strategies_page_for_method(method)
-        except Exception:
-            pass
+        complete_main_window_method_switch(self, method)
 
     def _redirect_to_strategies_page_for_method(self, method: str) -> None:
         redirect_to_strategies_page_for_method(self, method)
 
     def _auto_start_after_method_switch(self, method: str):
-        from log import log
-
-        try:
-            if not hasattr(self, 'dpi_controller') or not self.dpi_controller:
-                return
-
-            if method == "orchestra":
-                log("Автозапуск Оркестр", "INFO")
-                self.dpi_controller.start_dpi_async(selected_mode=None, launch_method="orchestra")
-
-            elif method == "direct_zapret2":
-                from config import get_dpi_autostart
-                if not get_dpi_autostart():
-                    return
-
-                from core.services import get_direct_flow_coordinator
-
-                try:
-                    profile = get_direct_flow_coordinator().ensure_launch_profile(
-                        "direct_zapret2",
-                        require_filters=False,
-                    )
-                except Exception:
-                    return
-
-                selected_mode = profile.to_selected_mode()
-                self.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=method)
-
-            elif method == "direct_zapret2_orchestra":
-                from config import get_dpi_autostart
-                if not get_dpi_autostart():
-                    return
-
-                from preset_orchestra_zapret2 import (
-                    ensure_default_preset_exists,
-                    get_active_preset_path,
-                    get_active_preset_name,
-                )
-
-                if not ensure_default_preset_exists():
-                    return
-
-                preset_path = get_active_preset_path()
-                preset_name = get_active_preset_name() or "Default"
-
-                if not preset_path.exists():
-                    return
-
-                selected_mode = {
-                    'is_preset_file': True,
-                    'name': f"Пресет оркестра: {preset_name}",
-                    'preset_path': str(preset_path),
-                }
-                self.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=method)
-
-            elif method == "direct_zapret1":
-                from config import get_dpi_autostart
-                if not get_dpi_autostart():
-                    return
-
-                from core.services import get_direct_flow_coordinator
-
-                try:
-                    profile = get_direct_flow_coordinator().ensure_launch_profile(
-                        "direct_zapret1",
-                        require_filters=False,
-                    )
-                except Exception:
-                    return
-
-                selected_mode = profile.to_selected_mode()
-                self.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=method)
-
-        except Exception as e:
-            log(f"Ошибка автозапуска после переключения режима: {e}", "ERROR")
+        auto_start_after_main_window_method_switch(self, method)
 
     def _proxy_start_click(self):
         self.home_page.start_btn.click()
@@ -1824,86 +851,31 @@ class MainWindowUI:
         self.home_page.folder_btn.click()
 
     def _open_subscription_dialog(self):
-        self.show_page(PageName.PREMIUM)
+        open_subscription_dialog(self)
 
     def _get_direct_strategy_summary(self, max_items: int = 2) -> str:
-        try:
-            from strategy_menu import get_direct_strategy_selections
-            from strategy_menu.strategies_registry import registry
-
-            selections = get_direct_strategy_selections() or {}
-            active_names: list[str] = []
-            for cat_key in registry.get_all_category_keys_by_command_order():
-                sid = selections.get(cat_key, "none") or "none"
-                if sid == "none":
-                    continue
-                info = registry.get_category_info(cat_key)
-                active_names.append(getattr(info, "full_name", None) or cat_key)
-
-            if not active_names:
-                return "Не выбрана"
-            if len(active_names) <= max_items:
-                return " • ".join(active_names)
-            return " • ".join(active_names[:max_items]) + f" +{len(active_names) - max_items} ещё"
-        except Exception:
-            return "Прямой запуск"
+        return get_direct_strategy_summary(self, max_items=max_items)
 
     def update_current_strategy_display(self, strategy_name: str):
-        launch_method = None
-        try:
-            from strategy_menu import get_strategy_launch_method
-            launch_method = get_strategy_launch_method()
-            if launch_method in ("direct_zapret2", "direct_zapret2_orchestra", "direct_zapret1"):
-                strategy_name = self._get_direct_strategy_summary()
-        except Exception:
-            pass
-
-        self.control_page.update_strategy(strategy_name)
-        try:
-            page = getattr(self, "zapret2_direct_control_page", None)
-            if page and hasattr(page, "update_strategy"):
-                page.update_strategy(strategy_name)
-        except Exception:
-            pass
-
-        for page_attr in (
-            'zapret2_direct_control_page', 'orchestra_zapret2_control_page',
-            'zapret2_strategies_page', 'zapret2_orchestra_strategies_page',
-            'orchestra_zapret2_user_presets_page', 'zapret1_direct_control_page',
-            'zapret1_strategies_page',
-        ):
-            page = getattr(self, page_attr, None)
-            if page and hasattr(page, 'update_current_strategy'):
-                page.update_current_strategy(strategy_name)
-
-        if hasattr(self.home_page, "update_launch_method_card"):
-            self.home_page.update_launch_method_card()
+        update_main_window_current_strategy_display(self, strategy_name)
 
     def update_autostart_display(self, enabled: bool, strategy_name: str = None):
-        self.home_page.update_autostart_status(enabled)
-        self.autostart_page.update_status(enabled, strategy_name)
+        update_main_window_autostart_display(self, enabled, strategy_name)
 
     def update_subscription_display(self, is_premium: bool, days: int = None):
-        self.home_page.update_subscription_status(is_premium, days)
-        self.about_page.update_subscription_status(is_premium, days)
+        update_main_window_subscription_display(self, is_premium, days)
 
     def set_status_text(self, text: str, status: str = "neutral"):
-        self.home_page.set_status(text, status)
+        set_main_window_status_text(self, text, status)
 
     def _on_autostart_enabled(self):
-        from log import log
-        log("Автозапуск включён через страницу настроек", "INFO")
-        self.update_autostart_display(True)
+        on_autostart_enabled(self)
 
     def _on_autostart_disabled(self):
-        from log import log
-        log("Автозапуск отключён через страницу настроек", "INFO")
-        self.update_autostart_display(False)
+        on_autostart_disabled(self)
 
     def _on_subscription_updated(self, is_premium: bool, days_remaining: int):
-        from log import log
-        log(f"Статус подписки обновлён: premium={is_premium}, days={days_remaining}", "INFO")
-        self.update_subscription_display(is_premium, days_remaining if days_remaining > 0 else None)
+        on_subscription_updated(self, is_premium, days_remaining)
 
         if hasattr(self, 'appearance_page') and self.appearance_page:
             self.appearance_page.set_premium_status(is_premium)
@@ -2026,89 +998,22 @@ class MainWindowUI:
             QTimer.singleShot(100, page._refresh_subtitles)
 
     def show_autostart_page(self):
-        self.show_page(PageName.AUTOSTART)
+        show_main_window_autostart_page(self)
 
     def show_hosts_page(self):
-        self.show_page(PageName.HOSTS)
+        show_main_window_hosts_page(self)
 
     def show_servers_page(self):
-        self.show_page(PageName.SERVERS)
+        show_main_window_servers_page(self)
 
     def _show_active_zapret2_control_page(self):
-        try:
-            from strategy_menu import get_strategy_launch_method
-
-            if get_strategy_launch_method() == "direct_zapret2_orchestra":
-                self.show_page(PageName.ZAPRET2_ORCHESTRA_CONTROL)
-            else:
-                self.show_page(PageName.ZAPRET2_DIRECT_CONTROL)
-        except Exception:
-            self.show_page(PageName.ZAPRET2_DIRECT_CONTROL)
+        show_active_zapret2_control_page(self)
 
     def _navigate_to_control(self):
-        try:
-            from strategy_menu import get_strategy_launch_method
-            if get_strategy_launch_method() == "direct_zapret2":
-                self.show_page(PageName.ZAPRET2_DIRECT_CONTROL)
-                return
-            if get_strategy_launch_method() == "direct_zapret2_orchestra":
-                self.show_page(PageName.ZAPRET2_ORCHESTRA_CONTROL)
-                return
-            if get_strategy_launch_method() == "direct_zapret1":
-                self.show_page(PageName.ZAPRET1_DIRECT_CONTROL)
-                return
-            if get_strategy_launch_method() == "orchestra":
-                self.show_page(PageName.ORCHESTRA)
-                return
-        except Exception:
-            pass
-        self.show_page(PageName.CONTROL)
+        navigate_to_control(self)
 
     def _navigate_to_strategies(self):
-        from log import log
-
-        try:
-            from strategy_menu import get_strategy_launch_method
-            method = get_strategy_launch_method()
-
-            if method == "orchestra":
-                target_page = PageName.ORCHESTRA
-            elif method == "direct_zapret2_orchestra":
-                target_page = PageName.ZAPRET2_ORCHESTRA_CONTROL
-            elif method == "direct_zapret2":
-                last_key = getattr(self, "_direct_zapret2_last_opened_category_key", None)
-                want_restore = bool(getattr(self, "_direct_zapret2_restore_detail_on_open", False))
-
-                if want_restore and last_key:
-                    try:
-                        from strategy_menu.strategies_registry import registry
-                        category_info = registry.get_category_info(last_key)
-                        detail_page = self._ensure_page(PageName.ZAPRET2_STRATEGY_DETAIL)
-                        if category_info and detail_page and hasattr(detail_page, "show_category"):
-                            try:
-                                from core.presets.direct_facade import DirectPresetFacade
-
-                                selections = DirectPresetFacade.from_launch_method("direct_zapret2").get_strategy_selections() or {}
-                                current_strategy_id = selections.get(last_key, "none")
-                            except Exception:
-                                current_strategy_id = "none"
-                            detail_page.show_category(last_key, category_info, current_strategy_id)
-                            target_page = PageName.ZAPRET2_STRATEGY_DETAIL
-                        else:
-                            target_page = PageName.ZAPRET2_DIRECT_CONTROL
-                    except Exception:
-                        target_page = PageName.ZAPRET2_DIRECT_CONTROL
-                else:
-                    target_page = PageName.ZAPRET2_DIRECT_CONTROL
-            elif method == "direct_zapret1":
-                target_page = PageName.ZAPRET1_DIRECT_CONTROL
-            else:
-                target_page = PageName.CONTROL
-
-            self.show_page(target_page)
-        except Exception as e:
-            log(f"Ошибка определения метода запуска стратегий: {e}", "ERROR")
-            self.show_page(PageName.ZAPRET2_DIRECT)
+        navigate_to_strategies(self)
 
     def _navigate_to_dpi_settings(self):
         self.show_page(PageName.DPI_SETTINGS)

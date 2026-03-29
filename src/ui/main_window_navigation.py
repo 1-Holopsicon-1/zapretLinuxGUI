@@ -113,3 +113,94 @@ def redirect_to_strategies_page_for_method(window, method: str) -> None:
         target_page = PageName.CONTROL
 
     window.show_page(target_page)
+
+
+def show_autostart_page(window) -> None:
+    window.show_page(PageName.AUTOSTART)
+
+
+def show_hosts_page(window) -> None:
+    window.show_page(PageName.HOSTS)
+
+
+def show_servers_page(window) -> None:
+    window.show_page(PageName.SERVERS)
+
+
+def show_active_zapret2_control_page(window) -> None:
+    try:
+        from strategy_menu import get_strategy_launch_method
+
+        if get_strategy_launch_method() == "direct_zapret2_orchestra":
+            window.show_page(PageName.ZAPRET2_ORCHESTRA_CONTROL)
+        else:
+            window.show_page(PageName.ZAPRET2_DIRECT_CONTROL)
+    except Exception:
+        window.show_page(PageName.ZAPRET2_DIRECT_CONTROL)
+
+
+def navigate_to_control(window) -> None:
+    try:
+        from strategy_menu import get_strategy_launch_method
+        if get_strategy_launch_method() == "direct_zapret2":
+            window.show_page(PageName.ZAPRET2_DIRECT_CONTROL)
+            return
+        if get_strategy_launch_method() == "direct_zapret2_orchestra":
+            window.show_page(PageName.ZAPRET2_ORCHESTRA_CONTROL)
+            return
+        if get_strategy_launch_method() == "direct_zapret1":
+            window.show_page(PageName.ZAPRET1_DIRECT_CONTROL)
+            return
+        if get_strategy_launch_method() == "orchestra":
+            window.show_page(PageName.ORCHESTRA)
+            return
+    except Exception:
+        pass
+    window.show_page(PageName.CONTROL)
+
+
+def navigate_to_strategies(window) -> None:
+    from log import log
+
+    try:
+        from strategy_menu import get_strategy_launch_method
+        method = get_strategy_launch_method()
+
+        if method == "orchestra":
+            target_page = PageName.ORCHESTRA
+        elif method == "direct_zapret2_orchestra":
+            target_page = PageName.ZAPRET2_ORCHESTRA_CONTROL
+        elif method == "direct_zapret2":
+            last_key = getattr(window, "_direct_zapret2_last_opened_category_key", None)
+            want_restore = bool(getattr(window, "_direct_zapret2_restore_detail_on_open", False))
+
+            if want_restore and last_key:
+                try:
+                    from strategy_menu.strategies_registry import registry
+                    category_info = registry.get_category_info(last_key)
+                    detail_page = window._ensure_page(PageName.ZAPRET2_STRATEGY_DETAIL)
+                    if category_info and detail_page and hasattr(detail_page, "show_category"):
+                        try:
+                            from core.presets.direct_facade import DirectPresetFacade
+
+                            selections = DirectPresetFacade.from_launch_method("direct_zapret2").get_strategy_selections() or {}
+                            current_strategy_id = selections.get(last_key, "none")
+                        except Exception:
+                            current_strategy_id = "none"
+                        detail_page.show_category(last_key, category_info, current_strategy_id)
+                        target_page = PageName.ZAPRET2_STRATEGY_DETAIL
+                    else:
+                        target_page = PageName.ZAPRET2_DIRECT_CONTROL
+                except Exception:
+                    target_page = PageName.ZAPRET2_DIRECT_CONTROL
+            else:
+                target_page = PageName.ZAPRET2_DIRECT_CONTROL
+        elif method == "direct_zapret1":
+            target_page = PageName.ZAPRET1_DIRECT_CONTROL
+        else:
+            target_page = PageName.CONTROL
+
+        window.show_page(target_page)
+    except Exception as e:
+        log(f"Ошибка определения метода запуска стратегий: {e}", "ERROR")
+        window.show_page(PageName.ZAPRET2_DIRECT)

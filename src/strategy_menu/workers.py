@@ -145,7 +145,8 @@ class CategoryTabLoader(QObject):
         """Загружает данные категории в фоновом потоке"""
         try:
             from strategy_menu.strategies_registry import registry
-            from strategy_menu import get_direct_strategy_selections, get_favorite_strategies
+            from strategy_menu.direct_selection_store import get_direct_strategy_selections
+            from strategy_menu.marks_store_bridge import get_favorite_strategies
 
             # Загружаем стратегии для категории
             strategies_dict = registry.get_category_strategies(self.category_key)

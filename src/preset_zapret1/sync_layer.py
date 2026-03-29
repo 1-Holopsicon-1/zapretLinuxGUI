@@ -188,9 +188,11 @@ class Zapret1PresetSyncLayer:
                     new_blocks.append(updated_block)
 
             if cat is not None:
-                category_block = self._build_single_category_block(category_key, cat)
-                if category_block:
-                    new_blocks.append(category_block)
+                category_blocks = self._build_category_blocks(category_key, cat)
+                if self._category_has_enabled_args(cat) and not category_blocks:
+                    log(f"V1: failed to rebuild category blocks for '{category_key}'", "ERROR")
+                    return False
+                new_blocks.extend(category_blocks)
 
             rendered = self._render_preset_text_sections(header_lines, base_lines, new_blocks)
 
@@ -390,13 +392,10 @@ class Zapret1PresetSyncLayer:
 
         names: set[str] = set()
         for mode in ("hostlist", "ipset"):
-            try:
-                for raw in build_category_base_filter_lines(category_key, mode):
-                    _k, filename = self._line_list_filename(raw)
-                    if filename:
-                        names.add(filename)
-            except Exception:
-                continue
+            for raw in build_category_base_filter_lines(category_key, mode):
+                _k, filename = self._line_list_filename(raw)
+                if filename:
+                    names.add(filename)
         return names
 
     def _active_list_filenames(self) -> set[str]:
@@ -415,39 +414,22 @@ class Zapret1PresetSyncLayer:
         return names
 
     @staticmethod
-    def _category_is_udp_like(category_key: str) -> bool:
-        try:
-            from preset_zapret2.catalog import load_categories
+    def _category_has_enabled_args(cat: CategoryConfigV1) -> bool:
+        return bool(
+            (getattr(cat, "tcp_enabled", False) and cat.has_tcp())
+            or (getattr(cat, "udp_enabled", False) and cat.has_udp())
+        )
 
-            info = load_categories().get(category_key) or {}
-            protocol = str(info.get("protocol") or "").upper()
-            return any(token in protocol for token in ("UDP", "QUIC", "L7", "RAW"))
-        except Exception:
-            return False
-
-    def _build_single_category_block(self, category_key: str, cat: CategoryConfigV1) -> list[str]:
+    def _build_protocol_block(
+        self,
+        category_key: str,
+        cat: CategoryConfigV1,
+        *,
+        protocol: str,
+        strategy_text: str,
+        custom_port: str,
+    ) -> list[str]:
         from preset_zapret2.base_filter import build_category_base_filter_lines
-
-        tcp_args = str(getattr(cat, "tcp_args", "") or "").strip()
-        udp_args = str(getattr(cat, "udp_args", "") or "").strip()
-
-        if not tcp_args and not udp_args:
-            return []
-
-        if udp_args and not tcp_args:
-            use_udp = True
-            strategy_text = udp_args
-            custom_port = str(getattr(cat, "udp_port", "") or "").strip()
-        elif tcp_args and not udp_args:
-            use_udp = False
-            strategy_text = tcp_args
-            custom_port = str(getattr(cat, "tcp_port", "") or "").strip()
-        else:
-            use_udp = self._category_is_udp_like(category_key)
-            strategy_text = udp_args if use_udp else tcp_args
-            custom_port = str(
-                (getattr(cat, "udp_port", "") if use_udp else getattr(cat, "tcp_port", "")) or ""
-            ).strip()
 
         lines = build_category_base_filter_lines(category_key, getattr(cat, "filter_mode", "hostlist") or "hostlist")
         if not lines:
@@ -457,11 +439,11 @@ class Zapret1PresetSyncLayer:
         if custom_port:
             for i, line in enumerate(lines):
                 low = line.lower()
-                if use_udp and low.startswith("--filter-udp="):
+                if protocol == "udp" and low.startswith("--filter-udp="):
                     lines[i] = f"--filter-udp={custom_port}"
-                elif use_udp and low.startswith("--filter-l7="):
+                elif protocol == "udp" and low.startswith("--filter-l7="):
                     lines[i] = f"--filter-l7={custom_port}"
-                elif (not use_udp) and low.startswith("--filter-tcp="):
+                elif protocol == "tcp" and low.startswith("--filter-tcp="):
                     lines[i] = f"--filter-tcp={custom_port}"
 
         for raw in strategy_text.splitlines():
@@ -470,3 +452,32 @@ class Zapret1PresetSyncLayer:
                 lines.append(line)
 
         return lines
+
+    def _build_category_blocks(self, category_key: str, cat: CategoryConfigV1) -> list[list[str]]:
+        blocks: list[list[str]] = []
+
+        tcp_args = str(getattr(cat, "tcp_args", "") or "").strip()
+        if getattr(cat, "tcp_enabled", False) and tcp_args:
+            tcp_block = self._build_protocol_block(
+                category_key,
+                cat,
+                protocol="tcp",
+                strategy_text=tcp_args,
+                custom_port=str(getattr(cat, "tcp_port", "") or "").strip(),
+            )
+            if tcp_block:
+                blocks.append(tcp_block)
+
+        udp_args = str(getattr(cat, "udp_args", "") or "").strip()
+        if getattr(cat, "udp_enabled", False) and udp_args:
+            udp_block = self._build_protocol_block(
+                category_key,
+                cat,
+                protocol="udp",
+                strategy_text=udp_args,
+                custom_port=str(getattr(cat, "udp_port", "") or "").strip(),
+            )
+            if udp_block:
+                blocks.append(udp_block)
+
+        return blocks

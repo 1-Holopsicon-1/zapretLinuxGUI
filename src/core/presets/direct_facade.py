@@ -481,7 +481,7 @@ class DirectPresetFacade:
         if self.launch_method == "direct_zapret2":
             from preset_zapret2.preset_storage import _load_preset_from_path
             try:
-                from strategy_menu import get_direct_zapret2_ui_mode
+                from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
 
                 ui_mode = normalize_direct_zapret2_ui_mode(get_direct_zapret2_ui_mode())
             except Exception:

@@ -262,7 +262,7 @@ class PresetManager:
     @staticmethod
     def _get_direct_ui_mode() -> str:
         try:
-            from strategy_menu import get_direct_zapret2_ui_mode
+            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
 
             return normalize_direct_zapret2_ui_mode(get_direct_zapret2_ui_mode())
         except Exception:

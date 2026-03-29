@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import List, Optional, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from strategy_menu.search_query import SearchQuery
+    from strategy_menu.filter_engine import SearchQuery
 
 
 @dataclass
