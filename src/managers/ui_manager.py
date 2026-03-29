@@ -172,7 +172,8 @@ class UIManager:
     def update_subscription_button_text(self, is_premium: bool, days_remaining: int) -> None:
         """⚡ Обновляет текст кнопки подписки"""
         try:
-            if not hasattr(self.app, 'subscription_btn'):
+            subscription_btn = getattr(self.app, 'subscription_btn', None)
+            if subscription_btn is None:
                 return
             
             # Определяем текст кнопки
@@ -186,6 +187,6 @@ class UIManager:
             else:
                 text = "Получить Premium"
             
-            self.app.subscription_btn.setText(text)
+            subscription_btn.setText(text)
         except Exception as e:
             log(f"Ошибка обновления кнопки подписки: {e}", "ERROR")

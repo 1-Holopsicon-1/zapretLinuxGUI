@@ -506,7 +506,7 @@ class DirectPresetFacade:
                 for line in profile.match_lines
             ):
                 continue
-            args_text = self._service().get_raw_args(preset, target_key)
+            args_text = self._service()._get_raw_args(preset, target_key)
             if self.launch_method == "direct_zapret2" and _v2_wssize_enabled_from_args(args_text):
                 return True
             if self.launch_method == "direct_zapret1" and _v1_wssize_enabled_from_args(args_text):
@@ -535,13 +535,13 @@ class DirectPresetFacade:
                 continue
 
             touched_any_tcp_443 = True
-            current_args = self._service().get_raw_args(preset, normalized_key) or ""
+            current_args = self._service()._get_raw_args(preset, normalized_key) or ""
             if self.launch_method == "direct_zapret2":
                 next_args = _rewrite_v2_wssize_args(current_args, bool(enabled))
             else:
                 next_args = _rewrite_v1_wssize_args(current_args, bool(enabled))
             if next_args != _join_arg_lines(_split_arg_lines(current_args)):
-                if self._service().update_raw_args(preset, normalized_key, next_args):
+                if self._service()._update_raw_args(preset, normalized_key, next_args):
                     changed = True
 
         if not touched_any_tcp_443:
@@ -738,7 +738,7 @@ class DirectPresetFacade:
         preset = self.get_selected_source_preset_model()
         if not preset:
             return "hostlist"
-        return self._service().get_filter_mode(preset, target_key)
+        return self._service()._get_filter_mode(preset, target_key)
 
     def update_target_filter_mode(self, target_key: str, filter_mode: str, *, save_and_sync: bool = True) -> bool:
         mode = str(filter_mode or "").strip().lower()
@@ -747,7 +747,7 @@ class DirectPresetFacade:
         preset = self.get_selected_source_preset_model()
         if not preset:
             return False
-        ok = self._service().update_filter_mode(preset, target_key, mode)
+        ok = self._service()._update_filter_mode(preset, target_key, mode)
         if not ok:
             return False
         return self.save_preset_model(preset, changed_target=str(target_key or "").strip().lower()) if save_and_sync else True
@@ -876,13 +876,13 @@ class DirectPresetFacade:
         preset = self.get_selected_source_preset_model()
         if not preset:
             return ""
-        return self._service().get_raw_args(preset, str(target_key or "").strip().lower())
+        return self._service()._get_raw_args(preset, str(target_key or "").strip().lower())
 
     def update_target_raw_args_text(self, target_key: str, raw_args: str, *, save_and_sync: bool = True) -> bool:
         preset = self.get_selected_source_preset_model()
         if not preset:
             return False
-        ok = self._service().update_raw_args(preset, str(target_key or "").strip().lower(), raw_args)
+        ok = self._service()._update_raw_args(preset, str(target_key or "").strip().lower(), raw_args)
         if not ok:
             return False
         return self.save_preset_model(preset, changed_target=str(target_key or "").strip().lower()) if save_and_sync else True

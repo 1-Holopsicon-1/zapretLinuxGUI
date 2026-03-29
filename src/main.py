@@ -1987,7 +1987,6 @@ def set_batfile_association() -> bool:
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
         if result.returncode == 0:
-            log("Ассоциация успешно установлена", level="INFO")
             return True
         else:
             log(f"Ошибка при выполнении команды: {result.stderr}", level="❌ ERROR")

@@ -3220,9 +3220,6 @@ class StrategyDetailPage(BasePage):
 
     def _load_target_filter_mode(self, target_key: str) -> str:
         """╨Ч╨░╨│╤А╤Г╨╢╨░╨╡╤В ╤А╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╨╕╨╖ PresetManager"""
-        details = self._get_target_details(target_key)
-        if details is not None:
-            return str(details.filter_mode or "hostlist")
         return self._direct_facade.get_target_filter_mode(target_key)
 
     def _save_target_sort(self, target_key: str, sort_order: str):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import SimpleNamespace
 
-from .category_metadata_loader import load_categories_metadata
+from .target_metadata_loader import load_target_metadata
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,8 @@ def _humanize_base_key(base_key: str) -> str:
 
 
 class TargetRegistryService:
-    def _load_categories(self) -> dict:
-        return load_categories_metadata()
+    def _load_target_metadata(self) -> dict:
+        return load_target_metadata()
 
     @staticmethod
     def base_key_from_target_key(target_key: str) -> str:
@@ -56,12 +56,12 @@ class TargetRegistryService:
         normalized_target_key = str(target_key or "").strip().lower()
         base_key = self.base_key_from_target_key(normalized_target_key)
         protocol = self.protocol_from_target_key(normalized_target_key)
-        categories = self._load_categories()
+        items = self._load_target_metadata()
 
         # Prefer exact protocol-specific entry (e.g. amazon_tcp, discord_udp).
         # Fall back to the base key only when the catalog defines a shared entry
         # like [youtube] for multiple protocol variants.
-        raw = categories.get(normalized_target_key) or categories.get(base_key) or {}
+        raw = items.get(normalized_target_key) or items.get(base_key) or {}
         display_name = str(raw.get("full_name") or _humanize_base_key(base_key)).strip() or target_key
         ports = str(raw.get("ports") or "").strip()
         strategy_type = str(raw.get("strategy_type") or "").strip().lower() or ("udp" if protocol == "UDP" else "tcp")

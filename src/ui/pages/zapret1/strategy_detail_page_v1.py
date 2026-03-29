@@ -756,9 +756,6 @@ class Zapret1StrategyDetailPage(BasePage):
         if not self._direct_facade:
             return "hostlist"
         try:
-            details = self._get_target_details(target_key)
-            if details is not None:
-                return str(details.filter_mode or "hostlist")
             return self._direct_facade.get_target_filter_mode(target_key)
         except Exception:
             return "hostlist"

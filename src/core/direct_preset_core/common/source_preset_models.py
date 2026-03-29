@@ -76,9 +76,6 @@ class PresetTargetDetails:
     send_settings: SendSettings
     syndata_settings: SyndataSettings
     warnings: tuple[str, ...] = ()
-    protocol_kind: str = ""
-    filter_mode: str = "hostlist"
-    raw_action_lines: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

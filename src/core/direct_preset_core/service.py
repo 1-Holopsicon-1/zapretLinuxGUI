@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,13 @@ from .common.strategy_catalogs import StrategyEntry, load_strategy_catalogs
 from .common.target_registry_service import TargetRegistryService
 from .engines import winws1_classifier, winws1_parser, winws1_rules, winws1_serializer
 from .engines import winws2_classifier, winws2_parser, winws2_rules, winws2_serializer
+
+
+@dataclass(frozen=True)
+class _ResolvedTargetState:
+    context: TargetContext
+    details: PresetTargetDetails
+    raw_action_lines: tuple[str, ...]
 
 
 class DirectPresetService:
@@ -92,30 +99,10 @@ class DirectPresetService:
         return items
 
     def get_target_details(self, source: SourcePreset, target_key: str) -> PresetTargetDetails | None:
-        contexts = self.collect_target_contexts(source)
-        ctx = contexts.get(str(target_key or "").strip().lower())
-        if ctx is None:
+        state = self._resolve_target_state(source, target_key)
+        if state is None:
             return None
-        profile = source.profiles[ctx.profile_index]
-        strategy_id = self._infer_strategy_id(profile.action_lines, ctx.strategy_candidates)
-        out_range = self._rules().parse_out_range(profile.action_lines)
-        send = self._rules().parse_send(profile.action_lines)
-        syndata = self._rules().parse_syndata(profile.action_lines)
-        warnings: list[str] = []
-        if len(ctx.related_profiles) > 1:
-            warnings.append("target appears in multiple profiles; basic UI edits only the first profile")
-        return PresetTargetDetails(
-            target_key=ctx.target_key,
-            display_name=ctx.display_name,
-            current_strategy=strategy_id,
-            out_range_settings=out_range,
-            send_settings=send,
-            syndata_settings=syndata,
-            warnings=tuple(warnings),
-            protocol_kind=ctx.protocol_kind,
-            filter_mode=ctx.filter_mode,
-            raw_action_lines=tuple(profile.action_lines),
-        )
+        return state.details
 
     def get_strategy_selections(self, source: SourcePreset) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -124,11 +111,11 @@ class DirectPresetService:
             out[target_key] = details.current_strategy if details else "none"
         return out
 
-    def get_filter_mode(self, source: SourcePreset, target_key: str) -> str:
+    def _get_filter_mode(self, source: SourcePreset, target_key: str) -> str:
         ctx = self.collect_target_contexts(source).get(str(target_key or "").strip().lower())
         return ctx.filter_mode if ctx else "hostlist"
 
-    def update_filter_mode(self, source: SourcePreset, target_key: str, filter_mode: str) -> bool:
+    def _update_filter_mode(self, source: SourcePreset, target_key: str, filter_mode: str) -> bool:
         normalized_key = str(target_key or "").strip().lower()
         normalized_mode = str(filter_mode or "").strip().lower()
         if normalized_mode not in ("hostlist", "ipset"):
@@ -168,7 +155,7 @@ class DirectPresetService:
         replace_profile_action_lines(source, profile_index, action_lines)
         return True
 
-    def update_raw_args(self, source: SourcePreset, target_key: str, raw_args: str) -> bool:
+    def _update_raw_args(self, source: SourcePreset, target_key: str, raw_args: str) -> bool:
         normalized_key = str(target_key or "").strip().lower()
         contexts = self.collect_target_contexts(source)
         ctx = contexts.get(normalized_key)
@@ -179,24 +166,22 @@ class DirectPresetService:
         replace_profile_action_lines(source, profile_index, action_lines)
         return True
 
-    def get_raw_args(self, source: SourcePreset, target_key: str) -> str:
-        details = self.get_target_details(source, target_key)
-        if not details:
+    def _get_raw_args(self, source: SourcePreset, target_key: str) -> str:
+        state = self._resolve_target_state(source, target_key)
+        if state is None:
             return ""
-        return "\n".join(self._rules().strip_helper_lines(list(details.raw_action_lines))).strip()
+        return "\n".join(self._rules().strip_helper_lines(list(state.raw_action_lines))).strip()
 
     def update_syndata(self, source: SourcePreset, target_key: str, syndata: SyndataSettings) -> bool:
         normalized_key = str(target_key or "").strip().lower()
-        details = self.get_target_details(source, normalized_key)
-        contexts = self.collect_target_contexts(source)
-        ctx = contexts.get(normalized_key)
-        if ctx is None or details is None:
+        state = self._resolve_target_state(source, normalized_key)
+        if state is None:
             return False
-        profile_index = split_profile_for_target(source, ctx.profile_index, normalized_key)
+        profile_index = split_profile_for_target(source, state.context.profile_index, normalized_key)
         action_lines = self._rules().compose_action_lines(
-            self._rules().strip_helper_lines(list(details.raw_action_lines)),
-            details.out_range_settings,
-            details.send_settings,
+            self._rules().strip_helper_lines(list(state.raw_action_lines)),
+            state.details.out_range_settings,
+            state.details.send_settings,
             syndata,
         )
         replace_profile_action_lines(source, profile_index, action_lines)
@@ -212,33 +197,31 @@ class DirectPresetService:
         syndata: SyndataSettings | None = None,
     ) -> bool:
         normalized_key = str(target_key or "").strip().lower()
-        details = self.get_target_details(source, normalized_key)
-        contexts = self.collect_target_contexts(source)
-        ctx = contexts.get(normalized_key)
-        if ctx is None or details is None:
+        state = self._resolve_target_state(source, normalized_key)
+        if state is None:
             return False
-        profile_index = split_profile_for_target(source, ctx.profile_index, normalized_key)
+        profile_index = split_profile_for_target(source, state.context.profile_index, normalized_key)
         action_lines = self._rules().compose_action_lines(
-            self._rules().strip_helper_lines(list(details.raw_action_lines)),
-            out_range or details.out_range_settings,
-            send or details.send_settings,
-            syndata or details.syndata_settings,
+            self._rules().strip_helper_lines(list(state.raw_action_lines)),
+            out_range or state.details.out_range_settings,
+            send or state.details.send_settings,
+            syndata or state.details.syndata_settings,
         )
         replace_profile_action_lines(source, profile_index, action_lines)
         return True
 
     def reset_target_from_template(self, current: SourcePreset, template: SourcePreset, target_key: str) -> bool:
-        template_details = self.get_target_details(template, target_key)
-        if template_details is None:
+        template_state = self._resolve_target_state(template, target_key)
+        if template_state is None:
             return False
         normalized_key = str(target_key or "").strip().lower()
         current_ctx = self.collect_target_contexts(current).get(normalized_key)
         if current_ctx is None:
             return False
         profile_index = split_profile_for_target(current, current_ctx.profile_index, normalized_key)
-        replace_profile_action_lines(current, profile_index, list(template_details.raw_action_lines))
-        if template_details.filter_mode != current_ctx.filter_mode:
-            self.update_filter_mode(current, normalized_key, template_details.filter_mode)
+        replace_profile_action_lines(current, profile_index, list(template_state.raw_action_lines))
+        if template_state.context.filter_mode != current_ctx.filter_mode:
+            self._update_filter_mode(current, normalized_key, template_state.context.filter_mode)
         return True
 
     def target_info(self, source: SourcePreset, target_key: str):
@@ -289,6 +272,38 @@ class DirectPresetService:
             if target_key in profile.canonical_target_keys:
                 count += 1
         return count
+
+    def _resolve_target_state(self, source: SourcePreset, target_key: str) -> _ResolvedTargetState | None:
+        normalized_key = str(target_key or "").strip().lower()
+        contexts = self.collect_target_contexts(source)
+        ctx = contexts.get(normalized_key)
+        if ctx is None:
+            return None
+
+        profile = source.profiles[ctx.profile_index]
+        strategy_id = self._infer_strategy_id(profile.action_lines, ctx.strategy_candidates)
+        out_range = self._rules().parse_out_range(profile.action_lines)
+        send = self._rules().parse_send(profile.action_lines)
+        syndata = self._rules().parse_syndata(profile.action_lines)
+
+        warnings: list[str] = []
+        if len(ctx.related_profiles) > 1:
+            warnings.append("target appears in multiple profiles; basic UI edits only the first profile")
+
+        details = PresetTargetDetails(
+            target_key=ctx.target_key,
+            display_name=ctx.display_name,
+            current_strategy=strategy_id,
+            out_range_settings=out_range,
+            send_settings=send,
+            syndata_settings=syndata,
+            warnings=tuple(warnings),
+        )
+        return _ResolvedTargetState(
+            context=ctx,
+            details=details,
+            raw_action_lines=tuple(profile.action_lines),
+        )
 
     def _candidate_catalog_names(self, protocol_kind: str) -> tuple[str, ...]:
         if self._engine == "winws2":
