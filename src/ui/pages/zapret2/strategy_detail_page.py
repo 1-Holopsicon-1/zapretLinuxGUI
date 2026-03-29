@@ -591,6 +591,7 @@ class StrategyDetailPage(BasePage):
         self.parent_app = parent
         self._target_key = None
         self._target_info = None
+        self._target_payload = None
         self._current_strategy_id = "none"
         self._selected_strategy_id = "none"
         self._strategies_tree = None
@@ -1555,14 +1556,16 @@ class StrategyDetailPage(BasePage):
             self._save_scroll_state(prev_key)
 
         normalized_key = str(target_key or "").strip().lower()
-        details = self._get_target_details(normalized_key)
-        target_info = self._direct_facade.get_target_ui_item(normalized_key)
-        if target_info is None or details is None:
+        payload = self._direct_facade.get_target_detail_payload(normalized_key)
+        if payload is None or payload.target_item is None:
             log(f"StrategyDetailPage.show_target: target '{normalized_key}' не найден", "WARNING")
             return
 
         log(f"StrategyDetailPage.show_target: {normalized_key}", "DEBUG")
         self._target_key = normalized_key
+        self._target_payload = payload
+        details = payload.details
+        target_info = payload.target_item
         self._target_info = target_info
         self._current_strategy_id = (details.current_strategy or "none").strip() or "none"
         self._selected_strategy_id = self._current_strategy_id
@@ -1882,15 +1885,19 @@ class StrategyDetailPage(BasePage):
     def _load_strategies(self):
         """Загружает стратегии для текущего target'а."""
         try:
-            target_info = self._direct_facade.get_target_ui_item(self._target_key) or self._target_info
+            payload = self._direct_facade.get_target_detail_payload(self._target_key)
+            if payload is not None:
+                self._target_payload = payload
+                target_info = payload.target_item or self._target_info
+            else:
+                target_info = self._target_info
             if target_info:
                 log(f"StrategyDetailPage: target {self._target_key}, strategy_type={target_info.strategy_type}", "DEBUG")
             else:
                 log(f"StrategyDetailPage: target {self._target_key} не найден в target metadata service!", "ERROR")
                 return
 
-            # Получаем стратегии для target'а из нового direct preset core
-            strategies = self._direct_facade.get_target_strategies(self._target_key)
+            strategies = dict(getattr(payload, "strategy_entries", {}) or {}) if payload is not None else self._direct_facade.get_target_strategies(self._target_key)
             log(f"StrategyDetailPage: загружено {len(strategies)} стратегий для {self._target_key}", "DEBUG")
 
             self._strategies_data_by_id = dict(strategies or {})
@@ -2707,6 +2714,9 @@ class StrategyDetailPage(BasePage):
         key = str(target_key or self._target_key or "").strip().lower()
         if not key or not getattr(self, "_direct_facade", None):
             return None
+        payload = getattr(self, "_target_payload", None)
+        if payload is not None and str(getattr(payload, "target_key", "") or "") == key:
+            return payload.details
         try:
             return self._direct_facade.get_target_details(key)
         except Exception:
@@ -2724,6 +2734,9 @@ class StrategyDetailPage(BasePage):
         """Returns the stored strategy args (tcp_args/udp_args) for the current target."""
         if not self._target_key:
             return ""
+        payload = getattr(self, "_target_payload", None)
+        if payload is not None and str(getattr(payload, "target_key", "") or "") == self._target_key:
+            return str(getattr(payload, "raw_args_text", "") or "")
         try:
             return self._direct_facade.get_target_raw_args_text(self._target_key) or ""
         except Exception:
@@ -3245,6 +3258,9 @@ class StrategyDetailPage(BasePage):
 
     def _load_target_filter_mode(self, target_key: str) -> str:
         """╨Ч╨░╨│╤А╤Г╨╢╨░╨╡╤В ╤А╨╡╨╢╨╕╨╝ ╤Д╨╕╨╗╤М╤В╤А╨░╤Ж╨╕╨╕ ╨┤╨╗╤П ╨║╨░╤В╨╡╨│╨╛╤А╨╕╨╕ ╨╕╨╖ PresetManager"""
+        payload = getattr(self, "_target_payload", None)
+        if payload is not None and str(getattr(payload, "target_key", "") or "") == str(target_key or "").strip().lower():
+            return str(getattr(payload, "filter_mode", "") or "hostlist")
         return self._direct_facade.get_target_filter_mode(target_key)
 
     def _save_target_sort(self, target_key: str, sort_order: str):
@@ -3428,6 +3444,9 @@ class StrategyDetailPage(BasePage):
             return ""
         if (self._selected_strategy_id or "none") == "none":
             return ""
+        payload = getattr(self, "_target_payload", None)
+        if payload is not None and str(getattr(payload, "target_key", "") or "") == self._target_key:
+            return str(getattr(payload, "raw_args_text", "") or "")
         try:
             return self._direct_facade.get_target_raw_args_text(self._target_key) or ""
         except Exception as e:

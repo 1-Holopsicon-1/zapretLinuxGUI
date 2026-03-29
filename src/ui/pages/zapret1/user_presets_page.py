@@ -99,6 +99,7 @@ _CSS_RGBA_COLOR_RE = re.compile(
     r"^\s*rgba?\(\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*,\s*([0-9]{1,3})\s*(?:,\s*([0-9]*\.?[0-9]+)\s*)?\)\s*$",
     re.IGNORECASE,
 )
+_PRESET_LIST_METADATA_CACHE: dict[tuple[str, int, int], dict[str, str]] = {}
 
 
 def _tr_text(key: str, language: str, default: str, **kwargs) -> str:
@@ -177,6 +178,12 @@ def _read_preset_list_metadata(path: Path) -> dict[str, str]:
     }
 
     try:
+        stat = path.stat()
+        cache_key = (str(path), int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))), int(stat.st_size))
+        cached = _PRESET_LIST_METADATA_CACHE.get(cache_key)
+        if cached is not None:
+            return dict(cached)
+
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             for raw in handle:
                 stripped = raw.strip()
@@ -199,6 +206,11 @@ def _read_preset_list_metadata(path: Path) -> dict[str, str]:
                 if icon_color_match:
                     result["icon_color"] = icon_color_match.group(1).strip()
                     continue
+    except Exception:
+        pass
+
+    try:
+        _PRESET_LIST_METADATA_CACHE[cache_key] = dict(result)
     except Exception:
         pass
 
@@ -1623,7 +1635,10 @@ class Zapret1UserPresetsPage(BasePage):
         """Central store says the selected source preset switched."""
         if self._bulk_reset_running:
             return
-        if self.isVisible() and self._apply_active_preset_marker():
+        marker_changed = self._apply_active_preset_marker()
+        if self.isVisible() and marker_changed:
+            return
+        if not self._ui_dirty and marker_changed:
             return
         self._ui_dirty = True
         if self.isVisible():

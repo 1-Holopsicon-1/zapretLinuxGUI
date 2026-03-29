@@ -7,7 +7,7 @@ import re
 from typing import Callable, Optional
 
 from core.direct_preset_core.common.source_preset_models import OutRangeSettings, SendSettings, SyndataSettings
-from core.direct_preset_core.service import BasicUiPayload, DirectPresetService
+from core.direct_preset_core.service import BasicUiPayload, DirectPresetService, TargetDetailPayload
 from core.presets.template_support import resolve_reset_template as _template_support_resolve_reset_template
 from core.presets.template_support import reset_all_templates as _template_support_reset_all_templates
 from core.presets.template_support import restore_deleted_templates as _template_support_restore_deleted_templates
@@ -358,6 +358,12 @@ class DirectPresetFacadeBackend:
                 filter_modes={},
             )
         return self._service().build_basic_ui_payload(preset)
+
+    def get_target_detail_payload(self, target_key: str) -> TargetDetailPayload | None:
+        preset = self.get_selected_source_preset_model()
+        if not preset:
+            return None
+        return self._service().build_target_detail_payload(preset, str(target_key or "").strip().lower())
 
     def list_file_names(self) -> list[str]:
         return [item.file_name for item in self.list_manifests()]

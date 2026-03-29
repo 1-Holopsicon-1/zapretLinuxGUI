@@ -183,6 +183,15 @@ class PresetSubpageBase(BasePage):
             self._direct_facade = DirectPresetFacade.from_launch_method(method)
         return self._direct_facade
 
+    def _is_orchestra_preset_backend(self) -> bool:
+        return self._direct_launch_method() is None and self._preset_hierarchy_scope_key() == "preset_orchestra_zapret2"
+
+    def _get_orchestra_preset_name(self) -> str:
+        candidate = str(self._preset_name or "").strip()
+        if candidate:
+            return candidate
+        return Path(str(self._preset_file_name or "").strip()).stem
+
     def _show_success(self, text: str) -> None:
         if InfoBar is not None:
             try:
@@ -200,6 +209,8 @@ class PresetSubpageBase(BasePage):
                 pass
 
     def _is_current_builtin(self) -> bool:
+        if self._is_orchestra_preset_backend():
+            return False
         facade = self._get_direct_facade()
         if facade is None:
             return False
@@ -357,6 +368,26 @@ class PresetSubpageBase(BasePage):
         if self._preset_path is None:
             return
         try:
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import _atomic_write_text, get_active_preset_name, get_active_preset_path, set_active_preset_name
+
+                preset_name = self._get_orchestra_preset_name()
+                if not preset_name:
+                    raise ValueError("Preset name is required for orchestra preset saving")
+
+                source_text = self.editor.toPlainText()
+                _atomic_write_text(self._preset_path, source_text)
+
+                active_name = str(get_active_preset_name() or "").strip()
+                if active_name.lower() == preset_name.lower():
+                    set_active_preset_name(preset_name)
+                    _atomic_write_text(get_active_preset_path(), source_text)
+                    self._notify_preset_switched()
+
+                self._notify_preset_saved(f"{preset_name}.txt")
+                self._set_footer(f"Сохранено {datetime.now().strftime('%H:%M:%S')}")
+                return
+
             facade = self._get_direct_facade()
             if facade is None:
                 raise ValueError("Direct preset facade is required")
@@ -437,7 +468,6 @@ class PresetSubpageBase(BasePage):
             self._show_error("Встроенный пресет нельзя переименовать. Создайте копию и работайте уже с ней.")
             return
         self._flush_pending_save()
-        facade = self._get_direct_facade()
         dialog = _RenameDialog(self._preset_name, [], self.window())
         if not dialog.exec():
             return
@@ -445,6 +475,22 @@ class PresetSubpageBase(BasePage):
         if not new_name or new_name == self._preset_name:
             return
         try:
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import get_active_preset_name, rename_preset
+
+                old_name = self._get_orchestra_preset_name()
+                if not old_name:
+                    raise ValueError("Preset name is required for orchestra preset rename")
+                if not rename_preset(old_name, new_name):
+                    raise ValueError("Не удалось переименовать orchestra preset")
+                self._notify_presets_changed()
+                self.set_preset_file_name(f"{new_name}.txt")
+                active_name = str(get_active_preset_name() or "").strip()
+                if active_name.lower() == new_name.lower():
+                    self._notify_preset_switched()
+                self._show_success(f"Пресет переименован: {new_name}")
+                return
+
             facade = self._get_direct_facade()
             if facade is None:
                 raise ValueError("Direct preset facade is required")
@@ -463,6 +509,19 @@ class PresetSubpageBase(BasePage):
         self._flush_pending_save()
         try:
             new_name = f"{self._preset_name} (копия)"
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import duplicate_preset
+
+                source_name = self._get_orchestra_preset_name()
+                if not source_name:
+                    raise ValueError("Preset name is required for orchestra preset duplicate")
+                if not duplicate_preset(source_name, new_name):
+                    raise ValueError("Не удалось создать копию orchestra preset")
+                self._notify_presets_changed()
+                self.set_preset_file_name(f"{new_name}.txt")
+                self._show_success(f"Создан дубликат: {new_name}")
+                return
+
             facade = self._get_direct_facade()
             if facade is None:
                 raise ValueError("Direct preset facade is required")
@@ -486,6 +545,17 @@ class PresetSubpageBase(BasePage):
         if not file_path:
             return
         try:
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import export_preset
+
+                preset_name = self._get_orchestra_preset_name()
+                if not preset_name:
+                    raise ValueError("Preset name is required for orchestra preset export")
+                if not export_preset(preset_name, Path(file_path)):
+                    raise ValueError("Не удалось экспортировать orchestra preset")
+                self._show_success(f"Пресет экспортирован: {file_path}")
+                return
+
             facade = self._get_direct_facade()
             if facade is None:
                 raise ValueError("Direct preset facade is required")
@@ -509,6 +579,28 @@ class PresetSubpageBase(BasePage):
             if not box.exec():
                 return
         try:
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import PresetManager, get_active_preset_name
+
+                preset_name = self._get_orchestra_preset_name()
+                if not preset_name:
+                    raise ValueError("Preset name is required for orchestra preset reset")
+                is_active = str(get_active_preset_name() or "").strip().lower() == preset_name.lower()
+                manager = PresetManager()
+                if not manager.reset_preset_to_default_template(
+                    preset_name,
+                    make_active=is_active,
+                    sync_active_file=is_active,
+                    emit_switched=is_active,
+                ):
+                    raise ValueError("Не удалось сбросить orchestra preset")
+                self.set_preset_file_name(f"{preset_name}.txt")
+                self._notify_preset_saved(f"{preset_name}.txt")
+                if is_active:
+                    self._notify_preset_switched()
+                self._show_success(f"Пресет «{self._preset_name}» сброшен")
+                return
+
             facade = self._get_direct_facade()
             if facade is None:
                 raise ValueError("Direct preset facade is required")
@@ -545,6 +637,19 @@ class PresetSubpageBase(BasePage):
                 return
         try:
             name = self._preset_name
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import delete_preset
+
+                preset_name = self._get_orchestra_preset_name()
+                if not preset_name:
+                    raise ValueError("Preset name is required for orchestra preset delete")
+                if not delete_preset(preset_name):
+                    raise ValueError("Не удалось удалить orchestra preset")
+                self._notify_presets_changed()
+                self.back_clicked.emit()
+                self._show_success(f"Пресет «{name}» удалён")
+                return
+
             facade = self._get_direct_facade()
             if facade is None:
                 raise ValueError("Direct preset facade is required")
@@ -559,6 +664,11 @@ class PresetSubpageBase(BasePage):
 
     def _current_selected_name(self) -> str:
         try:
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import get_active_preset_name
+
+                return str(get_active_preset_name() or "").strip()
+
             from core.services import get_direct_flow_coordinator
 
             method = self._direct_launch_method()
@@ -569,6 +679,10 @@ class PresetSubpageBase(BasePage):
 
     def _current_selected_file_name(self) -> str:
         try:
+            if self._is_orchestra_preset_backend():
+                active_name = self._current_selected_name()
+                return f"{active_name}.txt" if active_name else ""
+
             from core.services import get_direct_flow_coordinator
 
             method = self._direct_launch_method()
@@ -578,6 +692,17 @@ class PresetSubpageBase(BasePage):
 
     def _refresh_selected_launch_profile(self) -> bool:
         try:
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import PresetManager
+
+                active_name = self._current_selected_name()
+                if not active_name:
+                    return False
+                preset = PresetManager().load_preset(active_name)
+                if preset is None:
+                    return False
+                return bool(PresetManager().sync_preset_to_active_file(preset))
+
             from core.services import get_direct_flow_coordinator
 
             method = self._direct_launch_method()
@@ -588,6 +713,14 @@ class PresetSubpageBase(BasePage):
 
     def _activate_selected_preset(self) -> bool:
         try:
+            if self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import PresetManager
+
+                preset_name = self._get_orchestra_preset_name()
+                if not preset_name:
+                    return False
+                return bool(PresetManager().switch_preset(preset_name, reload_dpi=False))
+
             from core.services import get_direct_flow_coordinator
 
             method = self._direct_launch_method()
@@ -601,7 +734,7 @@ class PresetSubpageBase(BasePage):
 
     def _notify_preset_switched(self) -> None:
         method = self._direct_launch_method()
-        if not self._preset_file_name:
+        if not self._preset_file_name and not self._is_orchestra_preset_backend():
             return
         try:
             if method == "direct_zapret2":
@@ -612,6 +745,10 @@ class PresetSubpageBase(BasePage):
                 from core.services import get_preset_store_v1
 
                 get_preset_store_v1().notify_preset_switched(self._preset_file_name)
+            elif self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import get_preset_store
+
+                get_preset_store().notify_preset_switched(self._get_orchestra_preset_name())
         except Exception:
             pass
 
@@ -626,6 +763,10 @@ class PresetSubpageBase(BasePage):
                 from core.services import get_preset_store_v1
 
                 get_preset_store_v1().notify_preset_saved(file_name)
+            elif self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import get_preset_store
+
+                get_preset_store().notify_preset_saved(self._get_orchestra_preset_name())
         except Exception:
             pass
 
@@ -640,5 +781,9 @@ class PresetSubpageBase(BasePage):
                 from core.services import get_preset_store_v1
 
                 get_preset_store_v1().notify_presets_changed()
+            elif self._is_orchestra_preset_backend():
+                from preset_orchestra_zapret2 import get_preset_store
+
+                get_preset_store().notify_presets_changed()
         except Exception:
             pass

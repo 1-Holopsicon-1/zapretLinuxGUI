@@ -38,6 +38,16 @@ class BasicUiPayload:
     filter_modes: dict[str, str]
 
 
+@dataclass(frozen=True)
+class TargetDetailPayload:
+    target_key: str
+    target_item: Any
+    details: PresetTargetDetails
+    strategy_entries: dict[str, dict[str, str]]
+    raw_args_text: str
+    filter_mode: str
+
+
 class DirectPresetService:
     def __init__(self, paths: AppPaths, engine: str):
         self._paths = paths
@@ -140,6 +150,22 @@ class DirectPresetService:
                 continue
             items[target_key] = self._target_metadata.build_ui_item(target_key)
         return items
+
+    def build_target_detail_payload(self, source: SourcePreset, target_key: str) -> TargetDetailPayload | None:
+        normalized_key = str(target_key or "").strip().lower()
+        if not normalized_key:
+            return None
+        details = self.get_target_details(source, normalized_key)
+        if details is None:
+            return None
+        return TargetDetailPayload(
+            target_key=normalized_key,
+            target_item=self.target_info(source, normalized_key),
+            details=details,
+            strategy_entries=self.get_strategy_entries(source, normalized_key),
+            raw_args_text=self._get_raw_args(source, normalized_key),
+            filter_mode=self._get_filter_mode(source, normalized_key),
+        )
 
     def get_target_details(self, source: SourcePreset, target_key: str) -> PresetTargetDetails | None:
         state = self._resolve_target_state(source, target_key)

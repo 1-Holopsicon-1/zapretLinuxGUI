@@ -180,6 +180,7 @@ class Zapret1StrategyDetailPage(BasePage):
         self._target_key: str = ""
         self._target_info: dict[str, Any] = {}
         self._direct_facade = None
+        self._target_payload = None
 
         self._strategies: dict[str, dict] = {}
         self._current_strategy_id: str = "none"
@@ -481,11 +482,13 @@ class Zapret1StrategyDetailPage(BasePage):
     def show_target(self, target_key: str, direct_facade) -> None:
         self._target_key = str(target_key or "").strip().lower()
         self._direct_facade = direct_facade
-        target_info = None
+        payload = None
         try:
-            target_info = direct_facade.get_target_ui_item(self._target_key)
+            payload = direct_facade.get_target_detail_payload(self._target_key)
         except Exception:
-            target_info = None
+            payload = None
+        self._target_payload = payload
+        target_info = getattr(payload, "target_item", None)
         self._target_info = self._normalize_target_info(target_key, target_info)
         self._current_strategy_id = self._load_current_strategy_id()
         if self._current_strategy_id and self._current_strategy_id != "none":
@@ -546,6 +549,9 @@ class Zapret1StrategyDetailPage(BasePage):
         key = str(target_key or self._target_key or "").strip().lower()
         if not key or not getattr(self, "_direct_facade", None):
             return None
+        payload = getattr(self, "_target_payload", None)
+        if payload is not None and str(getattr(payload, "target_key", "") or "") == key:
+            return payload.details
         try:
             return self._direct_facade.get_target_details(key)
         except Exception:
@@ -559,7 +565,12 @@ class Zapret1StrategyDetailPage(BasePage):
 
         self.show_loading()
         try:
-            self._strategies = self._direct_facade.get_target_strategies(self._target_key) or {}
+            payload = self._direct_facade.get_target_detail_payload(self._target_key)
+            if payload is not None:
+                self._target_payload = payload
+                self._strategies = dict(getattr(payload, "strategy_entries", {}) or {})
+            else:
+                self._strategies = self._direct_facade.get_target_strategies(self._target_key) or {}
             self._current_strategy_id = self._load_current_strategy_id()
             if self._current_strategy_id and self._current_strategy_id != "none":
                 self._last_enabled_strategy_id = self._current_strategy_id
@@ -755,6 +766,9 @@ class Zapret1StrategyDetailPage(BasePage):
     def _load_target_filter_mode(self, target_key: str) -> str:
         if not self._direct_facade:
             return "hostlist"
+        payload = getattr(self, "_target_payload", None)
+        if payload is not None and str(getattr(payload, "target_key", "") or "") == str(target_key or "").strip().lower():
+            return str(getattr(payload, "filter_mode", "") or "hostlist")
         try:
             return self._direct_facade.get_target_filter_mode(target_key)
         except Exception:
@@ -910,6 +924,9 @@ class Zapret1StrategyDetailPage(BasePage):
     def _get_current_args(self) -> str:
         if not self._direct_facade or not self._target_key:
             return ""
+        payload = getattr(self, "_target_payload", None)
+        if payload is not None and str(getattr(payload, "target_key", "") or "") == self._target_key:
+            return str(getattr(payload, "raw_args_text", "") or "").strip()
         try:
             return (self._direct_facade.get_target_raw_args_text(self._target_key) or "").strip()
         except Exception:
