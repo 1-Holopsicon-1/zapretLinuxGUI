@@ -3447,6 +3447,10 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Сервер: проверка...",
         "en": "Server: checking...",
     },
+    "page.premium.label.server.idle": {
+        "ru": "Сервер: нажмите «Проверить соединение»",
+        "en": "Server: click \"Test connection\"",
+    },
     "page.premium.activation.error.init": {
         "ru": "❌ Ошибка инициализации",
         "en": "❌ Initialization error",
@@ -4004,8 +4008,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Control",
     },
     "page.z1_user_presets.configs.title": {
-        "ru": "Обменивайтесь категориями на нашем форуме-сайте через Telegram-бота: безопасно и анонимно",
-        "en": "Share categories on our forum site via Telegram bot: safe and anonymous",
+        "ru": "Обменивайтесь пресетами и категориями в разделе GitHub Discussions",
+        "en": "Share presets and categories in GitHub Discussions",
     },
     "page.z1_user_presets.configs.button": {
         "ru": "Получить конфиги",
@@ -4252,8 +4256,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Preset restore error: {error}",
     },
     "page.z1_user_presets.error.open_telegram": {
-        "ru": "Не удалось открыть Telegram: {error}",
-        "en": "Failed to open Telegram: {error}",
+        "ru": "Не удалось открыть страницу пресетов: {error}",
+        "en": "Failed to open presets page: {error}",
     },
     "page.z1_user_presets.file_dialog.import_title": {
         "ru": "Импортировать пресет",
@@ -4435,9 +4439,9 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Не выбрана",
         "en": "Not selected",
     },
-    "page.z2_direct.telegram.button": {
-        "ru": "ОТКРЫТЬ TELEGRAM БОТА",
-        "en": "OPEN TELEGRAM BOT",
+    "page.z2_direct.request.button": {
+        "ru": "ОТКРЫТЬ ФОРМУ НА GITHUB",
+        "en": "OPEN GITHUB FORM",
     },
     "page.z2_direct.toolbar.expand": {
         "ru": "Развернуть",
@@ -4472,8 +4476,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Control",
     },
     "page.z2_user_presets.configs.title": {
-        "ru": "Обменивайтесь категориями на нашем форуме-сайте через Telegram-бота: безопасно и анонимно",
-        "en": "Share categories on our forum site via Telegram bot: safe and anonymous",
+        "ru": "Обменивайтесь пресетами и категориями в разделе GitHub Discussions",
+        "en": "Share presets and categories in GitHub Discussions",
     },
     "page.z2_user_presets.configs.button": {
         "ru": "Получить конфиги",
@@ -4720,8 +4724,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Preset restore error: {error}",
     },
     "page.z2_user_presets.error.open_telegram": {
-        "ru": "Не удалось открыть Telegram: {error}",
-        "en": "Failed to open Telegram: {error}",
+        "ru": "Не удалось открыть страницу пресетов: {error}",
+        "en": "Failed to open presets page: {error}",
     },
     "page.z2_user_presets.file_dialog.import_title": {
         "ru": "Импортировать пресет",
@@ -5563,9 +5567,9 @@ TEXTS_EXTRA: dict[str, dict[str, str]] = {
         "ru": "Категории не найдены. Проверьте наличие json/strategies/builtin/categories.txt",
         "en": "No categories found. Check json/strategies/builtin/categories.txt",
     },
-    "page.z2_direct.telegram.hint": {
-        "ru": "Хотите добавить свою категорию? Напишите нам! Запрос на добавление своих сайтов можно сделать во вкладке на сайте-форуме через категорию для Zapret GUI.",
-        "en": "Want to add your own category? Contact us! You can submit your site-add request in the forum tab category for Zapret GUI.",
+    "page.z2_direct.request.hint": {
+        "ru": "Хотите добавить новый сайт или сервис в Zapret 2? Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset.",
+        "en": "Want to add a new site or service to Zapret 2? Open the GitHub form and describe what should be added to the hostlist or ipset.",
     },
     "page.z2_direct.current.active_count": {
         "ru": "{count} активных",

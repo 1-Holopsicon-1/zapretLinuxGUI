@@ -231,6 +231,28 @@ class PremiumStorage:
         return bool(PremiumStorage.update(lambda p: p.set(_INI_SECTION, "last_check", ts)))
 
     @staticmethod
+    def get_last_network_failure_ts() -> Optional[int]:
+        try:
+            with _INI_LOCK:
+                path = PremiumStorage.path()
+                parser = PremiumStorage._read(path)
+                if not parser.has_section(_INI_SECTION):
+                    return None
+                raw = (parser.get(_INI_SECTION, "last_network_failure_ts", fallback="") or "").strip()
+            return int(raw) if raw else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def save_last_network_failure_now() -> bool:
+        ts = int(time.time())
+        return bool(PremiumStorage.update(lambda p: p.set(_INI_SECTION, "last_network_failure_ts", str(ts))))
+
+    @staticmethod
+    def clear_last_network_failure() -> bool:
+        return bool(PremiumStorage.update(lambda p: p.remove_option(_INI_SECTION, "last_network_failure_ts")))
+
+    @staticmethod
     def get_activation_key() -> Optional[str]:
         try:
             with _INI_LOCK:

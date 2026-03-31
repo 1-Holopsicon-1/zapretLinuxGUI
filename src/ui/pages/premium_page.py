@@ -374,6 +374,11 @@ class PremiumPage(BasePage):
                 self._tr("page.premium.connection.progress.testing", "🔄 Проверка соединения...")
             )
             return
+        if mode == "idle":
+            self.server_status_label.setText(
+                self._tr("page.premium.label.server.idle", "Сервер: нажмите «Проверить соединение»")
+            )
+            return
         if mode == "init_error":
             self.server_status_label.setText(
                 self._tr("page.premium.activation.error.init", "❌ Ошибка инициализации")
@@ -409,8 +414,10 @@ class PremiumPage(BasePage):
         if not self._initialized:
             self._initialized = True
             self._init_checker()
-            QTimer.singleShot(500, self._check_status)
-            QTimer.singleShot(800, self._test_connection)
+            self._server_status_mode = "idle"
+            self._server_status_message = ""
+            self._server_status_success = None
+            self._render_server_status()
 
     def closeEvent(self, event):
         if self.current_thread and self.current_thread.isRunning():

@@ -44,11 +44,11 @@ class DonateChecker:
     def pair_start(self, device_name: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
         return self._svc.pair_start(device_name=device_name)
 
-    def check_device_activation(self, use_cache: bool = False) -> Dict[str, Any]:
-        return self._svc.check_device_activation(use_cache=use_cache)
+    def check_device_activation(self, use_cache: bool = False, automatic: bool = False) -> Dict[str, Any]:
+        return self._svc.check_device_activation(use_cache=use_cache, automatic=automatic)
 
-    def get_full_subscription_info(self, use_cache: bool = False) -> Dict[str, Any]:
-        return self._svc.get_full_subscription_info(use_cache=use_cache)
+    def get_full_subscription_info(self, use_cache: bool = False, automatic: bool = False) -> Dict[str, Any]:
+        return self._svc.get_full_subscription_info(use_cache=use_cache, automatic=automatic)
 
     def check_subscription_status(self, use_cache: bool = True) -> Tuple[bool, str, Optional[int]]:
         info = self.get_full_subscription_info(use_cache=use_cache)

@@ -1,4 +1,3 @@
-from ui.nav_mode_config import get_nav_visibility
 from ui.page_names import PageName
 
 
@@ -49,10 +48,14 @@ def normalize_launch_method_for_ui(method: str | None) -> str:
 
 
 def should_add_nav_page_on_init(page_name: PageName, method: str | None) -> bool:
-    normalized_method = normalize_launch_method_for_ui(method)
-    if page_name not in MODE_GATED_NAV_PAGES:
-        return True
-    return bool(get_nav_visibility(normalized_method).get(page_name, False))
+    # Mode-gated sidebar pages must still be registered during the initial
+    # navigation build. If we create them later inside sync_nav_visibility(),
+    # Fluent inserts them at the end of the scroll area and the visual order of
+    # top-level items shifts depending on the current launch mode.
+    #
+    # Visibility is applied separately by sync_nav_visibility(), so init-time
+    # registration should stay order-stable for every launch method.
+    return True
 
 
 def get_sidebar_search_pages_for_method(method: str | None, all_pages: set[PageName]) -> set[PageName]:

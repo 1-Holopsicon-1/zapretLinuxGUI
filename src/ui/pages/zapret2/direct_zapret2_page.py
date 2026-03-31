@@ -30,6 +30,11 @@ except ImportError:
     _HAS_FLUENT_LABELS = False
 
 
+_CATEGORY_REQUEST_FORM_URL = (
+    "https://github.com/youtubediscord/zapret/issues/new?template=hostlist_ipset_request.yml"
+)
+
+
 def _log_startup_z2_direct_metric(section: str, elapsed_ms: float) -> None:
     try:
         rounded = int(round(float(elapsed_ms)))
@@ -103,8 +108,8 @@ class Zapret2StrategiesPageNew(BasePage):
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._basic_payload_cache = None
-        self._telegram_hint_label = None
-        self._telegram_btn = None
+        self._request_hint_label = None
+        self._request_btn = None
         self._expand_btn = None
         self._collapse_btn = None
         self._info_btn = None
@@ -232,43 +237,43 @@ class Zapret2StrategiesPageNew(BasePage):
             filter_modes = payload.filter_modes or {}
             _log_startup_z2_direct_metric("_build_content.payload", (_time.perf_counter() - _t_payload) * 1000)
 
-            # Карточка с кнопкой Telegram (выделенная, акцентная)
-            _t_telegram = _time.perf_counter()
-            telegram_card = SettingsCard()
-            telegram_layout = QHBoxLayout()
-            telegram_layout.setContentsMargins(0, 0, 0, 0)
-            telegram_layout.setSpacing(16)
+            # Карточка с переходом на форму запроса новой категории
+            _t_request_link = _time.perf_counter()
+            request_card = SettingsCard()
+            request_layout = QHBoxLayout()
+            request_layout.setContentsMargins(0, 0, 0, 0)
+            request_layout.setSpacing(16)
 
             # Описательный текст слева
             _hint_text = tr_catalog(
-                "page.z2_direct.telegram.hint",
+                "page.z2_direct.request.hint",
                 language=self._ui_language,
                 default=(
-                    "Хотите добавить новый сайт или сервис в direct preset? Напишите нам. "
-                    "Запрос можно оставить на сайте-форуме в разделе Zapret GUI."
+                    "Хотите добавить новый сайт или сервис в Zapret 2? "
+                    "Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset."
                 ),
             )
-            telegram_hint = CaptionLabel(_hint_text)
-            self._telegram_hint_label = telegram_hint
-            telegram_hint.setWordWrap(True)
-            telegram_hint.setContentsMargins(12, 0, 0, 0)
-            telegram_hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-            telegram_hint.setMinimumWidth(0)
-            telegram_layout.addWidget(telegram_hint, 1)
+            request_hint = CaptionLabel(_hint_text)
+            self._request_hint_label = request_hint
+            request_hint.setWordWrap(True)
+            request_hint.setContentsMargins(12, 0, 0, 0)
+            request_hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            request_hint.setMinimumWidth(0)
+            request_layout.addWidget(request_hint, 1)
 
-            # Кнопка Telegram
-            telegram_btn = ActionButton(
-                tr_catalog("page.z2_direct.telegram.button", language=self._ui_language, default="ОТКРЫТЬ TELEGRAM БОТА"),
-                "fa5b.telegram-plane",
+            # Кнопка GitHub-формы
+            request_btn = ActionButton(
+                tr_catalog("page.z2_direct.request.button", language=self._ui_language, default="ОТКРЫТЬ ФОРМУ НА GITHUB"),
+                "fa5b.github",
             )
-            self._telegram_btn = telegram_btn
-            telegram_btn.setFixedHeight(36)
-            telegram_btn.clicked.connect(self._open_custom_domains)
-            telegram_layout.addWidget(telegram_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self._request_btn = request_btn
+            request_btn.setFixedHeight(36)
+            request_btn.clicked.connect(self._open_category_request_form)
+            request_layout.addWidget(request_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-            telegram_card.add_layout(telegram_layout)
-            self.content_layout.addWidget(telegram_card)
-            _log_startup_z2_direct_metric("_build_content.telegram_card", (_time.perf_counter() - _t_telegram) * 1000)
+            request_card.add_layout(request_layout)
+            self.content_layout.addWidget(request_card)
+            _log_startup_z2_direct_metric("_build_content.request_card", (_time.perf_counter() - _t_request_link) * 1000)
 
             # Панель действий (toolbar)
             _t_toolbar = _time.perf_counter()
@@ -647,20 +652,20 @@ class Zapret2StrategiesPageNew(BasePage):
                 tr_catalog("page.z2_direct.back.control", language=self._ui_language, default="Управление")
             )
 
-        if self._telegram_hint_label is not None:
-            self._telegram_hint_label.setText(
+        if self._request_hint_label is not None:
+            self._request_hint_label.setText(
                 tr_catalog(
-                    "page.z2_direct.telegram.hint",
+                    "page.z2_direct.request.hint",
                     language=self._ui_language,
                     default=(
-                        "Хотите добавить новый сайт или сервис в direct preset? Напишите нам. "
-                        "Запрос можно оставить на сайте-форуме в разделе Zapret GUI."
+                        "Хотите добавить новый сайт или сервис в Zapret 2? "
+                        "Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset."
                     ),
                 )
             )
-        if self._telegram_btn is not None:
-            self._telegram_btn.setText(
-                tr_catalog("page.z2_direct.telegram.button", language=self._ui_language, default="ОТКРЫТЬ TELEGRAM БОТА")
+        if self._request_btn is not None:
+            self._request_btn.setText(
+                tr_catalog("page.z2_direct.request.button", language=self._ui_language, default="ОТКРЫТЬ ФОРМУ НА GITHUB")
             )
         if self._expand_btn is not None:
             self._expand_btn.setText(
@@ -677,7 +682,8 @@ class Zapret2StrategiesPageNew(BasePage):
 
         self._update_current_strategies_display()
 
-    def _open_custom_domains(self):
-        """Открывает пост в Telegram для запроса добавления сайтов"""
-        from config.telegram_links import open_telegram_link
-        open_telegram_link("bypassblock", post=1359)
+    def _open_category_request_form(self):
+        """Открывает GitHub-форму запроса на добавление сайтов в hostlist/ipset."""
+        import webbrowser
+
+        webbrowser.open(_CATEGORY_REQUEST_FORM_URL)

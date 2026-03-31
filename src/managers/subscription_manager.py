@@ -307,7 +307,7 @@ class SubscriptionManager:
 
                 def run(self):
                     try:
-                        activation_info = self.donate_checker.check_device_activation(use_cache=False)
+                        activation_info = self.donate_checker.check_device_activation(use_cache=False, automatic=True)
                         self.finished.emit(activation_info, True, "")
                     except Exception as e:
                         self.finished.emit(None, False, str(e))

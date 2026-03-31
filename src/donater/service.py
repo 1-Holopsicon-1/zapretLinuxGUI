@@ -15,7 +15,8 @@ try:
     from config._build_secrets import PREMIUM_API_BASE_URL as API_BASE_URL
 except ImportError:
     API_BASE_URL = ""
-REQUEST_TIMEOUT = 10
+REQUEST_TIMEOUT = 5
+AUTO_NETWORK_RETRY_COOLDOWN_SEC = 30
 
 
 class PremiumService:
@@ -107,10 +108,46 @@ class PremiumService:
             PremiumStorage.save_last_check()
             return True
 
-    def check_status(self, *, allow_network: bool = True) -> ActivationStatus:
+    def check_status(self, *, allow_network: bool = True, automatic: bool = False) -> ActivationStatus:
         with self._lock:
             device_id = PremiumStorage.get_device_id()
             device_token = PremiumStorage.get_device_token() or ""
+            network_cooldown_active = False
+
+            def _apply_network_health(raw_any: Any) -> None:
+                if not isinstance(raw_any, dict):
+                    return
+
+                http = raw_any.get("_http_status")
+                http_i = 0
+                try:
+                    http_i = int(str(http))
+                except Exception:
+                    http_i = 0
+
+                if http_i > 0:
+                    PremiumStorage.clear_last_network_failure()
+                    return
+
+                if str(raw_any.get("error") or "").strip() == "Ошибка сети":
+                    PremiumStorage.save_last_network_failure_now()
+
+            if allow_network and automatic:
+                last_failure_ts = PremiumStorage.get_last_network_failure_ts() or 0
+                now_ts = int(time.time())
+                if last_failure_ts > 0 and (now_ts - last_failure_ts) < AUTO_NETWORK_RETRY_COOLDOWN_SEC:
+                    allow_network = False
+                    network_cooldown_active = True
+                    try:
+                        from log import log
+
+                        remaining = AUTO_NETWORK_RETRY_COOLDOWN_SEC - max(0, now_ts - last_failure_ts)
+                        log(
+                            f"Premium auto-check skipped: recent network failure cooldown ({remaining}s left)",
+                            "DEBUG",
+                        )
+                    except Exception:
+                        pass
 
             def _format_api_error(raw_any: Any, *, ctx: str) -> Optional[str]:
                 if not isinstance(raw_any, dict):
@@ -149,6 +186,7 @@ class PremiumService:
             if allow_network and has_pending_code:
                 raw2, nonce2 = self._api.post_pair_finish(device_id=device_id, pair_code=str(code))
                 if raw2:
+                    _apply_network_health(raw2)
                     pair_error_message = _format_api_error(raw2, ctx="pair_finish")
                     signed2 = verify_signed_response(raw2, expected_device_id=device_id, expected_nonce=nonce2)
                     if signed2 and signed2.get("type") == "zapret_premium_activation":
@@ -227,7 +265,10 @@ class PremiumService:
 
                 msg = pair_error_message
                 if not msg:
-                    msg = "Ожидание привязки" if has_pending_code else "Устройство не привязано"
+                    if network_cooldown_active:
+                        msg = "Недавняя ошибка сети, используем кэш"
+                    else:
+                        msg = "Ожидание привязки" if has_pending_code else "Устройство не привязано"
 
                 return ActivationStatus(
                     is_activated=False,
@@ -243,6 +284,7 @@ class PremiumService:
                 raw, nonce = self._api.post_check(device_id=device_id, device_token=device_token)
 
                 if isinstance(raw, dict):
+                    _apply_network_health(raw)
                     # If server replied with an error (e.g. HTTP 400), surface it to UI/logs.
                     http = raw.get("_http_status")
                     http_i = 0
@@ -315,6 +357,8 @@ class PremiumService:
                         api_error_message = "Некорректный ответ сервера"
                         if http2:
                             api_error_message += f" (HTTP {http2})"
+            elif network_cooldown_active:
+                api_error_message = "Недавняя ошибка сети, используем кэш"
 
             if api_error_message:
                 try:
@@ -371,8 +415,8 @@ class PremiumService:
             )
 
     # Back-compat helpers used around the app:
-    def check_device_activation(self, *, use_cache: bool = False) -> Dict[str, Any]:
-        st = self.check_status(allow_network=not use_cache)
+    def check_device_activation(self, *, use_cache: bool = False, automatic: bool = False) -> Dict[str, Any]:
+        st = self.check_status(allow_network=not use_cache, automatic=automatic)
         found = st.is_linked if st.is_linked is not None else (PremiumStorage.get_device_token() is not None)
         return {
             "found": found,
@@ -385,8 +429,8 @@ class PremiumService:
             "subscription_level": st.subscription_level,
         }
 
-    def get_full_subscription_info(self, *, use_cache: bool = False) -> Dict[str, Any]:
-        info = self.check_device_activation(use_cache=use_cache)
+    def get_full_subscription_info(self, *, use_cache: bool = False, automatic: bool = False) -> Dict[str, Any]:
+        info = self.check_device_activation(use_cache=use_cache, automatic=automatic)
         is_premium = bool(info.get("activated"))
         status_msg = info.get("status") or ("Premium активен" if is_premium else "Не активировано")
         return {

@@ -1779,18 +1779,18 @@ class Zapret2UserPresetsPage(BasePage):
         tokens = get_theme_tokens()
         semantic = get_semantic_palette(tokens.theme_name)
 
-        # Telegram configs link
+        # Presets community link
         configs_card = SettingsCard()
         configs_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         configs_layout = QHBoxLayout()
         configs_layout.setSpacing(12)
         self._configs_icon = QLabel()
-        self._configs_icon.setPixmap(qta.icon("fa5b.telegram", color=tokens.accent_hex).pixmap(18, 18))
+        self._configs_icon.setPixmap(qta.icon("fa5b.github", color=tokens.accent_hex).pixmap(18, 18))
         configs_layout.addWidget(self._configs_icon)
         configs_title = StrongBodyLabel(
             self._tr(
                 "page.z2_user_presets.configs.title",
-                "Обменивайтесь категориями на нашем форуме-сайте через Telegram-бота: безопасно и анонимно",
+                "Обменивайтесь пресетами и категориями в разделе GitHub Discussions",
             )
         )
         self._configs_title_label = configs_title
@@ -1984,7 +1984,7 @@ class Zapret2UserPresetsPage(BasePage):
             semantic = get_semantic_palette(tokens.theme_name)
 
             if getattr(self, "_configs_icon", None) is not None:
-                self._configs_icon.setPixmap(qta.icon("fa5b.telegram", color=tokens.accent_hex).pixmap(18, 18))
+                self._configs_icon.setPixmap(qta.icon("fa5b.github", color=tokens.accent_hex).pixmap(18, 18))
 
             # _restore_deleted_btn is ActionButton — self-styling, skip explicit update
 
@@ -3045,16 +3045,16 @@ class Zapret2UserPresetsPage(BasePage):
 
     def _open_new_configs_post(self):
         try:
-            from config.telegram_links import open_telegram_link
+            from core.direct_flow import DirectFlowCoordinator
 
-            open_telegram_link("bypassblock", post=1359)
+            webbrowser.open(DirectFlowCoordinator.PRESETS_DOWNLOAD_URL)
         except Exception as e:
-            log(f"Ошибка открытия Telegram: {e}", "ERROR")
+            log(f"Ошибка открытия страницы пресетов: {e}", "ERROR")
             InfoBar.warning(
                 title=self._tr("common.error.title", "Ошибка"),
                 content=self._tr(
                     "page.z2_user_presets.error.open_telegram",
-                    "Не удалось открыть Telegram: {error}",
+                    "Не удалось открыть страницу пресетов: {error}",
                     error=e,
                 ),
                 parent=self.window(),
@@ -3072,7 +3072,7 @@ class Zapret2UserPresetsPage(BasePage):
             self._configs_title_label.setText(
                 self._tr(
                     "page.z2_user_presets.configs.title",
-                    "Обменивайтесь категориями на нашем форуме-сайте через Telegram-бота: безопасно и анонимно",
+                    "Обменивайтесь пресетами и категориями в разделе GitHub Discussions",
                 )
             )
         if self._get_configs_btn is not None:
