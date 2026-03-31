@@ -48,6 +48,7 @@ import qtawesome as qta
 
 from ui.pages.base_page import BasePage
 from ui.compat_widgets import ActionButton, SettingsCard, LineEdit, set_tooltip
+from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 
 try:
@@ -55,7 +56,7 @@ try:
         BodyLabel, CaptionLabel, StrongBodyLabel, SubtitleLabel,
         PushButton as FluentPushButton, PrimaryPushButton, ToolButton, PrimaryToolButton,
         MessageBox, InfoBar, MessageBoxBase, TransparentToolButton, TransparentPushButton, FluentIcon,
-        RoundMenu, Action,
+        RoundMenu, Action, IndeterminateProgressRing,
     )
     _HAS_FLUENT_LABELS = True
 except ImportError:
@@ -75,6 +76,7 @@ except ImportError:
     FluentIcon = None
     RoundMenu = None
     Action = None
+    IndeterminateProgressRing = None
     _HAS_FLUENT_LABELS = False
 
 
@@ -1307,6 +1309,12 @@ class Zapret2UserPresetsPage(BasePage):
 
         self._ui_initialized = False
         self._lazy_show_scheduled = False
+        self._ui_state_store: Optional[MainWindowStateStore] = None
+        self._ui_state_unsubscribe = None
+        self._last_ui_state = AppUiState()
+        self._restart_indicator_card = None
+        self._restart_indicator_spinner = None
+        self._restart_indicator_label = None
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         return _tr_text(key, self._ui_language, default, **kwargs)
@@ -1343,6 +1351,33 @@ class Zapret2UserPresetsPage(BasePage):
         target = "preset_orchestra_zapret2" if not module_suffix else f"preset_orchestra_zapret2.{module_suffix}"
         module = importlib.import_module(target)
         return getattr(module, attr_name)
+
+    def _supports_runtime_restart_indicator(self, state: AppUiState) -> bool:
+        return str(state.launch_method or "").strip().lower() == "direct_zapret2"
+
+    def _restart_indicator_engine_name(self) -> str:
+        return "winws2"
+
+    def _format_runtime_restart_text(self, state: AppUiState) -> str:
+        engine_name = self._restart_indicator_engine_name()
+        busy_text = str(state.dpi_busy_text or "").strip().lower()
+        if "останов" in busy_text:
+            return self._tr(
+                "page.z2_user_presets.restart_indicator.stopping",
+                "Применяем новый пресет: останавливаем {engine_name}, чтобы перезапустить его с новыми параметрами.",
+                engine_name=engine_name,
+            )
+        if "запуск" in busy_text:
+            return self._tr(
+                "page.z2_user_presets.restart_indicator.starting",
+                "Применяем новый пресет: запускаем {engine_name} уже с обновлённой конфигурацией.",
+                engine_name=engine_name,
+            )
+        return self._tr(
+            "page.z2_user_presets.restart_indicator.default",
+            "Применяем новый пресет и перезапускаем {engine_name}. Подождите немного.",
+            engine_name=engine_name,
+        )
 
     def _get_preset_store(self):
         if self._is_orchestra_backend():
@@ -1656,6 +1691,8 @@ class Zapret2UserPresetsPage(BasePage):
         except Exception:
             pass
 
+        self._sync_runtime_restart_indicator()
+
         self._ui_initialized = True
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         log(f"Z2UserPresetsPage: lazy ui init {elapsed_ms}ms", "DEBUG")
@@ -1674,6 +1711,56 @@ class Zapret2UserPresetsPage(BasePage):
         else:
             self._update_presets_view_height()
         self._schedule_layout_resync(include_delayed=True)
+
+    def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
+        if self._ui_state_store is store:
+            return
+
+        unsubscribe = getattr(self, "_ui_state_unsubscribe", None)
+        if callable(unsubscribe):
+            try:
+                unsubscribe()
+            except Exception:
+                pass
+
+        self._ui_state_store = store
+        self._ui_state_unsubscribe = store.subscribe(
+            self._on_ui_state_changed,
+            fields={"dpi_busy", "dpi_busy_text", "launch_method"},
+            emit_initial=True,
+        )
+
+    def _on_ui_state_changed(self, state: AppUiState, _changed_fields: frozenset[str]) -> None:
+        self._last_ui_state = state
+        self._sync_runtime_restart_indicator()
+
+    def _sync_runtime_restart_indicator(self) -> None:
+        card = getattr(self, "_restart_indicator_card", None)
+        label = getattr(self, "_restart_indicator_label", None)
+        spinner = getattr(self, "_restart_indicator_spinner", None)
+        if card is None or label is None:
+            return
+
+        state = getattr(self, "_last_ui_state", AppUiState())
+        should_show = bool(state.dpi_busy) and self._supports_runtime_restart_indicator(state)
+        if should_show:
+            label.setText(self._format_runtime_restart_text(state))
+            if spinner is not None:
+                try:
+                    spinner.show()
+                    spinner.start()
+                except Exception:
+                    pass
+            card.show()
+            return
+
+        if spinner is not None:
+            try:
+                spinner.stop()
+                spinner.hide()
+            except Exception:
+                pass
+        card.hide()
 
     def _schedule_layout_resync(self, include_delayed: bool = False):
         self._layout_resync_timer.start(0)
@@ -1809,6 +1896,35 @@ class Zapret2UserPresetsPage(BasePage):
         configs_layout.addWidget(get_configs_btn)
         configs_card.add_layout(configs_layout)
         self.add_widget(configs_card)
+
+        restart_card = SettingsCard()
+        restart_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        restart_layout = QHBoxLayout()
+        restart_layout.setSpacing(10)
+
+        restart_spinner = None
+        if IndeterminateProgressRing is not None:
+            restart_spinner = IndeterminateProgressRing(start=False)
+            restart_spinner.setFixedSize(18, 18)
+            restart_spinner.setStrokeWidth(2)
+            restart_spinner.hide()
+            restart_layout.addWidget(restart_spinner, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        restart_label = CaptionLabel(
+            self._tr(
+                "page.z2_user_presets.restart_indicator.default",
+                "Применяем новый пресет и перезапускаем winws2. Подождите немного.",
+            )
+        )
+        restart_label.setWordWrap(True)
+        restart_layout.addWidget(restart_label, 1)
+
+        restart_card.add_layout(restart_layout)
+        restart_card.hide()
+        self._restart_indicator_card = restart_card
+        self._restart_indicator_spinner = restart_spinner
+        self._restart_indicator_label = restart_label
+        self.add_widget(restart_card)
 
         # "Restore deleted presets" button
         self._restore_deleted_btn = ActionButton(
