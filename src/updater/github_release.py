@@ -14,6 +14,10 @@ import json
 import os
 import requests
 from log import log
+from .channel_utils import (
+    normalize_update_channel,
+    is_test_release_asset_name,
+)
 from .network_hints import maybe_log_disable_dpi_for_update
 from .proxy_bypass import request_get_bypass_proxy
 from config import LOGS_FOLDER
@@ -277,7 +281,7 @@ def get_all_releases_with_exe() -> List[Dict[str, Any]]:
     ✅ ОПТИМИЗИРОВАНО: 
     - Кэширует полный результат на 10 минут
     - НЕ делает отдельный запрос check_rate_limit()
-    - Максимум 2 страницы для dev канала (200 релизов = достаточно)
+    - Максимум 2 страницы для test канала (200 релизов = достаточно)
     """
     global _all_releases_cache
     
@@ -336,6 +340,7 @@ def get_all_releases_with_exe() -> List[Dict[str, Any]]:
                         "version": version_str,
                         "tag_name": release["tag_name"],
                         "update_url": exe_asset["browser_download_url"],
+                        "file_name": exe_asset["name"],
                         "release_notes": release.get("body", ""),
                         "prerelease": release.get("prerelease", False),
                         "name": release.get("name", ""),
@@ -377,6 +382,7 @@ def _get_cached_releases() -> List[Dict[str, Any]]:
                             "version": version_str,
                             "tag_name": release["tag_name"],
                             "update_url": exe_asset["browser_download_url"],
+                            "file_name": exe_asset["name"],
                             "release_notes": release.get("body", ""),
                             "prerelease": release.get("prerelease", False),
                             "name": release.get("name", ""),
@@ -391,11 +397,12 @@ def get_latest_release(channel: str) -> Optional[dict]:
     """
     Получает информацию о последнем релизе с GitHub.
     Для stable канала использует /releases/latest.
-    Для dev канала ищет самую новую версию среди ALL релизов с .exe файлами.
+    Для test канала ищет самую новую тестовую версию среди ALL релизов с .exe файлами.
     """
     # Загружаем кэш при первом запуске
     if not _github_cache:
         _load_persistent_cache()
+    channel = normalize_update_channel(channel)
     
     try:
         if channel == "stable":
@@ -419,21 +426,30 @@ def get_latest_release(channel: str) -> Optional[dict]:
                 "version": version_str,
                 "tag_name": release["tag_name"],
                 "update_url": exe_asset["browser_download_url"],
+                "file_name": exe_asset["name"],
                 "release_notes": release.get("body", ""),
                 "prerelease": False,
                 "name": release.get("name", ""),
                 "published_at": release.get("published_at", "")
             }
         else:
-            # Для dev канала получаем ВСЕ релизы и ищем самый новый
-            log("🔍 Получение всех dev релизов для поиска самого нового...", "🔁 UPDATE")
+            # Для test канала получаем все релизы и отбираем только test-кандидаты.
+            log("🔍 Получение всех test релизов для поиска самого нового...", "🔁 UPDATE")
             
             all_releases = get_all_releases_with_exe()
             if not all_releases:
                 log("❌ Не найдено релизов с .exe файлом", "🔁 UPDATE")
                 return None
+
+            filtered_releases = [
+                rel for rel in all_releases
+                if rel.get("prerelease") or is_test_release_asset_name(rel.get("file_name", ""))
+            ]
+            if not filtered_releases:
+                log("❌ Не найдено test релизов с .exe файлом", "🔁 UPDATE")
+                return None
             
-            log(f"📦 Найдено {len(all_releases)} релизов с .exe файлами", "🔁 UPDATE")
+            log(f"📦 Найдено {len(filtered_releases)} test релизов с .exe файлами", "🔁 UPDATE")
             
             # Сортируем по версии (от новой к старой)
             def version_key(rel):
@@ -442,17 +458,17 @@ def get_latest_release(channel: str) -> Optional[dict]:
                 except:
                     return version.parse("0.0.0")
             
-            all_releases.sort(key=version_key, reverse=True)
+            filtered_releases.sort(key=version_key, reverse=True)
             
             # Логируем первые 5 релизов для отладки
             log("🔝 Топ релизов по версии:", "🔁 UPDATE")
-            for i, rel in enumerate(all_releases[:5]):
+            for i, rel in enumerate(filtered_releases[:5]):
                 prerelease_mark = " (prerelease)" if rel.get("prerelease") else ""
                 log(f"   {i+1}. v{rel['version']}{prerelease_mark} - {rel.get('created_at', 'н/д')}", "🔁 UPDATE")
             
             # Возвращаем самый новый
-            latest = all_releases[0]
-            log(f"✅ Выбран самый новый dev релиз: {latest['version']} (prerelease: {latest.get('prerelease', False)})", "🔁 UPDATE")
+            latest = filtered_releases[0]
+            log(f"✅ Выбран самый новый test релиз: {latest['version']} (prerelease: {latest.get('prerelease', False)})", "🔁 UPDATE")
             
             return latest
             

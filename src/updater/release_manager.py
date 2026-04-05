@@ -26,10 +26,15 @@ from .github_release import (
     normalize_version, 
     is_rate_limited
 )
+from .channel_utils import (
+    normalize_update_channel,
+    is_test_update_channel,
+    get_channel_installer_name,
+)
 from .network_hints import maybe_log_disable_dpi_for_update
 from .proxy_bypass import request_get_bypass_proxy
 from log import log
-from config import CHANNEL, LOGS_FOLDER
+from config import LOGS_FOLDER
 
 # Отключаем предупреждения SSL для самоподписанных сертификатов
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -148,11 +153,13 @@ class ReleaseManager:
         3. VPS серверы (резерв)
 
         Args:
-            channel: "stable" или "dev"
+            channel: "stable" или "test"
 
         Returns:
             Dict с информацией о релизе или None
         """
+        channel = normalize_update_channel(channel)
+
         # 1. GitHub API (быстрый CDN)
         result = self._try_github(channel)
         if result:
@@ -181,20 +188,20 @@ class ReleaseManager:
         Пытается получить информацию о релизе из Telegram
         
         Args:
-            channel: "stable" или "dev"
+            channel: "stable" или "test"
             
         Returns:
             Dict с информацией о релизе или None
         """
         try:
             from .telegram_updater import is_telegram_available, get_telegram_version_info
+            channel = normalize_update_channel(channel)
             
             if not is_telegram_available():
                 log("⏭️ Telegram недоступен (telethon не установлен)", "🔄 RELEASE")
                 return None
             
-            # Маппинг каналов (и 'dev' и 'test' → test-канал Telegram)
-            tg_channel = 'test' if channel in ('dev', 'test') else 'stable'
+            tg_channel = normalize_update_channel(channel)
             
             log(f"📱 Проверка обновлений через Telegram ({tg_channel})...", "🔄 RELEASE")
             
@@ -208,16 +215,14 @@ class ReleaseManager:
                 log(f"✅ Telegram: версия {version} ({response_time:.2f}с)", "🔄 RELEASE")
                 
                 # Формируем результат в стандартном формате
-                file_name = info.get('file_name') or (
-                    f"Zapret2Setup_TEST.exe" if channel == "dev" else "Zapret2Setup.exe"
-                )
+                file_name = info.get('file_name') or get_channel_installer_name(channel)
                 return {
                     "version": version,
                     "tag_name": f"v{version}",
                     "update_url": f"telegram://{info['channel']}",
                     "file_name": file_name,
                     "release_notes": "",
-                    "prerelease": channel == "dev",
+                    "prerelease": is_test_update_channel(channel),
                     "name": f"Zapret {version} ({channel})",
                     "published_at": info.get('date', ''),
                     "source": info['source'],
@@ -239,7 +244,7 @@ class ReleaseManager:
         Перебирает все доступные серверы, пропуская заблокированные.
         
         Args:
-            channel: "stable" или "dev"
+            channel: "stable" или "test"
             
         Returns:
             Dict с информацией о релизе или None
@@ -312,7 +317,7 @@ class ReleaseManager:
         Пытается получить релиз с конкретного URL
         
         Args:
-            channel: "stable" или "dev"
+            channel: "stable" или "test"
             server: Информация о сервере из пула
             url: Базовый URL сервера
             protocol: "HTTPS" или "HTTP"
@@ -430,8 +435,7 @@ class ReleaseManager:
                 return None
         
         # ✅ Теперь обрабатываем all_data (из кэша или из запроса)
-        # Преобразуем channel (dev -> test для API)
-        api_channel = "test" if channel == "dev" else channel
+        api_channel = normalize_update_channel(channel)
         
         if api_channel not in all_data or not all_data[api_channel]:
             error_msg = f"Канал {api_channel} не найден"
@@ -485,7 +489,7 @@ class ReleaseManager:
             "update_url": download_url,
             "file_name": file_name,
             "release_notes": data.get("release_notes", ""),
-            "prerelease": channel == "dev",
+            "prerelease": is_test_update_channel(channel),
             "name": f"Zapret {data.get('version', '0.0.0')} ({api_channel})",
             "published_at": data.get("date", ""),
             "source": server_name,
@@ -653,13 +657,14 @@ def get_latest_release(channel: str, use_cache: bool = True) -> Optional[Dict[st
     Получает информацию о последнем релизе с поддержкой кэширования
     
     Args:
-        channel: "stable" или "dev"
+        channel: "stable" или "test"
         use_cache: Использовать кэш (False для принудительной проверки)
         
     Returns:
         Dict с информацией о релизе или None
     """
     from .update_cache import UpdateCache
+    channel = normalize_update_channel(channel)
     
     # ✅ ПРОВЕРЯЕМ КЭШ только если use_cache=True
     if use_cache:
@@ -697,7 +702,8 @@ def invalidate_cache(channel: Optional[str] = None):
         channel: Конкретный канал или None для очистки всего
     """
     from .update_cache import UpdateCache
-    UpdateCache.invalidate(channel)
+    normalized_channel = normalize_update_channel(channel) if channel is not None else None
+    UpdateCache.invalidate(normalized_channel)
     log(f"🗑️ Кэш {'канала ' + channel if channel else 'всех каналов'} очищен", "🔄 CACHE")
 
 
@@ -706,12 +712,13 @@ def get_cache_info(channel: str) -> Optional[Dict[str, Any]]:
     Возвращает информацию о состоянии кэша
     
     Args:
-        channel: "stable" или "dev"
+        channel: "stable" или "test"
         
     Returns:
         Dict с информацией о кэше или None
     """
     from .update_cache import UpdateCache, CACHE_DURATION
+    channel = normalize_update_channel(channel)
     
     age = UpdateCache.get_cache_age(channel)
     if age is None:

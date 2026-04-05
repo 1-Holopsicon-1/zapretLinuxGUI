@@ -1,5 +1,5 @@
-# Preset: ALL TCP & UDP v3_2
-# TemplateOrigin: ALL TCP & UDP v3_2
+# Preset: ALL TCP & UDP fake_tls_auto_11
+# TemplateOrigin: ALL TCP & UDP fake_tls_auto_11
 # BuiltinVersion: 2.18
 # Created: 2026-01-30T14:17:56.182141
 # Description: 
@@ -86,10 +86,10 @@
 --ipset-exclude=lists/ipset-ru.txt
 --ipset-exclude=lists/ipset-dns.txt
 --ipset-exclude=lists/ipset-exclude.txt
---out-range=-d8
---lua-desync=send:repeats=2
---lua-desync=syndata:blob=tls_google
---lua-desync=pktmod:tcp_flags_unset=ack
+--out-range=-n8
+--lua-desync=fake:blob=0x00000000:repeats=11:tcp_ack=-66000:tcp_ts_up
+--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:repeats=11:tcp_ack=-66000:tcp_ts_up
+--lua-desync=multidisorder_legacy:pos=1,midsld:repeats=11
 
 --new
 

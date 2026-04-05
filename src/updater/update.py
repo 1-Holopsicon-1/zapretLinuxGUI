@@ -17,6 +17,7 @@ from utils import run_hidden, get_system_exe
 
 from .release_manager import get_latest_release
 from .github_release import normalize_version
+from .channel_utils import is_test_update_channel
 from config import CHANNEL, APP_VERSION
 from log import log
 from .rate_limiter import UpdateRateLimiter
@@ -614,8 +615,8 @@ class UpdateWorker(QObject):
                 self._emit(error_msg)
                 log(f"⏱️ Проверка заблокирована rate limiter: {error_msg}", "🔁 UPDATE")
                 
-                # Для ручных проверок показываем сообщение (кроме dev/test версий)
-                if not self._silent and CHANNEL not in ('dev', 'test'):
+                # Для ручных проверок показываем сообщение только в stable-канале.
+                if not self._silent and not is_test_update_channel(CHANNEL):
                     self.show_no_updates.emit(f"Rate limit: {error_msg}")
                 
                 return False

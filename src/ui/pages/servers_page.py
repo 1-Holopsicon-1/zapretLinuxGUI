@@ -47,6 +47,7 @@ from log import log
 from updater.telegram_updater import TELEGRAM_CHANNELS
 from config.telegram_links import open_telegram_link
 from updater.github_release import normalize_version
+from updater.channel_utils import normalize_update_channel, is_test_update_channel
 from updater.rate_limiter import UpdateRateLimiter
 
 
@@ -458,7 +459,7 @@ class ServerCheckWorker(QThread):
 
             if is_telegram_available():
                 start_time = _time.time()
-                tg_channel = 'test' if CHANNEL in ('dev', 'test') else 'stable'
+                tg_channel = normalize_update_channel(CHANNEL)
                 tg_info = get_telegram_version_info(tg_channel)
                 response_time = _time.time() - start_time
 
@@ -693,7 +694,7 @@ class VersionCheckWorker(QThread):
 
         if not all_versions:
             from updater.release_manager import get_latest_release
-            for channel in ['stable', 'dev']:
+            for channel in ['stable', 'test']:
                 try:
                     release = get_latest_release(channel, use_cache=False)
                     if release:
@@ -705,7 +706,7 @@ class VersionCheckWorker(QThread):
             self.complete.emit()
             return
 
-        channel_mapping = {'stable': 'stable', 'dev': 'test'}
+        channel_mapping = {'stable': 'stable', 'test': 'test'}
 
         for ui_channel, api_channel in channel_mapping.items():
             data = all_versions.get(api_channel, {})
@@ -1295,7 +1296,7 @@ class ServersPage(BasePage):
 
         if server_name == 'Telegram Bot':
             if status.get('status') == 'online':
-                if CHANNEL in ('dev', 'test'):
+                if is_test_update_channel(CHANNEL):
                     extra = self._tr("page.servers.table.versions.test_template", "T: {version}").format(
                         version=status.get('test_version', '—')
                     )
@@ -1597,7 +1598,7 @@ class ServersPage(BasePage):
         self.server_worker.start()
 
     def _get_candidate_version_and_notes(self, status: dict) -> tuple[str | None, str]:
-        if CHANNEL in ("dev", "test"):
+        if is_test_update_channel(CHANNEL):
             raw_version = status.get("test_version")
             notes = status.get("test_notes", "") or ""
         else:
@@ -1680,18 +1681,17 @@ class ServersPage(BasePage):
         self.version_worker.start()
 
     def _on_version_found(self, channel: str, version_info: dict):
-        if channel == 'stable' or (channel == 'dev' and CHANNEL in ('dev', 'test')):
-            target_channel = 'dev' if CHANNEL in ('dev', 'test') else 'stable'
-            if channel == target_channel and not version_info.get('error'):
-                version = version_info.get('version', '')
-                from updater.update import compare_versions
-                try:
-                    if compare_versions(APP_VERSION, version) < 0:
-                        self._found_update = True
-                        self._remote_version = version
-                        self._release_notes = version_info.get('release_notes', '')
-                except Exception:
-                    pass
+        target_channel = 'test' if is_test_update_channel(CHANNEL) else 'stable'
+        if channel in {'stable', 'test'} and channel == target_channel and not version_info.get('error'):
+            version = version_info.get('version', '')
+            from updater.update import compare_versions
+            try:
+                if compare_versions(APP_VERSION, version) < 0:
+                    self._found_update = True
+                    self._remote_version = version
+                    self._release_notes = version_info.get('release_notes', '')
+            except Exception:
+                pass
 
     def _on_versions_complete(self):
         self._checking = False
@@ -1792,7 +1792,7 @@ class ServersPage(BasePage):
         self.update_card.show_deferred(self._remote_version)
 
     def _open_telegram_channel(self):
-        open_telegram_link("zapretnetdiscordyoutube")
+        open_telegram_link("zapretguidev" if is_test_update_channel(CHANNEL) else "zapretnetdiscordyoutube")
 
     def _on_back_to_about(self):
         try:

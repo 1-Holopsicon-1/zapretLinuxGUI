@@ -9,6 +9,7 @@ import time
 from typing import Optional, Dict, Any
 from config import LOGS_FOLDER
 from log import log
+from .channel_utils import normalize_update_channel
 
 CACHE_FILE = os.path.join(LOGS_FOLDER, '.update_cache.json')
 CACHE_DURATION = 3600  # 1 час (3600 секунд)
@@ -65,12 +66,13 @@ class UpdateCache:
         Возвращает закэшированный релиз если он актуален
         
         Args:
-            channel: "stable" или "dev"
+            channel: "stable" или "test"
             
         Returns:
             Dict с информацией о релизе или None
         """
         try:
+            channel = normalize_update_channel(channel)
             if not os.path.exists(CACHE_FILE):
                 return None
             
@@ -103,10 +105,11 @@ class UpdateCache:
         Сохраняет информацию о релизе в кэш
         
         Args:
-            channel: "stable" или "dev"
+            channel: "stable" или "test"
             release_info: Информация о релизе
         """
         try:
+            channel = normalize_update_channel(channel)
             # Загружаем существующий кэш
             cache = {}
             if os.path.exists(CACHE_FILE):
@@ -146,6 +149,7 @@ class UpdateCache:
                     os.remove(CACHE_FILE)
                     log("🗑️ Весь кэш обновлений очищен", "🔄 CACHE")
             else:
+                channel = normalize_update_channel(channel)
                 # Удаляем конкретный канал
                 if os.path.exists(CACHE_FILE):
                     with open(CACHE_FILE, 'r', encoding='utf-8') as f:
@@ -168,12 +172,13 @@ class UpdateCache:
         Возвращает возраст кэша в секундах
         
         Args:
-            channel: "stable" или "dev"
+            channel: "stable" или "test"
             
         Returns:
             Возраст в секундах или None если кэша нет
         """
         try:
+            channel = normalize_update_channel(channel)
             if not os.path.exists(CACHE_FILE):
                 return None
             
@@ -195,12 +200,13 @@ class UpdateCache:
         Возвращает подробную информацию о кэше
         
         Args:
-            channel: "stable" или "dev"
+            channel: "stable" или "test"
             
         Returns:
             Dict с информацией о кэше или None
         """
         try:
+            channel = normalize_update_channel(channel)
             if not os.path.exists(CACHE_FILE):
                 return None
             
