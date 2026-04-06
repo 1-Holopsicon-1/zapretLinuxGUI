@@ -19,6 +19,7 @@ from typing import Optional
 from log import log
 from launcher_common.runner_base import StrategyRunnerBase
 from launcher_common.preset_runner_support import (
+    controller_transition_in_progress,
     ConfigFileWatcher,
     PreparedPresetArtifact,
     PresetRunnerState,
@@ -26,6 +27,7 @@ from launcher_common.preset_runner_support import (
     is_process_alive_with_expected_name,
     launch_args_from_preset_text,
     notify_ui_launch_error,
+    publish_runner_runtime_state,
     preset_cache_key,
     remember_cache_entry,
     wait_for_process_exit,
@@ -213,6 +215,13 @@ class StrategyRunnerV2(StrategyRunnerBase):
             f"Runner state: {snapshot.state.value} "
             f"(gen={snapshot.generation}, reason={snapshot.reason}, preset={snapshot.preset_path})",
             "DEBUG",
+        )
+        publish_runner_runtime_state(
+            launch_method="direct_zapret2",
+            state=state,
+            preset_path=preset_path,
+            pid=pid,
+            error=error,
         )
         return snapshot
 
@@ -509,6 +518,9 @@ class StrategyRunnerV2(StrategyRunnerBase):
         Called when config file changes.
         Restarts process with new config.
         """
+        if controller_transition_in_progress("direct_zapret2"):
+            log("Hot-reload пропущен: controller уже выполняет transition для direct_zapret2", "DEBUG")
+            return
         log("Hot-reload triggered: config file changed", "INFO")
 
         with self._state_lock:

@@ -17,6 +17,7 @@ from log import log
 from launcher_common.constants import CREATE_NO_WINDOW
 from launcher_common.runner_base import StrategyRunnerBase
 from launcher_common.preset_runner_support import (
+    controller_transition_in_progress,
     ConfigFileWatcher,
     PreparedPresetArtifact,
     PresetRunnerState,
@@ -24,6 +25,7 @@ from launcher_common.preset_runner_support import (
     is_process_alive_with_expected_name,
     launch_args_from_preset_text,
     notify_ui_launch_error,
+    publish_runner_runtime_state,
     preset_cache_key,
     remember_cache_entry,
     wait_for_process_exit,
@@ -95,10 +97,20 @@ class StrategyRunnerV1(StrategyRunnerBase):
             f"(gen={snapshot.generation}, reason={snapshot.reason}, preset={snapshot.preset_path})",
             "DEBUG",
         )
+        publish_runner_runtime_state(
+            launch_method="direct_zapret1",
+            state=state,
+            preset_path=preset_path,
+            pid=pid,
+            error=error,
+        )
         return snapshot
 
     def _on_config_changed(self) -> None:
         """Called when the launch preset file changes. Performs full restart."""
+        if controller_transition_in_progress("direct_zapret1"):
+            log("Hot-reload пропущен: controller уже выполняет transition для direct_zapret1", "DEBUG")
+            return
         log("Launch preset file changed, restarting winws.exe...", "INFO")
         try:
             with self._state_lock:

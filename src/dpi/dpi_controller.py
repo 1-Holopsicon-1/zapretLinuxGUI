@@ -613,12 +613,102 @@ class DPIController:
         self._restart_completed_generation = 0
         self._restart_pending_stop_generation = 0
         self._restart_active_start_generation = 0
+        self._restart_runner_wait_queued = False
+        self._direct_switch_runner_wait_queued = False
         # Generation token for async start verification.
         # Prevents stale QTimer checks from previous start attempts.
         self._dpi_start_verify_generation = 0
 
     def _runtime_service(self):
         return getattr(self.app, "dpi_runtime_service", None)
+
+    def transition_pipeline_in_progress(self, launch_method: str | None = None) -> bool:
+        method = str(launch_method or "").strip().lower()
+
+        try:
+            if self._dpi_start_thread and self._dpi_start_thread.isRunning():
+                return True
+        except RuntimeError:
+            self._dpi_start_thread = None
+
+        try:
+            if self._dpi_stop_thread and self._dpi_stop_thread.isRunning():
+                return True
+        except RuntimeError:
+            self._dpi_stop_thread = None
+
+        try:
+            if self._direct_preset_switch_thread and self._direct_preset_switch_thread.isRunning():
+                if not method or method in {"direct_zapret1", "direct_zapret2"}:
+                    return True
+        except RuntimeError:
+            self._direct_preset_switch_thread = None
+
+        if int(self._restart_request_generation or 0) > int(self._restart_completed_generation or 0):
+            return True
+        if int(self._restart_active_start_generation or 0) > 0:
+            return True
+        if int(self._restart_pending_stop_generation or 0) > 0:
+            return True
+        if int(self._direct_preset_switch_requested_generation or 0) > int(self._direct_preset_switch_completed_generation or 0):
+            if not method or method in {"direct_zapret1", "direct_zapret2"}:
+                return True
+
+        return False
+
+    @staticmethod
+    def _is_runner_transition_state(state_value: object) -> bool:
+        return str(state_value or "").strip().lower() in {"starting", "stopping"}
+
+    def _runner_transition_in_progress(self, *, launch_method: str | None = None) -> bool:
+        try:
+            from launcher_common import get_current_runner
+
+            runner = get_current_runner()
+            if runner is None:
+                return False
+
+            if launch_method:
+                try:
+                    from config import get_winws_exe_for_method
+
+                    expected_name = os.path.basename(get_winws_exe_for_method(str(launch_method or "").strip().lower())).strip().lower()
+                    runner_name = os.path.basename(str(getattr(runner, "winws_exe", "") or "")).strip().lower()
+                    if expected_name and runner_name and expected_name != runner_name:
+                        return False
+                except Exception:
+                    pass
+
+            snapshot_getter = getattr(runner, "get_runner_state_snapshot", None)
+            if not callable(snapshot_getter):
+                return False
+
+            snapshot = snapshot_getter()
+            return self._is_runner_transition_state(getattr(snapshot, "state", ""))
+        except Exception:
+            return False
+
+    def _schedule_pending_restart_retry(self) -> None:
+        if self._restart_runner_wait_queued:
+            return
+        self._restart_runner_wait_queued = True
+
+        def _retry() -> None:
+            self._restart_runner_wait_queued = False
+            self._process_pending_restart_request()
+
+        QTimer.singleShot(200, _retry)
+
+    def _schedule_pending_direct_switch_retry(self) -> None:
+        if self._direct_switch_runner_wait_queued:
+            return
+        self._direct_switch_runner_wait_queued = True
+
+        def _retry() -> None:
+            self._direct_switch_runner_wait_queued = False
+            self._process_pending_direct_preset_switch()
+
+        QTimer.singleShot(200, _retry)
 
     def _handle_conflicting_processes_before_start(self) -> bool:
         conflicting = check_conflicting_processes()
@@ -913,6 +1003,14 @@ class DPIController:
         if launch_method not in ("direct_zapret1", "direct_zapret2"):
             return
 
+        if self._runner_transition_in_progress(launch_method=launch_method):
+            log(
+                f"Direct preset switch отложен: runner transition ещё идёт ({launch_method}), поколение {target_generation}",
+                "DEBUG",
+            )
+            self._schedule_pending_direct_switch_retry()
+            return
+
         try:
             if self._direct_preset_switch_thread and self._direct_preset_switch_thread.isRunning():
                 return
@@ -993,6 +1091,15 @@ class DPIController:
         if target_generation <= int(self._restart_completed_generation or 0):
             return
 
+        method = self._resolve_launch_method()
+        if self._runner_transition_in_progress(launch_method=method):
+            log(
+                f"Перезапуск DPI отложен: runner transition ещё идёт ({method}), актуальное поколение {target_generation}",
+                "DEBUG",
+            )
+            self._schedule_pending_restart_retry()
+            return
+
         try:
             if self._dpi_start_thread and self._dpi_start_thread.isRunning():
                 log(
@@ -1013,6 +1120,17 @@ class DPIController:
                 return
         except RuntimeError:
             self._dpi_stop_thread = None
+
+        try:
+            if self._direct_preset_switch_thread and self._direct_preset_switch_thread.isRunning():
+                log(
+                    f"Перезапуск DPI отложен: direct preset switch ещё идёт, актуальное поколение {target_generation}",
+                    "DEBUG",
+                )
+                self._schedule_pending_restart_retry()
+                return
+        except RuntimeError:
+            self._direct_preset_switch_thread = None
 
         if self.is_running():
             self._restart_pending_stop_generation = target_generation

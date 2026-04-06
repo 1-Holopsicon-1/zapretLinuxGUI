@@ -627,13 +627,12 @@ class PresetSubpageBase(BasePage):
 
     def _activate_selected_preset(self) -> bool:
         try:
-            from core.services import get_direct_flow_coordinator
+            from core.presets.direct_runtime_events import activate_direct_preset_file
 
             method = self._direct_launch_method()
             if not self._preset_file_name:
                 return False
-            get_direct_flow_coordinator().select_preset_file_name(method, self._preset_file_name)
-            self._notify_preset_switched()
+            activate_direct_preset_file(method, self._preset_file_name)
             return True
         except Exception:
             return False
@@ -643,28 +642,18 @@ class PresetSubpageBase(BasePage):
         if not self._preset_file_name:
             return
         try:
-            if method == "direct_zapret2":
-                from core.services import get_preset_store
+            from core.presets.direct_runtime_events import notify_direct_preset_switched
 
-                get_preset_store().notify_preset_switched(self._preset_file_name)
-            elif method == "direct_zapret1":
-                from core.services import get_preset_store_v1
-
-                get_preset_store_v1().notify_preset_switched(self._preset_file_name)
+            notify_direct_preset_switched(method, self._preset_file_name)
         except Exception:
             pass
 
     def _notify_preset_saved(self, file_name: str) -> None:
         try:
             method = self._direct_launch_method()
-            if method == "direct_zapret2":
-                from core.services import get_preset_store
+            from core.presets.direct_runtime_events import notify_direct_preset_saved
 
-                get_preset_store().notify_preset_saved(file_name)
-            elif method == "direct_zapret1":
-                from core.services import get_preset_store_v1
-
-                get_preset_store_v1().notify_preset_saved(file_name)
+            notify_direct_preset_saved(method, file_name)
         except Exception:
             pass
 

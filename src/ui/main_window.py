@@ -850,9 +850,14 @@ class MainWindowUI:
 
             def _reload_dpi():
                 try:
-                    page = self.get_loaded_page(PageName.ZAPRET1_DIRECT_CONTROL)
-                    if page and hasattr(page, "_reload_dpi"):
-                        page._reload_dpi()
+                    from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+
+                    request_direct_runtime_content_apply(
+                        self,
+                        launch_method="direct_zapret1",
+                        reason="target_settings_changed",
+                        target_key=target_key,
+                    )
                 except Exception:
                     pass
 

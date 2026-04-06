@@ -5,7 +5,9 @@ from typing import Callable, Optional
 
 from PyQt6.QtCore import QFileSystemWatcher, QTimer, QObject
 
+from launcher_common.preset_runner_support import publish_active_preset_content_changed
 from log import log
+from dpi.runtime_preset_switch_policy import request_runtime_preset_switch
 
 
 class PresetRuntimeCoordinator(QObject):
@@ -42,6 +44,7 @@ class PresetRuntimeCoordinator(QObject):
         self._active_preset_file_refresh_timer: QTimer | None = None
         self._preset_switch_refresh_timer: QTimer | None = None
         self._active_preset_file_path: str = ""
+        self._last_switched_preset_file_name: str = ""
 
     def setup_active_preset_file_watcher(self) -> None:
         watched_path = self._get_active_preset_path()
@@ -79,6 +82,7 @@ class PresetRuntimeCoordinator(QObject):
 
     def handle_preset_switched(self, preset_file_name: str) -> None:
         log(f"Пресет переключен: {preset_file_name}", "INFO")
+        self._last_switched_preset_file_name = str(preset_file_name or "").strip()
         self.setup_active_preset_file_watcher()
         self.request_dpi_restart_after_preset_switch()
         try:
@@ -92,18 +96,16 @@ class PresetRuntimeCoordinator(QObject):
 
     def request_dpi_restart_after_preset_switch(self) -> None:
         try:
-            if not self._is_dpi_running():
-                return
             launch_method = str(self._get_launch_method() or "").strip().lower()
-            if launch_method in {"direct_zapret1", "direct_zapret2"}:
-                log(
-                    f"DPI запущен - переключаем текущий direct пресет через выделенный pipeline ({launch_method})",
-                    "INFO",
-                )
-                self._switch_direct_preset_async(launch_method)
+            parent = self.parent()
+            if parent is None:
                 return
-            log("DPI запущен - запрашиваем перезапуск после смены пресета", "INFO")
-            self._restart_dpi_async()
+            request_runtime_preset_switch(
+                parent,
+                launch_method=launch_method,
+                reason="preset_switched",
+                preset_file_name=str(getattr(self, "_last_switched_preset_file_name", "") or ""),
+            )
         except Exception:
             return
 
@@ -134,10 +136,7 @@ class PresetRuntimeCoordinator(QObject):
             pass
 
         try:
-            parent = self.parent()
-            store = getattr(parent, "ui_state_store", None)
-            if store is not None:
-                store.bump_preset_content_revision()
+            publish_active_preset_content_changed(desired or path)
         except Exception:
             pass
 

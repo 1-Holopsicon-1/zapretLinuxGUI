@@ -463,7 +463,7 @@ class Zapret2StrategiesPageNew(BasePage):
         """Применяет выбор стратегии (вызывается из StrategyDetailPage)"""
         try:
             from core.presets.direct_facade import DirectPresetFacade
-            from dpi.zapret2_core_restart import trigger_dpi_reload
+            from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
 
             # Multi-phase TCP UI persists args directly (strategy_detail_page.py).
             # Avoid clobbering preset args by re-applying a non-existent single strategy.
@@ -476,8 +476,9 @@ class Zapret2StrategiesPageNew(BasePage):
             # Сохраняем в preset файл
             direct_facade = DirectPresetFacade.from_launch_method(
                 "direct_zapret2",
-                on_dpi_reload_needed=lambda: trigger_dpi_reload(
+                on_dpi_reload_needed=lambda: request_direct_runtime_content_apply(
                     self.parent_app,
+                    launch_method="direct_zapret2",
                     reason="strategy_changed"
                 )
             )
@@ -515,9 +516,10 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def _apply_changes(self):
         """Применяет изменения - перезапускает DPI если запущен"""
-        from dpi.zapret2_core_restart import trigger_dpi_reload
-        trigger_dpi_reload(
+        from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+        request_direct_runtime_content_apply(
             self.parent_app,
+            launch_method="direct_zapret2",
             reason="strategy_changed"
         )
 

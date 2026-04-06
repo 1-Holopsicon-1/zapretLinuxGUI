@@ -1486,9 +1486,13 @@ class DpiSettingsPage(BasePage):
             from strategy_menu import get_strategy_launch_method
             launch_method = get_strategy_launch_method()
 
-            if launch_method == "direct_zapret2":
-                from dpi.zapret2_core_restart import trigger_dpi_reload
-                trigger_dpi_reload(app, reason="settings_changed")
+            if launch_method in {"direct_zapret1", "direct_zapret2"}:
+                from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+                request_direct_runtime_content_apply(
+                    app,
+                    launch_method=str(launch_method or ""),
+                    reason="settings_changed",
+                )
                 return
 
             # Для остальных режимов (orchestra, zapret1, bat) - старая логика

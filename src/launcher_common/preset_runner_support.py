@@ -117,6 +117,10 @@ class ConfigFileWatcher:
                         log(f"Config file changed: {self._file_path}", "INFO")
                         self._last_mtime = current_mtime
                         try:
+                            publish_active_preset_content_changed(self._file_path)
+                        except Exception:
+                            pass
+                        try:
                             self._callback()
                         except Exception as e:
                             log(f"Error in config change callback: {e}", "ERROR")
@@ -213,6 +217,113 @@ class PresetRunnerStateMachine:
             reason=str(reason or ""),
         )
         return self._snapshot
+
+
+def publish_runner_runtime_state(
+    *,
+    launch_method: str,
+    state: PresetRunnerState,
+    preset_path: str = "",
+    pid: int | None = None,
+    error: str = "",
+) -> None:
+    """Best-effort bridge from runner state machine to GUI runtime state."""
+    if state not in {PresetRunnerState.STARTING, PresetRunnerState.RUNNING, PresetRunnerState.FAILED}:
+        return
+
+    method = str(launch_method or "").strip().lower()
+    if method not in {"direct_zapret1", "direct_zapret2"}:
+        return
+
+    payload = {
+        "launch_method": method,
+        "phase": state.value,
+        "preset_path": str(preset_path or "").strip(),
+        "pid": int(pid) if isinstance(pid, int) else None,
+        "error": str(error or "").strip(),
+    }
+
+    try:
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None:
+            return
+
+        target = app.activeWindow()
+        if target is None or not hasattr(target, "runner_runtime_state_requested"):
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, "runner_runtime_state_requested"):
+                    target = widget
+                    break
+
+        if target is not None and hasattr(target, "runner_runtime_state_requested"):
+            signal = getattr(target, "runner_runtime_state_requested", None)
+            if signal is not None:
+                signal.emit(dict(payload))
+    except Exception:
+        pass
+
+
+def publish_active_preset_content_changed(path: str) -> None:
+    """Best-effort bridge that reports active preset file content changes to the app."""
+    normalized_path = str(path or "").strip()
+    if not normalized_path:
+        return
+
+    try:
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None:
+            return
+
+        target = app.activeWindow()
+        if target is None or not hasattr(target, "active_preset_content_changed_requested"):
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, "active_preset_content_changed_requested"):
+                    target = widget
+                    break
+
+        if target is not None and hasattr(target, "active_preset_content_changed_requested"):
+            signal = getattr(target, "active_preset_content_changed_requested", None)
+            if signal is not None:
+                signal.emit(normalized_path)
+    except Exception:
+        pass
+
+
+def controller_transition_in_progress(launch_method: str) -> bool:
+    """Checks whether the main DPI controller is already applying a runtime transition."""
+    method = str(launch_method or "").strip().lower()
+    if method not in {"direct_zapret1", "direct_zapret2", "direct_zapret2_orchestra", "orchestra"}:
+        return False
+
+    try:
+        from PyQt6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None:
+            return False
+
+        target = app.activeWindow()
+        if target is None or not hasattr(target, "dpi_controller"):
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, "dpi_controller"):
+                    target = widget
+                    break
+
+        if target is None:
+            return False
+
+        controller = getattr(target, "dpi_controller", None)
+        checker = getattr(controller, "transition_pipeline_in_progress", None)
+        if callable(checker):
+            return bool(checker(method))
+    except Exception:
+        return False
+
+    return False
 
 
 def preset_cache_key(path: str) -> tuple[str, int, int] | None:

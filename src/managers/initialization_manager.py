@@ -118,8 +118,9 @@ class InitializationManager:
             self._finalize_managers_init,
         ]
 
-        if bool(getattr(self.app, "start_in_tray", False)):
-            phase_two_steps.append(self._init_tray)
+        # Native tray icon should be available for the whole app session,
+        # not only after explicit "hide to tray".
+        phase_two_steps.append(self._init_tray)
 
         phase_two_steps.append(self._init_logger)
 

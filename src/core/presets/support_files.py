@@ -53,7 +53,12 @@ def _prepare_direct_zapret2_support_files() -> None:
 
 
 def _prepare_direct_zapret1_support_files() -> None:
-    _ensure_v1_strategies_exist()
+    if not _ensure_v1_strategies_exist():
+        log(
+            "direct_zapret1 support strategies were not refreshed from bundle; "
+            "continuing with already installed APPDATA state",
+            "DEBUG",
+        )
     sync_repo_builtins_to_runtime_templates_v1()
     update_changed_v1_templates_in_presets()
     ensure_v1_templates_copied_to_presets()

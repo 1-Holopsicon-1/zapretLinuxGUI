@@ -359,6 +359,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
     finalize_ui_bootstrap_requested = pyqtSignal()
     startup_interactive_ready = pyqtSignal(str)
     startup_post_init_ready = pyqtSignal(str)
+    runner_runtime_state_requested = pyqtSignal(object)
+    active_preset_content_changed_requested = pyqtSignal(str)
 
     from ui.theme import ThemeHandler
     # ✅ ДОБАВЛЯЕМ TYPE HINTS для менеджеров
@@ -624,7 +626,7 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         QApplication.quit()
 
     def ensure_tray_manager(self):
-        """Создаёт tray manager по требованию, если пользователь уже выбрал сценарий трея."""
+        """Возвращает tray manager, создавая его только как аварийный fallback."""
         tray_manager = getattr(self, "tray_manager", None)
         if tray_manager is not None:
             return tray_manager
@@ -795,9 +797,13 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         self._startup_managers_ready_ms = None
         self._startup_post_init_done_logged = False
         self._startup_post_init_done_ms = None
+        self._last_active_preset_content_path = ""
+        self._last_active_preset_content_ms = 0
         self.deferred_init_requested.connect(self._deferred_init, Qt.ConnectionType.QueuedConnection)
         self.continue_startup_requested.connect(self._continue_deferred_init, Qt.ConnectionType.QueuedConnection)
         self.finalize_ui_bootstrap_requested.connect(self._finalize_ui_bootstrap, Qt.ConnectionType.QueuedConnection)
+        self.runner_runtime_state_requested.connect(self._apply_runner_runtime_state_update, Qt.ConnectionType.QueuedConnection)
+        self.active_preset_content_changed_requested.connect(self._apply_active_preset_content_changed, Qt.ConnectionType.QueuedConnection)
 
         # Show window right away (FluentWindow handles rendering)
         if not self.start_in_tray and not self.isVisible():
@@ -897,6 +903,79 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
             self.finish_ui_bootstrap()
         except Exception as e:
             log(f"Startup: finish_ui_bootstrap failed: {e}", "DEBUG")
+
+    def _apply_runner_runtime_state_update(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+
+        runtime_service = getattr(self, "dpi_runtime_service", None)
+        if runtime_service is None:
+            return
+
+        launch_method = str(payload.get("launch_method") or "").strip().lower()
+        if launch_method not in {"direct_zapret1", "direct_zapret2"}:
+            return
+
+        snapshot = runtime_service.snapshot()
+        current_method = str(snapshot.launch_method or "").strip().lower()
+        if current_method and current_method != launch_method and snapshot.phase in {"starting", "running", "autostart_pending"}:
+            return
+
+        try:
+            from config import get_winws_exe_for_method
+
+            expected_process = os.path.basename(get_winws_exe_for_method(launch_method)).strip().lower()
+        except Exception:
+            expected_process = snapshot.expected_process
+
+        preset_path = str(payload.get("preset_path") or "").strip()
+        pid = payload.get("pid")
+        error_text = str(payload.get("error") or "").strip()
+        phase = str(payload.get("phase") or "").strip().lower()
+
+        if phase == "starting":
+            runtime_service.begin_start(
+                launch_method=launch_method,
+                expected_process=expected_process,
+                expected_preset_path=preset_path,
+            )
+            return
+
+        if phase == "running":
+            runtime_service.mark_running(
+                pid=pid if isinstance(pid, int) else None,
+                expected_process=expected_process,
+                expected_preset_path=preset_path or snapshot.expected_preset_path,
+            )
+            return
+
+        if phase == "failed":
+            runtime_service.mark_start_failed(
+                error_text or "Запуск завершился ошибкой",
+            )
+
+    def _apply_active_preset_content_changed(self, path: str) -> None:
+        normalized_path = os.path.normcase(str(path or "").strip())
+        if not normalized_path:
+            return
+
+        now_ms = _startup_elapsed_ms()
+        if (
+            normalized_path == str(getattr(self, "_last_active_preset_content_path", "") or "")
+            and max(0, now_ms - int(getattr(self, "_last_active_preset_content_ms", 0) or 0)) < 500
+        ):
+            return
+
+        self._last_active_preset_content_path = normalized_path
+        self._last_active_preset_content_ms = now_ms
+
+        store = getattr(self, "ui_state_store", None)
+        if store is None:
+            return
+        try:
+            store.bump_preset_content_revision()
+        except Exception:
+            pass
 
     def _mark_startup_interactive(self, source: str = "ui_signals_connected") -> None:
         if self._startup_interactive_logged:

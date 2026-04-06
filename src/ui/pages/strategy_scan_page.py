@@ -1545,7 +1545,9 @@ class StrategyScanPage(BasePage):
             )
 
             facade.save_source_text_by_file_name(selected_file_name, updated_content)
-            get_preset_store().notify_preset_saved(selected_file_name)
+            from core.presets.direct_runtime_events import notify_direct_preset_saved
+
+            notify_direct_preset_saved("direct_zapret2", selected_file_name)
 
             InfoBarHelper.success(
                 self.window(),

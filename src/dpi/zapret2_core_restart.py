@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from main import LupiDPIApp
 
 from log import log
+from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
 
 
 def _is_direct_zapret2_mode() -> bool:
@@ -111,55 +112,16 @@ def trigger_dpi_reload(
     Returns:
         bool: True если перезапуск запущен, False если DPI не запущен или режим не direct_zapret2
     """
-    # 1. Проверяем режим
     if not _is_direct_zapret2_mode():
         log(f"trigger_dpi_reload пропущен: режим не direct_zapret2", "DEBUG")
         return False
 
-    # 2. Проверяем наличие dpi_controller
-    if not hasattr(app, 'dpi_controller') or not app.dpi_controller:
-        log("trigger_dpi_reload: dpi_controller не найден", "DEBUG")
-        return False
-
-    # 3. Проверяем запущен ли DPI
-    if not _is_dpi_running(app):
-        log(f"trigger_dpi_reload: DPI не запущен, перезапуск не требуется", "DEBUG")
-        return False
-
-    # 4. Проверяем наличие выбранного source-пресета с активными фильтрами
-    try:
-        from core.services import get_direct_flow_coordinator
-        preset_path = get_direct_flow_coordinator().get_selected_source_path("direct_zapret2")
-
-        if not preset_path.exists():
-            log("Preset файл не найден - останавливаем DPI", "WARNING")
-            app.dpi_controller.stop_dpi_async()
-            return True
-
-        # Проверяем наличие активных фильтров
-        content = preset_path.read_text(encoding='utf-8')
-        has_filters = any(f in content for f in ['--wf-tcp-out', '--wf-udp-out', '--wf-raw-part'])
-
-        if not has_filters:
-            log("Preset файл не содержит активных фильтров - останавливаем DPI", "INFO")
-            app.dpi_controller.stop_dpi_async()
-            return True
-
-    except Exception as e:
-        log(f"Ошибка проверки preset файла: {e}", "ERROR")
-        # Продолжаем - пусть hot-reload обработает
-
-    # 5. Hot-reload: ConfigFileWatcher автоматически перезапустит winws2.exe
-    #    когда обнаружит изменение launch preset file
-    #    Но если нужен немедленный перезапуск - делаем явно
-    target_info = f" [{target_key}]" if target_key else ""
-    log(f"DPI reload{target_info} (причина: {reason}) - hot-reload сработает автоматически", "INFO")
-
-    # Для немедленного эффекта можно явно перезапустить
-    # (hot-reload имеет задержку ~1 сек)
-    # app.dpi_controller.start_dpi_async()  # Закомментировано - полагаемся на hot-reload
-
-    return True
+    return request_direct_runtime_content_apply(
+        app,
+        launch_method="direct_zapret2",
+        reason=reason,
+        target_key=target_key,
+    )
 
 
 class DPIReloadDebouncer:

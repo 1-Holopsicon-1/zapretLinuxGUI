@@ -924,10 +924,11 @@ class StrategyDetailPage(BasePage):
             self.show_loading()
         except Exception:
             pass
-        from dpi.zapret2_core_restart import trigger_dpi_reload
+        from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
         if self.parent_app:
-            trigger_dpi_reload(
+            request_direct_runtime_content_apply(
                 self.parent_app,
+                launch_method="direct_zapret2",
                 reason="preset_settings_changed",
                 target_key=self._target_key
             )
@@ -2634,7 +2635,9 @@ class StrategyDetailPage(BasePage):
             updated = facade.rename_by_file_name(old_file_name, new_name)
             self._notify_preset_structure_changed()
             if facade.is_selected_file_name(updated.file_name):
-                store.notify_preset_switched(updated.file_name)
+                from core.presets.direct_runtime_events import notify_direct_preset_switched
+
+                notify_direct_preset_switched("direct_zapret2", updated.file_name)
             log(f"Пресет '{old_name}' переименован в '{new_name}'", "INFO")
             if InfoBar:
                 InfoBar.success(

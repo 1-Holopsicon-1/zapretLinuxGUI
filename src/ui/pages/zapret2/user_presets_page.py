@@ -1401,8 +1401,8 @@ class BaseZapret2UserPresetsPage(BasePage):
                 }
                 for item in facade.list_manifests()
             ]
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"Z2UserPresetsPage: не удалось загрузить lightweight список пресетов: {e}", "ERROR")
 
         return []
 
@@ -2082,7 +2082,9 @@ class BaseZapret2UserPresetsPage(BasePage):
             updated = facade.rename_by_file_name(current_name, new_name)
             shared_runtime.mark_presets_structure_changed(self)
             if facade.is_selected_file_name(updated.file_name):
-                self._get_preset_store().notify_preset_switched(updated.file_name)
+                from core.presets.direct_runtime_events import notify_direct_preset_switched
+
+                notify_direct_preset_switched("direct_zapret2", updated.file_name)
             log(f"Пресет '{display_name}' переименован в '{new_name}'", "INFO")
         except Exception as e:
             log(f"Ошибка переименования пресета: {e}", "ERROR")
@@ -2161,7 +2163,9 @@ class BaseZapret2UserPresetsPage(BasePage):
             shared_runtime.mark_presets_structure_changed(self)
             selected_file_name = facade.get_selected_file_name()
             if selected_file_name:
-                self._get_preset_store().notify_preset_switched(selected_file_name)
+                from core.presets.direct_runtime_events import notify_direct_preset_switched
+
+                notify_direct_preset_switched("direct_zapret2", selected_file_name)
             if failed:
                 log(
                     f"Восстановление заводских пресетов завершено частично: "
@@ -2397,10 +2401,9 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _on_activate_preset(self, name: str):
         try:
-            from core.services import get_direct_flow_coordinator
+            from core.presets.direct_runtime_events import activate_direct_preset_file
 
-            get_direct_flow_coordinator().select_preset_file_name("direct_zapret2", name)
-            self._get_preset_store().notify_preset_switched(name)
+            activate_direct_preset_file("direct_zapret2", name)
             activated = True
 
             if activated:
@@ -2528,9 +2531,14 @@ class BaseZapret2UserPresetsPage(BasePage):
 
             facade = self._get_direct_facade()
             facade.reset_to_template_by_file_name(name)
-            self._get_preset_store().notify_preset_saved(name)
+            from core.presets.direct_runtime_events import (
+                notify_direct_preset_saved,
+                notify_direct_preset_switched,
+            )
+
+            notify_direct_preset_saved("direct_zapret2", name)
             if facade.is_selected_file_name(name):
-                self._get_preset_store().notify_preset_switched(name)
+                notify_direct_preset_switched("direct_zapret2", name)
 
             log(f"Сброшен пресет '{display_name}' к шаблону", "INFO")
 
@@ -2660,7 +2668,9 @@ class BaseZapret2UserPresetsPage(BasePage):
             shared_runtime.mark_presets_structure_changed(self)
             selected_file_name = facade.get_selected_file_name()
             if selected_file_name:
-                self._get_preset_store().notify_preset_switched(selected_file_name)
+                from core.presets.direct_runtime_events import notify_direct_preset_switched
+
+                notify_direct_preset_switched("direct_zapret2", selected_file_name)
             log("Восстановлены удалённые пресеты", "INFO")
         except Exception as e:
             log(f"Ошибка восстановления удалённых пресетов: {e}", "ERROR")
@@ -2676,21 +2686,14 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _on_dpi_reload_needed(self):
         try:
-            widget = self
-            while widget:
-                if hasattr(widget, "dpi_controller"):
-                    widget.dpi_controller.restart_dpi_async()
-                    log("DPI перезапущен после смены пресета", "INFO")
-                    return
-                widget = widget.parent()
-
-            from PyQt6.QtWidgets import QApplication
-            for w in QApplication.topLevelWidgets():
-                if hasattr(w, "dpi_controller"):
-                    w.dpi_controller.restart_dpi_async()
-                    log("DPI перезапущен после смены пресета", "INFO")
-                    return
-
+            from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+            parent_app = getattr(self, "parent_app", None)
+            if parent_app is not None:
+                request_direct_runtime_content_apply(
+                    parent_app,
+                    launch_method="direct_zapret2",
+                    reason="user_preset_saved",
+                )
         except Exception as e:
             log(f"Ошибка перезапуска DPI: {e}", "ERROR")
 

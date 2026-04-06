@@ -973,13 +973,14 @@ class Zapret2DirectControlPage(BasePage):
         # so strategy ids are reinterpreted against the currently selected
         # basic/advanced catalogs without going through legacy registry reloads.
         try:
-            from dpi.zapret2_core_restart import trigger_dpi_reload
+            from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
             from core.presets.direct_facade import DirectPresetFacade
 
             facade = DirectPresetFacade.from_launch_method(
                 "direct_zapret2",
-                on_dpi_reload_needed=lambda: trigger_dpi_reload(
+                on_dpi_reload_needed=lambda: request_direct_runtime_content_apply(
                     self.parent_app,
+                    launch_method="direct_zapret2",
                     reason="direct_launch_mode_changed",
                 ),
             )
