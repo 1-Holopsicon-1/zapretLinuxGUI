@@ -58,11 +58,8 @@ class DPIManager(QObject):
             if method in {"direct_zapret1", "direct_zapret2"}:
                 from core.services import get_direct_flow_coordinator
 
-                preset = get_direct_flow_coordinator().get_selected_source_manifest(method)
-                preset_name = str(getattr(preset, "name", "") or "").strip()
-                if preset_name:
-                    return f"Пресет: {preset_name}"
-                return "Пресет"
+                snapshot = get_direct_flow_coordinator().get_startup_snapshot(method)
+                return str(snapshot.display_name or "").strip() or "Пресет"
 
             if method == "direct_zapret2_orchestra":
                 from preset_orchestra_zapret2 import get_active_preset_name

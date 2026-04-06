@@ -526,7 +526,7 @@ def collect_direct_strategy_args(app_instance) -> tuple[List[str], str, str]:
             try:
                 from core.services import get_direct_flow_coordinator
 
-                profile = get_direct_flow_coordinator().ensure_launch_profile(
+                snapshot = get_direct_flow_coordinator().get_startup_snapshot(
                     "direct_zapret2",
                     require_filters=False,
                 )
@@ -534,22 +534,22 @@ def collect_direct_strategy_args(app_instance) -> tuple[List[str], str, str]:
                 log(f"DirectZ2 autostart: {e}", "ERROR")
                 return [], "direct_zapret2", winws_exe
 
-            if not profile.launch_config_path.exists():
-                log(f"Выбранный source-пресет не найден: {profile.launch_config_path}", "❌ ERROR")
-                return [], profile.display_name, winws_exe
+            if not snapshot.preset_path.exists():
+                log(f"Выбранный source-пресет не найден: {snapshot.preset_path}", "❌ ERROR")
+                return [], snapshot.display_name, winws_exe
 
             # winws2.exe поддерживает загрузку аргументов из файла через формат @file.
             # Это сильно сокращает командную строку для задач/служб.
-            args = [f"@{profile.launch_config_path}"]
-            log(f"DirectZ2 autostart: используем выбранный source-пресет как @config: {profile.launch_config_path}", "INFO")
-            return args, profile.display_name, winws_exe
+            args = [f"@{snapshot.preset_path}"]
+            log(f"DirectZ2 autostart: используем выбранный source-пресет как @config: {snapshot.preset_path}", "INFO")
+            return args, snapshot.display_name, winws_exe
 
         # direct_zapret1: winws.exe загружается из выбранного source-пресета через @file
         if launch_method == "direct_zapret1":
             try:
                 from core.services import get_direct_flow_coordinator
 
-                profile = get_direct_flow_coordinator().ensure_launch_profile(
+                snapshot = get_direct_flow_coordinator().get_startup_snapshot(
                     "direct_zapret1",
                     require_filters=False,
                 )
@@ -557,13 +557,13 @@ def collect_direct_strategy_args(app_instance) -> tuple[List[str], str, str]:
                 log(f"DirectZ1 autostart: {e}", "ERROR")
                 return [], "direct_zapret1", winws_exe
 
-            if not profile.launch_config_path.exists():
-                log(f"DirectZ1 autostart: выбранный source-пресет не найден: {profile.launch_config_path}", "ERROR")
-                return [], profile.display_name, winws_exe
+            if not snapshot.preset_path.exists():
+                log(f"DirectZ1 autostart: выбранный source-пресет не найден: {snapshot.preset_path}", "ERROR")
+                return [], snapshot.display_name, winws_exe
 
-            args_v1 = [f"@{profile.launch_config_path}"]
-            log(f"DirectZ1 autostart: используем выбранный source-пресет как @config: {profile.launch_config_path}", "INFO")
-            return args_v1, profile.display_name, winws_exe
+            args_v1 = [f"@{snapshot.preset_path}"]
+            log(f"DirectZ1 autostart: используем выбранный source-пресет как @config: {snapshot.preset_path}", "INFO")
+            return args_v1, snapshot.display_name, winws_exe
 
         from legacy_registry_launch.selection_store import get_direct_strategy_selections
         from launcher_common import combine_strategies

@@ -19,6 +19,7 @@ from PyQt6.QtGui import QFont, QColor, QAction
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QHeaderView, QMenu
 
 from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
+from ui.popup_menu import exec_popup_menu
 from ui.support_request_actions import prepare_strategy_scan_support_request
 from ui.text_catalog import tr as tr_catalog
 
@@ -857,7 +858,11 @@ class StrategyScanPage(BasePage):
         if not menu.actions():
             return
 
-        menu.exec(self._quick_domain_btn.mapToGlobal(self._quick_domain_btn.rect().bottomLeft()))
+        exec_popup_menu(
+            menu,
+            self._quick_domain_btn.mapToGlobal(self._quick_domain_btn.rect().bottomLeft()),
+            owner=self,
+        )
 
     def _on_pick_quick_domain(self, domain: str) -> None:
         """Fill the domain field from quick picker."""

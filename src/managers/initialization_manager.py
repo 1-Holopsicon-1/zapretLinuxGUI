@@ -197,7 +197,7 @@ class InitializationManager:
                 from core.services import get_direct_flow_coordinator
 
                 try:
-                    get_direct_flow_coordinator().ensure_selected_source_path("direct_zapret2")
+                    get_direct_flow_coordinator().get_startup_snapshot("direct_zapret2")
                 except Exception as e:
                     log(
                         f"direct_zapret2: не удалось подготовить выбранный source-пресет: {e}",
@@ -215,7 +215,7 @@ class InitializationManager:
                 from core.services import get_direct_flow_coordinator
 
                 try:
-                    get_direct_flow_coordinator().ensure_selected_source_path("direct_zapret1")
+                    get_direct_flow_coordinator().get_startup_snapshot("direct_zapret1")
                 except Exception:
                     log("direct_zapret1: не удалось подготовить выбранный source-пресет", "ERROR")
 
@@ -398,7 +398,7 @@ class InitializationManager:
             from core.services import get_direct_flow_coordinator
 
             try:
-                get_direct_flow_coordinator().ensure_launch_profile(launch_method, require_filters=True)
+                get_direct_flow_coordinator().get_startup_snapshot(launch_method, require_filters=True)
             except Exception:
                 self._show_strategy_required_warning(for_bat=False)
                 self.app.set_status("⚠️ Выберите стратегию для запуска")

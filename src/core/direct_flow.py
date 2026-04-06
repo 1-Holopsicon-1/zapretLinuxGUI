@@ -36,6 +36,34 @@ class DirectLaunchProfile:
         }
 
 
+@dataclass(frozen=True)
+class DirectStartupSnapshot:
+    launch_method: str
+    engine: str
+    preset_file_name: str
+    preset_name: str
+    preset_path: Path
+    display_name: str
+    has_required_filters: bool | None = None
+
+    def to_selected_mode(self) -> dict[str, object]:
+        return {
+            "is_preset_file": True,
+            "name": self.display_name,
+            "preset_path": str(self.preset_path),
+        }
+
+    def to_launch_profile(self) -> DirectLaunchProfile:
+        return DirectLaunchProfile(
+            launch_method=self.launch_method,
+            engine=self.engine,
+            preset_file_name=self.preset_file_name,
+            preset_name=self.preset_name,
+            launch_config_path=self.preset_path,
+            display_name=self.display_name,
+        )
+
+
 class DirectFlowCoordinator:
     PRESETS_DOWNLOAD_URL = "https://github.com/youtubediscord/zapret/discussions/categories/presets"
 
@@ -59,9 +87,25 @@ class DirectFlowCoordinator:
         timing_callback: Callable[[str, float], None] | None = None,
         timing_label: str | None = None,
     ) -> DirectLaunchProfile:
+        snapshot = self.get_startup_snapshot(
+            launch_method,
+            require_filters=require_filters,
+            timing_callback=timing_callback,
+            timing_label=timing_label,
+        )
+        return snapshot.to_launch_profile()
+
+    def get_startup_snapshot(
+        self,
+        launch_method: str,
+        *,
+        require_filters: bool = False,
+        timing_callback: Callable[[str, float], None] | None = None,
+        timing_label: str | None = None,
+    ) -> DirectStartupSnapshot:
         started_at = time.perf_counter()
         method = self._normalize_method(launch_method)
-        label = str(timing_label or f"direct_flow.{method}.ensure_launch_profile")
+        label = str(timing_label or f"direct_flow.{method}.startup_snapshot")
 
         t_selected = time.perf_counter()
         selected = self._ensure_selected_source_manifest(
@@ -80,28 +124,32 @@ class DirectFlowCoordinator:
         if not launch_config_path.exists():
             raise DirectFlowError(f"Selected source preset not found: {launch_config_path}")
 
-        text = ""
-        t_read = time.perf_counter()
-        try:
-            text = launch_config_path.read_text(encoding="utf-8").strip()
-        except Exception as exc:
-            raise DirectFlowError(f"Failed to read selected source preset: {exc}") from exc
-        self._emit_timing(timing_callback, f"{label}.read_preset_text", t_read)
+        has_required_filters: bool | None = None
+        if require_filters:
+            text = ""
+            t_read = time.perf_counter()
+            try:
+                text = launch_config_path.read_text(encoding="utf-8").strip()
+            except Exception as exc:
+                raise DirectFlowError(f"Failed to read selected source preset: {exc}") from exc
+            self._emit_timing(timing_callback, f"{label}.read_preset_text", t_read)
 
-        t_filters = time.perf_counter()
-        if require_filters and not self._has_required_filters(method, text):
-            raise DirectFlowError("Выберите хотя бы одну категорию для запуска")
-        self._emit_timing(timing_callback, f"{label}.filter_validation", t_filters)
+            t_filters = time.perf_counter()
+            has_required_filters = self._has_required_filters(method, text)
+            if not has_required_filters:
+                raise DirectFlowError("Выберите хотя бы одну категорию для запуска")
+            self._emit_timing(timing_callback, f"{label}.filter_validation", t_filters)
 
         self._emit_timing(timing_callback, f"{label}.total", started_at)
 
-        return DirectLaunchProfile(
+        return DirectStartupSnapshot(
             launch_method=method,
             engine=self._METHOD_TO_ENGINE[method],
             preset_file_name=selected.file_name,
             preset_name=selected.name,
-            launch_config_path=launch_config_path,
+            preset_path=launch_config_path,
             display_name=f"Пресет: {selected.name}",
+            has_required_filters=has_required_filters,
         )
 
     def build_selected_mode(
@@ -110,7 +158,7 @@ class DirectFlowCoordinator:
         *,
         require_filters: bool = False,
     ) -> dict[str, object]:
-        return self.ensure_launch_profile(
+        return self.get_startup_snapshot(
             launch_method,
             require_filters=require_filters,
         ).to_selected_mode()
@@ -129,7 +177,7 @@ class DirectFlowCoordinator:
         return get_app_paths().engine_paths(engine).ensure_directories().presets_dir / selected.file_name
 
     def ensure_selected_source_path(self, launch_method: str) -> Path:
-        return self.ensure_launch_profile(launch_method, require_filters=False).launch_config_path
+        return self.get_startup_snapshot(launch_method, require_filters=False).preset_path
 
     def is_selected_preset(self, launch_method: str, preset_name: str) -> bool:
         try:

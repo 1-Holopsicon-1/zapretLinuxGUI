@@ -2,6 +2,7 @@
 Контроллер для управления DPI - содержит всю логику запуска и остановки
 """
 
+from dataclasses import dataclass
 import os
 import time
 
@@ -16,6 +17,14 @@ from dpi.process_health_check import (
     try_kill_conflicting_processes,
     get_conflicting_processes_report,
 )
+
+
+@dataclass(frozen=True)
+class PreparedDpiStartRequest:
+    launch_method: str
+    selected_mode: object
+    mode_name: str
+    method_name: str
 
 class DPIStartWorker(QObject):
     """Worker для асинхронного запуска DPI"""
@@ -611,6 +620,217 @@ class DPIController:
     def _runtime_service(self):
         return getattr(self.app, "dpi_runtime_service", None)
 
+    def _handle_conflicting_processes_before_start(self) -> bool:
+        conflicting = check_conflicting_processes()
+        if not conflicting:
+            return True
+
+        report = get_conflicting_processes_report()
+        log(report, "WARNING")
+
+        names = ", ".join(c['name'] for c in conflicting)
+        from PyQt6.QtWidgets import QMessageBox
+
+        msg = QMessageBox(self.app)
+        msg.setWindowTitle("Обнаружены конфликтующие программы")
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setText(
+            f"Обнаружены программы, которые блокируют WinDivert:\n\n"
+            f"{names}\n\n"
+            f"Эти программы перехватывают системные вызовы и не дают "
+            f"WinDivert драйверу запуститься."
+        )
+        msg.setInformativeText("Закрыть их автоматически и продолжить запуск?")
+
+        btn_kill = msg.addButton("Закрыть и продолжить", QMessageBox.ButtonRole.AcceptRole)
+        btn_ignore = msg.addButton("Продолжить без закрытия", QMessageBox.ButtonRole.DestructiveRole)
+        btn_cancel = msg.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+        msg.setDefaultButton(btn_kill)
+
+        msg.exec()
+        clicked = msg.clickedButton()
+
+        if clicked == btn_cancel:
+            log("Запуск DPI отменён пользователем из-за конфликтующих процессов", "INFO")
+            return False
+
+        if clicked == btn_kill:
+            log("Пользователь выбрал закрыть конфликтующие процессы", "INFO")
+            killed = try_kill_conflicting_processes(auto_kill=True)
+            if killed:
+                log("Конфликтующие процессы закрыты, ожидание 1с...", "INFO")
+                time.sleep(1)
+            else:
+                log("Не удалось закрыть все конфликтующие процессы", "WARNING")
+                retry_msg = QMessageBox.warning(
+                    self.app,
+                    "Не удалось закрыть процессы",
+                    "Некоторые конфликтующие процессы не удалось закрыть.\n"
+                    "Запуск DPI может завершиться ошибкой.\n\n"
+                    "Продолжить запуск?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if retry_msg == QMessageBox.StandardButton.No:
+                    log("Запуск DPI отменён после неудачного закрытия процессов", "INFO")
+                    return False
+
+        if clicked == btn_ignore:
+            log("Пользователь продолжил запуск несмотря на конфликтующие процессы", "WARNING")
+
+        return True
+
+    @staticmethod
+    def _resolve_launch_method(launch_method=None) -> str:
+        return str(launch_method or get_strategy_launch_method() or "").strip().lower()
+
+    @staticmethod
+    def _resolve_method_name(launch_method: str) -> str:
+        method = str(launch_method or "").strip().lower()
+        if method == "orchestra":
+            return "оркестр"
+        if method == "direct_zapret2":
+            return "прямой"
+        if method == "direct_zapret2_orchestra":
+            return "оркестратор Z2"
+        if method == "direct_zapret1":
+            return "прямой Z1"
+        return "классический"
+
+    @staticmethod
+    def _resolve_mode_name(selected_mode) -> str:
+        if isinstance(selected_mode, tuple) and len(selected_mode) == 2:
+            _, strategy_name = selected_mode
+            return str(strategy_name or "Неизвестная стратегия")
+        if isinstance(selected_mode, dict):
+            return str(selected_mode.get("name", str(selected_mode)) or "Неизвестная стратегия")
+        if isinstance(selected_mode, str):
+            return str(selected_mode or "Неизвестная стратегия")
+        return "Неизвестная стратегия"
+
+    def _fail_start_preparation(self, message: str) -> None:
+        text = str(message or "").strip() or "Не удалось подготовить запуск DPI"
+        log(f"Ошибка подготовки запуска: {text}", "❌ ERROR")
+        self.app.set_status(f"❌ {text}")
+        self._show_launch_error_top(text)
+        self._mark_runtime_failed(text)
+
+    def _prepare_selected_mode_for_start(self, selected_mode, launch_method: str):
+        method = str(launch_method or "").strip().lower()
+
+        if method == "orchestra":
+            return {"is_orchestra": True, "name": "Оркестр"}
+
+        if selected_mode is not None and selected_mode != "default":
+            return selected_mode
+
+        if method in ("direct_zapret2", "direct_zapret1"):
+            from core.services import get_direct_flow_coordinator
+
+            snapshot = get_direct_flow_coordinator().get_startup_snapshot(
+                method,
+                require_filters=True,
+            )
+            log(f"Используется выбранный source-пресет: {snapshot.preset_path}", "INFO")
+            return snapshot.to_selected_mode()
+
+        if method == "direct_zapret2_orchestra":
+            from preset_orchestra_zapret2 import (
+                ensure_default_preset_exists,
+                get_active_preset_path,
+                get_active_preset_name,
+            )
+
+            ensure_default_preset_exists()
+            preset_path = get_active_preset_path()
+            preset_name = get_active_preset_name() or "Default"
+            return {
+                "is_preset_file": True,
+                "name": f"Пресет оркестра: {preset_name}",
+                "preset_path": str(preset_path),
+            }
+
+        raise RuntimeError("Неизвестный метод запуска")
+
+    @staticmethod
+    def _direct_filter_flags(launch_method: str) -> tuple[str, ...]:
+        method = str(launch_method or "").strip().lower()
+        if method == "direct_zapret1":
+            return ("--wf-tcp=", "--wf-udp=")
+        return ("--wf-tcp-out", "--wf-udp-out", "--wf-raw-part")
+
+    def _validate_direct_selected_mode(self, selected_mode, launch_method: str) -> None:
+        method = str(launch_method or "").strip().lower()
+        if method not in ("direct_zapret2", "direct_zapret2_orchestra", "direct_zapret1"):
+            return
+        if not isinstance(selected_mode, dict) or not bool(selected_mode.get("is_preset_file")):
+            return
+
+        preset_path = Path(str(selected_mode.get("preset_path") or "").strip())
+        if not preset_path.exists():
+            raise RuntimeError("Preset файл не найден. Создайте пресет в настройках")
+
+        try:
+            content = preset_path.read_text(encoding="utf-8").strip()
+
+            if method in ("direct_zapret2", "direct_zapret2_orchestra"):
+                content_lower = content.lower()
+                if ("unknown.txt" in content_lower) or ("ipset-unknown.txt" in content_lower):
+                    try:
+                        if method == "direct_zapret2_orchestra":
+                            from preset_orchestra_zapret2.txt_preset_parser import (
+                                parse_preset_file,
+                                generate_preset_file,
+                            )
+
+                            data = parse_preset_file(preset_path)
+                            if generate_preset_file(data, preset_path, atomic=True):
+                                content = preset_path.read_text(encoding="utf-8").strip()
+                        else:
+                            from core.direct_preset_core.service import DirectPresetService
+                            from core.services import get_app_paths
+
+                            service = DirectPresetService(get_app_paths(), "winws2")
+                            source = service.read_source_preset(preset_path)
+                            if service.remove_placeholder_profiles(source):
+                                service.write_source_preset(preset_path, source)
+                                content = preset_path.read_text(encoding="utf-8").strip()
+                    except Exception as e:
+                        log(f"Ошибка очистки preset файла от unknown.txt: {e}", "DEBUG")
+
+            if not any(flag in content for flag in self._direct_filter_flags(method)):
+                raise RuntimeError("Выберите хотя бы одну категорию для запуска")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Ошибка чтения preset: {e}") from e
+
+    def _prepare_start_request(self, selected_mode=None, launch_method=None) -> PreparedDpiStartRequest:
+        resolved_method = self._resolve_launch_method(launch_method)
+        log(f"Используется метод запуска: {resolved_method}", "INFO")
+
+        prepared_selected_mode = self._prepare_selected_mode_for_start(selected_mode, resolved_method)
+        self._validate_direct_selected_mode(prepared_selected_mode, resolved_method)
+
+        prelaunch_warnings, prelaunch_error = self._sanitize_direct_preset_before_launch(
+            prepared_selected_mode,
+            resolved_method,
+        )
+        if prelaunch_error:
+            raise RuntimeError(prelaunch_error)
+
+        self._pending_launch_warnings = [
+            *prelaunch_warnings,
+            *self._collect_soft_launch_warnings(prepared_selected_mode, resolved_method),
+        ]
+
+        return PreparedDpiStartRequest(
+            launch_method=resolved_method,
+            selected_mode=prepared_selected_mode,
+            mode_name=self._resolve_mode_name(prepared_selected_mode),
+            method_name=self._resolve_method_name(resolved_method),
+        )
+
     @staticmethod
     def _expected_preset_path(selected_mode) -> str:
         if isinstance(selected_mode, dict) and bool(selected_mode.get("is_preset_file")):
@@ -984,232 +1204,27 @@ class DPIController:
 
         self._pending_launch_warnings = []
 
-        # Проверка конфликтующих процессов (Process Hacker, Process Explorer и т.д.)
-        conflicting = check_conflicting_processes()
-        if conflicting:
-            report = get_conflicting_processes_report()
-            log(report, "WARNING")
-
-            names = ", ".join(c['name'] for c in conflicting)
-            from PyQt6.QtWidgets import QMessageBox
-            msg = QMessageBox(self.app)
-            msg.setWindowTitle("Обнаружены конфликтующие программы")
-            msg.setIcon(QMessageBox.Icon.Warning)
-            msg.setText(
-                f"Обнаружены программы, которые блокируют WinDivert:\n\n"
-                f"{names}\n\n"
-                f"Эти программы перехватывают системные вызовы и не дают "
-                f"WinDivert драйверу запуститься."
-            )
-            msg.setInformativeText("Закрыть их автоматически и продолжить запуск?")
-
-            btn_kill = msg.addButton("Закрыть и продолжить", QMessageBox.ButtonRole.AcceptRole)
-            btn_ignore = msg.addButton("Продолжить без закрытия", QMessageBox.ButtonRole.DestructiveRole)
-            btn_cancel = msg.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
-            msg.setDefaultButton(btn_kill)
-
-            msg.exec()
-            clicked = msg.clickedButton()
-
-            if clicked == btn_cancel:
-                log("Запуск DPI отменён пользователем из-за конфликтующих процессов", "INFO")
-                return
-
-            if clicked == btn_kill:
-                log("Пользователь выбрал закрыть конфликтующие процессы", "INFO")
-                killed = try_kill_conflicting_processes(auto_kill=True)
-                if killed:
-                    log("Конфликтующие процессы закрыты, ожидание 1с...", "INFO")
-                    time.sleep(1)
-                else:
-                    log("Не удалось закрыть все конфликтующие процессы", "WARNING")
-                    retry_msg = QMessageBox.warning(
-                        self.app,
-                        "Не удалось закрыть процессы",
-                        "Некоторые конфликтующие процессы не удалось закрыть.\n"
-                        "Запуск DPI может завершиться ошибкой.\n\n"
-                        "Продолжить запуск?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                        QMessageBox.StandardButton.No
-                    )
-                    if retry_msg == QMessageBox.StandardButton.No:
-                        log("Запуск DPI отменён после неудачного закрытия процессов", "INFO")
-                        return
-
-            # btn_ignore — продолжаем без закрытия, логируем предупреждение
-            if clicked == btn_ignore:
-                log("Пользователь продолжил запуск несмотря на конфликтующие процессы", "WARNING")
+        if not self._handle_conflicting_processes_before_start():
+            return
 
         # Invalidate any pending verification loop from older starts.
         self._dpi_start_verify_generation += 1
 
-        # Проверяем выбранный метод запуска (явно переданный или из реестра)
-        if launch_method is None:
-            launch_method = get_strategy_launch_method()
-        log(f"Используется метод запуска: {launch_method}", "INFO")
-
-        # Для оркестра не нужно выбирать стратегию - он работает автоматически
-        if launch_method == "orchestra":
-            selected_mode = {'is_orchestra': True, 'name': 'Оркестр'}
-
-        # ✅ ИСПРАВЛЕНИЕ: Если стратегия не выбрана - используем готовый preset файл
-        elif selected_mode is None or selected_mode == 'default':
-            if launch_method in ("direct_zapret2", "direct_zapret2_orchestra", "direct_zapret1"):
-                # Для Direct режимов используем готовый preset файл.
-                # direct_zapret2/direct_zapret1: selected source preset path
-                # direct_zapret2_orchestra: legacy orchestra-specific flow
-                if launch_method == "direct_zapret2_orchestra":
-                    from preset_orchestra_zapret2 import (
-                        ensure_default_preset_exists,
-                        get_active_preset_path,
-                        get_active_preset_name,
-                    )
-
-                    ensure_default_preset_exists()
-                    preset_path = get_active_preset_path()
-                    preset_name = get_active_preset_name() or "Default"
-                else:
-                    try:
-                        from core.services import get_direct_flow_coordinator
-
-                        profile = get_direct_flow_coordinator().ensure_launch_profile(
-                            launch_method,
-                            require_filters=True,
-                        )
-                        selected_mode = profile.to_selected_mode()
-                        log(f"Используется выбранный source-пресет: {profile.launch_config_path}", "INFO")
-                    except Exception as e:
-                        log(f"Ошибка подготовки direct запуска: {e}", "❌ ERROR")
-                        self.app.set_status(f"❌ {e}")
-                        self._show_launch_error_top(str(e))
-                        self._mark_runtime_failed(str(e))
-                        return
-
-                    preset_path = Path(str(selected_mode["preset_path"]))
-                    preset_name = str(profile.preset_name or "Default")
-
-                if not preset_path.exists():
-                    log(f"Preset файл не найден: {preset_path}", "❌ ERROR")
-                    self.app.set_status("❌ Preset файл не найден. Создайте пресет в настройках")
-                    self._show_launch_error_top("Preset файл не найден. Создайте пресет в настройках")
-                    self._mark_runtime_failed("Preset файл не найден. Создайте пресет в настройках")
-                    return
-
-                # Проверяем что файл не пустой
-                try:
-                    content = preset_path.read_text(encoding='utf-8').strip()
-
-                    # 🧹 Sanitize placeholder categories that reference non-existent stub lists.
-                    # If preset contains `lists/unknown.txt` or `lists/ipset-unknown.txt`,
-                    # drop that whole category to prevent winws2 from exiting immediately.
-                    if launch_method in ("direct_zapret2", "direct_zapret2_orchestra"):
-                        content_l = content.lower()
-                        if ("unknown.txt" in content_l) or ("ipset-unknown.txt" in content_l):
-                            try:
-                                if launch_method == "direct_zapret2_orchestra":
-                                    from preset_orchestra_zapret2.txt_preset_parser import (
-                                        parse_preset_file,
-                                        generate_preset_file,
-                                    )
-                                    data = parse_preset_file(preset_path)
-                                    if generate_preset_file(data, preset_path, atomic=True):
-                                        content = preset_path.read_text(encoding="utf-8").strip()
-                                else:
-                                    from core.direct_preset_core.service import DirectPresetService
-                                    from core.services import get_app_paths
-
-                                    service = DirectPresetService(get_app_paths(), "winws2")
-                                    source = service.read_source_preset(preset_path)
-                                    if service.remove_placeholder_profiles(source):
-                                        service.write_source_preset(preset_path, source)
-                                        content = preset_path.read_text(encoding="utf-8").strip()
-                            except Exception as e:
-                                log(f"Ошибка очистки preset файла от unknown.txt: {e}", "DEBUG")
-                    # Проверяем наличие WinDivert фильтров
-                    if launch_method == "direct_zapret1":
-                        # Zapret 1 (winws.exe) использует синтаксис --wf-tcp= / --wf-udp=
-                        has_filters = any(f in content for f in ['--wf-tcp=', '--wf-udp='])
-                    else:
-                        # Zapret 2 (winws2.exe) использует --wf-tcp-out= / --wf-udp-out= / --wf-raw-part=
-                        has_filters = any(f in content for f in ['--wf-tcp-out', '--wf-udp-out', '--wf-raw-part'])
-                    if not has_filters:
-                        log("Preset файл не содержит активных фильтров", "WARNING")
-                        self.app.set_status("⚠️ Выберите хотя бы одну категорию для запуска")
-                        self._show_launch_error_top("Выберите хотя бы одну категорию для запуска")
-                        self._mark_runtime_failed("Выберите хотя бы одну категорию для запуска")
-                        return
-                except Exception as e:
-                    log(f"Ошибка чтения preset файла: {e}", "❌ ERROR")
-                    self.app.set_status(f"❌ Ошибка чтения preset: {e}")
-                    self._show_launch_error_top(f"Ошибка чтения preset: {e}")
-                    self._mark_runtime_failed(f"Ошибка чтения preset: {e}")
-                    return
-
-                if launch_method == "direct_zapret2_orchestra":
-                    selected_mode = {
-                        'is_preset_file': True,
-                        'name': f"Пресет оркестра: {preset_name}",
-                        'preset_path': str(preset_path)
-                    }
-                else:
-                    selected_mode = {
-                        'is_preset_file': True,
-                        'name': f"Пресет: {preset_name}",
-                        'preset_path': str(preset_path)
-                    }
-                log(f"Используется launch config: {preset_path}", "INFO")
-                
-            else:
-                log(f"Неизвестный метод запуска '{launch_method}': стратегия не выбрана", "❌ ERROR")
-                self.app.set_status("❌ Неизвестный метод запуска")
-                self._show_launch_error_top("Неизвестный метод запуска")
-                self._mark_runtime_failed("Неизвестный метод запуска")
-                return
-
-        prelaunch_warnings, prelaunch_error = self._sanitize_direct_preset_before_launch(selected_mode, launch_method)
-        if prelaunch_error:
-            log(prelaunch_error, "❌ ERROR")
-            self.app.set_status(f"❌ {prelaunch_error}")
-            self._show_launch_error_top(prelaunch_error)
-            self._mark_runtime_failed(prelaunch_error)
+        try:
+            request = self._prepare_start_request(selected_mode, launch_method)
+        except Exception as e:
+            self._fail_start_preparation(str(e))
             return
 
-        self._pending_launch_warnings = [
-            *prelaunch_warnings,
-            *self._collect_soft_launch_warnings(selected_mode, launch_method),
-        ]
-        
-        # ✅ ОБРАБОТКА всех типов стратегий (остальной код без изменений)
-        mode_name = "Неизвестная стратегия"
-        
-        if isinstance(selected_mode, tuple) and len(selected_mode) == 2:
-            # Встроенная стратегия (ID, название)
-            strategy_id, strategy_name = selected_mode
-            mode_name = strategy_name
+        if isinstance(request.selected_mode, tuple) and len(request.selected_mode) == 2:
+            strategy_id, strategy_name = request.selected_mode
             log(f"Обработка встроенной стратегии: {strategy_name} (ID: {strategy_id})", "DEBUG")
-            
-        elif isinstance(selected_mode, dict):
-            # Preset file strategy (is_preset_file) или другой dict
-            mode_name = selected_mode.get('name', str(selected_mode))
-            log(f"Обработка стратегии: {mode_name}", "DEBUG")
+        elif isinstance(request.selected_mode, dict):
+            log(f"Обработка стратегии: {request.mode_name}", "DEBUG")
+        elif isinstance(request.selected_mode, str):
+            log(f"Обработка строковой стратегии: {request.mode_name}", "DEBUG")
 
-        elif isinstance(selected_mode, str):
-            # Строковое название стратегии
-            mode_name = selected_mode
-            log(f"Обработка строковой стратегии: {mode_name}", "DEBUG")
-        
-        # Показываем состояние запуска
-        if launch_method == "orchestra":
-            method_name = "оркестр"
-        elif launch_method == "direct_zapret2":
-            method_name = "прямой"
-        elif launch_method == "direct_zapret2_orchestra":
-            method_name = "оркестратор Z2"
-        elif launch_method == "direct_zapret1":
-            method_name = "прямой Z1"
-        else:
-            method_name = "классический"
-        self.app.set_status(f"🚀 Запуск DPI ({method_name}): {mode_name}")
+        self.app.set_status(f"🚀 Запуск DPI ({request.method_name}): {request.mode_name}")
         
         # Показываем индикатор только на уже загруженной странице стратегий
         # для активного метода запуска, без старого обязательного attr-контракта.
@@ -1220,11 +1235,11 @@ class DPIController:
         if store is not None:
             store.set_dpi_busy(True, "Запуск Zapret...")
 
-        self._begin_runtime_start(str(launch_method or ""), selected_mode)
+        self._begin_runtime_start(request.launch_method, request.selected_mode)
         
         # Создаем поток и worker
         self._dpi_start_thread = QThread()
-        self._dpi_start_worker = DPIStartWorker(self.app, selected_mode, launch_method)
+        self._dpi_start_worker = DPIStartWorker(self.app, request.selected_mode, request.launch_method)
         self._dpi_start_worker.moveToThread(self._dpi_start_thread)
         
         # Подключение сигналов
@@ -1251,7 +1266,7 @@ class DPIController:
         # Запускаем поток
         self._dpi_start_thread.start()
         
-        log(f"Запуск асинхронного старта DPI: {mode_name} (метод: {method_name})", "INFO")    
+        log(f"Запуск асинхронного старта DPI: {request.mode_name} (метод: {request.method_name})", "INFO")
 
     def stop_dpi_async(self):
         """Асинхронно останавливает DPI без блокировки UI"""

@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFont, QTextCursor, QAction
 import qtawesome as qta
 
 from .base_page import BasePage
+from ui.popup_menu import exec_popup_menu
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 
@@ -1074,7 +1075,7 @@ class OrchestraPage(BasePage):
             whitelist_action.triggered.connect(lambda: self._add_to_whitelist_from_log(domain))
             menu.addAction(whitelist_action)
 
-        menu.exec(self.log_text.mapToGlobal(pos))
+        exec_popup_menu(menu, self.log_text.mapToGlobal(pos), owner=self)
 
     def _parse_log_line_for_strategy(self, line: str) -> tuple | None:
         """Парсит строку лога и извлекает домен, стратегию и протокол

@@ -8,7 +8,7 @@ import sys
 import time
 from ctypes import wintypes
 
-from PyQt6.QtCore import QEvent, QEventLoop, QObject, QPoint, QTimer, Qt
+from PyQt6.QtCore import QTimer, QPoint
 from PyQt6.QtGui import QAction, QCursor, QFontMetrics
 from PyQt6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QWidget
 
@@ -35,6 +35,8 @@ try:
 except Exception:
     def log(*args, **kwargs):  # type: ignore[no-redef]
         return None
+
+from ui.popup_menu import exec_popup_menu
 
 
 if sys.platform == "win32":
@@ -295,166 +297,15 @@ def _global_mouse_button_down(vk_code: int) -> bool:
         return False
 
 
-class _TrayPopupLifecycleFilter(QObject):
-    """Закрывает tray popup-меню при потере фокуса/активности."""
-
-    def __init__(self, menu: QWidget, owner_window: QWidget | None, app: QApplication | None, on_close) -> None:
-        super().__init__(menu)
-        self._menu = menu
-        self._owner_window = owner_window
-        self._app = app
-        self._on_close = on_close
-
-    def _event_global_pos(self, event) -> QPoint | None:
-        try:
-            global_pos = event.globalPosition()
-            return global_pos.toPoint()
-        except Exception:
-            pass
-
-        try:
-            global_pos = event.globalPos()
-            return QPoint(int(global_pos.x()), int(global_pos.y()))
-        except Exception:
-            return None
-
-    def _menu_contains_global_pos(self, global_pos: QPoint | None) -> bool:
-        return _widget_contains_global_pos(self._menu, global_pos)
-
-    def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
-        event_type = event.type()
-
-        if obj is self._menu and event_type in (
-            QEvent.Type.Hide,
-            QEvent.Type.Close,
-            QEvent.Type.FocusOut,
-            QEvent.Type.WindowDeactivate,
-        ):
-            self._on_close()
-            return False
-
-        if obj is self._app and event_type in (
-            QEvent.Type.MouseButtonPress,
-            QEvent.Type.MouseButtonDblClick,
-        ):
-            if self._menu.isVisible() and not self._menu_contains_global_pos(self._event_global_pos(event)):
-                self._on_close()
-            return False
-
-        if obj is self._owner_window and event_type in (
-            QEvent.Type.Hide,
-            QEvent.Type.Close,
-            QEvent.Type.WindowDeactivate,
-        ):
-            self._on_close()
-            return False
-
-        return super().eventFilter(obj, event)
-
-
 def _exec_tray_popup_menu(menu: QWidget, pos: QPoint, *, owner: QWidget | None) -> None:
-    """Показывает tray popup-меню и гарантирует закрытие по клику мимо."""
+    """Tray uses the shared popup lifecycle plus Windows click-outside polling."""
 
-    finished = {"value": False}
-    loop = QEventLoop(menu)
-
-    def _finish() -> None:
-        if finished["value"]:
-            return
-        finished["value"] = True
-        try:
-            menu.hide()
-        except Exception:
-            pass
-        if loop.isRunning():
-            loop.quit()
-
-    owner_window = owner.window() if owner is not None else None
-    app = QApplication.instance()
-    lifecycle_filter = _TrayPopupLifecycleFilter(menu, owner_window, app, on_close=_finish)
-    menu.installEventFilter(lifecycle_filter)
-    if owner_window is not None and owner_window is not menu:
-        owner_window.installEventFilter(lifecycle_filter)
-
-    state_handler = None
-    mouse_watch_timer = None
-    if app is not None:
-        app.installEventFilter(lifecycle_filter)
-
-        def _on_app_state_changed(state) -> None:
-            if state != Qt.ApplicationState.ApplicationActive:
-                _finish()
-
-        state_handler = _on_app_state_changed
-        app.applicationStateChanged.connect(state_handler)
-
-    if sys.platform == "win32":
-        mouse_watch_timer = QTimer(menu)
-        mouse_watch_timer.setInterval(35)
-
-        mouse_state = {
-            "left": _global_mouse_button_down(VK_LBUTTON),
-            "right": _global_mouse_button_down(VK_RBUTTON),
-        }
-
-        def _poll_global_mouse() -> None:
-            if finished["value"] or not menu.isVisible():
-                _finish()
-                return
-
-            cursor_pos = QCursor.pos()
-            inside_menu = _widget_contains_global_pos(menu, cursor_pos)
-
-            left_down = _global_mouse_button_down(VK_LBUTTON)
-            right_down = _global_mouse_button_down(VK_RBUTTON)
-
-            new_left_click = left_down and not mouse_state["left"]
-            new_right_click = right_down and not mouse_state["right"]
-
-            mouse_state["left"] = left_down
-            mouse_state["right"] = right_down
-
-            if (new_left_click or new_right_click) and not inside_menu:
-                _finish()
-
-        mouse_watch_timer.timeout.connect(_poll_global_mouse)
-        mouse_watch_timer.start()
-
-    for action in menu.actions():
-        try:
-            action.triggered.connect(lambda _checked=False: _finish())
-        except Exception:
-            pass
-
-    try:
-        menu.exec(pos)
-        if not finished["value"] and menu.isVisible():
-            loop.exec()
-    finally:
-        try:
-            menu.removeEventFilter(lifecycle_filter)
-        except Exception:
-            pass
-        if owner_window is not None and owner_window is not menu:
-            try:
-                owner_window.removeEventFilter(lifecycle_filter)
-            except Exception:
-                pass
-        if app is not None:
-            try:
-                app.removeEventFilter(lifecycle_filter)
-            except Exception:
-                pass
-        if app is not None and state_handler is not None:
-            try:
-                app.applicationStateChanged.disconnect(state_handler)
-            except Exception:
-                pass
-        if mouse_watch_timer is not None:
-            try:
-                mouse_watch_timer.stop()
-            except Exception:
-                pass
+    exec_popup_menu(
+        menu,
+        pos,
+        owner=owner,
+        monitor_global_mouse=True,
+    )
 
 
 class SystemTrayManager:

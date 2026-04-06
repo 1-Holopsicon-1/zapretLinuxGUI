@@ -10,6 +10,7 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFileDialog
 
 from ui.pages.base_page import BasePage
+from ui.popup_menu import exec_popup_menu
 
 try:
     from qfluentwidgets import (
@@ -475,7 +476,11 @@ class PresetSubpageBase(BasePage):
             menu.addAction(reset_action)
             if delete_action is not None:
                 menu.addAction(delete_action)
-            menu.exec(self.menuButton.mapToGlobal(self.menuButton.rect().bottomLeft()))
+            exec_popup_menu(
+                menu,
+                self.menuButton.mapToGlobal(self.menuButton.rect().bottomLeft()),
+                owner=self,
+            )
 
     def _rename_preset(self) -> None:
         if self._is_current_builtin():

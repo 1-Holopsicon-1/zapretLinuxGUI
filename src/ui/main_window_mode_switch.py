@@ -59,7 +59,7 @@ def complete_main_window_method_switch(window, method: str) -> None:
     if method == "direct_zapret2":
         from core.services import get_direct_flow_coordinator
         try:
-            get_direct_flow_coordinator().ensure_launch_profile("direct_zapret2", require_filters=False)
+            get_direct_flow_coordinator().get_startup_snapshot("direct_zapret2")
         except Exception:
             log("direct_zapret2: выбранный source-пресет не подготовлен", "ERROR")
             try:
@@ -82,7 +82,7 @@ def complete_main_window_method_switch(window, method: str) -> None:
         try:
             from core.services import get_direct_flow_coordinator
 
-            get_direct_flow_coordinator().ensure_launch_profile("direct_zapret1", require_filters=False)
+            get_direct_flow_coordinator().get_startup_snapshot("direct_zapret1")
         except Exception as e:
             log(f"direct_zapret1: ошибка инициализации пресета: {e}", "WARNING")
             can_autostart = False
@@ -123,68 +123,12 @@ def auto_start_after_main_window_method_switch(window, method: str) -> None:
             log("Автозапуск Оркестр", "INFO")
             window.dpi_controller.start_dpi_async(selected_mode=None, launch_method="orchestra")
 
-        elif method == "direct_zapret2":
+        elif method in {"direct_zapret2", "direct_zapret2_orchestra", "direct_zapret1"}:
             from config import get_dpi_autostart
             if not get_dpi_autostart():
                 return
-
-            from core.services import get_direct_flow_coordinator
-
-            try:
-                profile = get_direct_flow_coordinator().ensure_launch_profile(
-                    "direct_zapret2",
-                    require_filters=False,
-                )
-            except Exception:
-                return
-
-            selected_mode = profile.to_selected_mode()
-            window.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=method)
-
-        elif method == "direct_zapret2_orchestra":
-            from config import get_dpi_autostart
-            if not get_dpi_autostart():
-                return
-
-            from preset_orchestra_zapret2 import (
-                ensure_default_preset_exists,
-                get_active_preset_path,
-                get_active_preset_name,
-            )
-
-            if not ensure_default_preset_exists():
-                return
-
-            preset_path = get_active_preset_path()
-            preset_name = get_active_preset_name() or "Default"
-
-            if not preset_path.exists():
-                return
-
-            selected_mode = {
-                'is_preset_file': True,
-                'name': f"Пресет оркестра: {preset_name}",
-                'preset_path': str(preset_path),
-            }
-            window.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=method)
-
-        elif method == "direct_zapret1":
-            from config import get_dpi_autostart
-            if not get_dpi_autostart():
-                return
-
-            from core.services import get_direct_flow_coordinator
-
-            try:
-                profile = get_direct_flow_coordinator().ensure_launch_profile(
-                    "direct_zapret1",
-                    require_filters=False,
-                )
-            except Exception:
-                return
-
-            selected_mode = profile.to_selected_mode()
-            window.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=method)
+            log(f"Автозапуск после смены режима передан в единый DPI controller pipeline: {method}", "INFO")
+            window.dpi_controller.start_dpi_async(selected_mode=None, launch_method=method)
 
     except Exception as e:
         log(f"Ошибка автозапуска после переключения режима: {e}", "ERROR")

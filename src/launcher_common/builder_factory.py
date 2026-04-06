@@ -35,22 +35,22 @@ def _combine_direct_source_preset(launch_method: str) -> dict:
     from core.services import get_direct_flow_coordinator
 
     method = str(launch_method or "").strip().lower()
-    profile = get_direct_flow_coordinator().ensure_launch_profile(method, require_filters=False)
+    snapshot = get_direct_flow_coordinator().get_startup_snapshot(method)
     facade = DirectPresetFacade.from_launch_method(method)
     selections = facade.get_strategy_selections() or {}
     active_targets = sum(1 for strategy_id in selections.values() if (strategy_id or "none") != "none")
 
-    log(f"combine_strategies: using selected source preset for {method}: {profile.launch_config_path}", "DEBUG")
+    log(f"combine_strategies: using selected source preset for {method}: {snapshot.preset_path}", "DEBUG")
 
     return {
-        "name": profile.display_name,
-        "description": profile.display_name,
+        "name": snapshot.display_name,
+        "description": snapshot.display_name,
         "version": "source-preset",
         "provider": "direct_preset_core",
         "author": "DirectPresetCore",
         "updated": "2026",
         "all_sites": True,
-        "args": f"@{profile.launch_config_path}",
+        "args": f"@{snapshot.preset_path}",
         "_is_builtin": False,
         "_is_preset_file": True,
         "_direct_source_preset": True,

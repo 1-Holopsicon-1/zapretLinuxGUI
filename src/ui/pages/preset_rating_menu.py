@@ -6,6 +6,8 @@ from PyQt6.QtCore import QPoint
 from PyQt6.QtGui import QCursor
 from PyQt6.QtWidgets import QWidget, QMenu
 
+from ui.popup_menu import exec_popup_menu
+
 
 def show_preset_rating_menu(
     parent: QWidget,
@@ -39,7 +41,12 @@ def show_preset_rating_menu(
         action.setChecked(current_rating == value)
         actions[action] = value
 
-    chosen = menu.exec(global_pos or QCursor.pos())
+    chosen = exec_popup_menu(
+        menu,
+        global_pos or QCursor.pos(),
+        owner=parent,
+        capture_action=True,
+    )
     if chosen == clear_action:
         hierarchy_store.set_preset_rating(
             preset_file_name,

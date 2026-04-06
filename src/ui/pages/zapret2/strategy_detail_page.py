@@ -63,6 +63,7 @@ from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.compat_widgets import ActionButton, PrimaryActionButton, ResetActionButton, SettingsRow, set_tooltip, SettingsCard
 from ui.pages.dpi_settings_page import Win11ToggleRow, Win11ComboRow, Win11NumberRow
 from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree, StrategyTreeRow
+from ui.popup_menu import exec_popup_menu
 from strategy_menu.args_preview_dialog import ArgsPreviewDialog
 from launcher_common.blobs import get_blobs_info
 from strategy_menu.marks_store_bridge import DirectZapret2MarksStore, DirectZapret2FavoritesStore
@@ -3973,7 +3974,7 @@ class StrategyDetailPage(BasePage):
             pos = self._sort_btn.mapToGlobal(self._sort_btn.rect().bottomLeft())
         except Exception:
             return
-        menu.exec(pos)
+        exec_popup_menu(menu, pos, owner=self)
 
     def _apply_sort(self):
         """Применяет текущую сортировку"""
