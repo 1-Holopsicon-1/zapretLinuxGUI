@@ -563,7 +563,7 @@ class HomePage(BasePage):
     def update_dpi_status(self, state: str | bool, strategy_name: str | None = None, last_error: str = ""):
         """Обновляет отображение статуса DPI"""
         phase = str(state or "").strip().lower()
-        if phase not in {"starting", "running", "stopping", "failed", "stopped"}:
+        if phase not in {"autostart_pending", "starting", "running", "stopping", "failed", "stopped"}:
             phase = "running" if bool(state) else "stopped"
 
         if phase == "running":
@@ -574,6 +574,11 @@ class HomePage(BasePage):
             self.dpi_status_card.set_status_color('running')
             self.start_btn.setVisible(False)
             self.stop_btn.setVisible(True)
+        elif phase == "autostart_pending":
+            self.dpi_status_card.set_value("Автозапуск запланирован", "Подготавливаем стартовый запуск после инициализации")
+            self.dpi_status_card.set_status_color('warning')
+            self.start_btn.setVisible(False)
+            self.stop_btn.setVisible(False)
         elif phase == "starting":
             self.dpi_status_card.set_value("Запускается", "Ждём подтверждение процесса winws")
             self.dpi_status_card.set_status_color('warning')

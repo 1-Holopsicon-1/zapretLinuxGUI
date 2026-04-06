@@ -758,7 +758,7 @@ class SystemTrayManager:
             self._tg_proxy_action.setText(state["tg_proxy_label"])
 
         if self._exit_stop_action is not None:
-            active_phases = {"starting", "running", "stopping"}
+            active_phases = {"autostart_pending", "starting", "running", "stopping"}
             self._exit_stop_action.setEnabled(
                 bool(state["is_dpi_running"]) or str(state.get("dpi_phase") or "").strip().lower() in active_phases
             )

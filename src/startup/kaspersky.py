@@ -88,9 +88,9 @@ def _check_kaspersky_warning_disabled():
     """
     try:
         import winreg
-        
-        # Путь к ключу реестра
-        key_path = r"Software\ZapretReg2"
+        from config.config import REGISTRY_PATH
+
+        key_path = REGISTRY_PATH
         value_name = "DisableKasperskyWarning"
         
         # Пытаемся открыть ключ
@@ -105,7 +105,7 @@ def _check_kaspersky_warning_disabled():
         # Если winreg недоступен (не Windows), возвращаем False
         return False
 
-def _set_kaspersky_warning_disabled(disabled: bool):
+def _set_kaspersky_warning_disabled(disabled: bool) -> bool:
     """
     Сохраняет в реестре настройку отключения предупреждения о Kaspersky.
     
@@ -114,26 +114,28 @@ def _set_kaspersky_warning_disabled(disabled: bool):
     """
     try:
         import winreg
-        
-        # Путь к ключу реестра
-        key_path = r"Software\ZapretReg2"
+        from config.config import REGISTRY_PATH
+
+        key_path = REGISTRY_PATH
         value_name = "DisableKasperskyWarning"
         
         # Создаем или открываем ключ
         try:
             with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_WRITE) as key:
                 winreg.SetValueEx(key, value_name, 0, winreg.REG_DWORD, 1 if disabled else 0)
+            return True
         except Exception as e:
             print(f"Ошибка при записи в реестр: {e}")
+            return False
             
     except ImportError:
         # Если winreg недоступен (не Windows), ничего не делаем
-        pass
+        return False
 
 
-def disable_kaspersky_warning_forever() -> None:
+def disable_kaspersky_warning_forever() -> bool:
     """Отключает дальнейшие предупреждения о Kaspersky."""
-    _set_kaspersky_warning_disabled(True)
+    return _set_kaspersky_warning_disabled(True)
 
 
 def build_kaspersky_notification() -> dict | None:

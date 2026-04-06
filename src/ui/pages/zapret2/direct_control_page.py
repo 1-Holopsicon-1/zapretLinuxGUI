@@ -1313,7 +1313,7 @@ class Zapret2DirectControlPage(BasePage):
 
     def update_status(self, state: str | bool, last_error: str = ""):
         phase = str(state or "").strip().lower()
-        if phase not in {"starting", "running", "stopping", "failed", "stopped"}:
+        if phase not in {"autostart_pending", "starting", "running", "stopping", "failed", "stopped"}:
             phase = "running" if bool(state) else "stopped"
 
         if phase == "running":
@@ -1325,6 +1325,14 @@ class Zapret2DirectControlPage(BasePage):
             self._update_stop_winws_button_text()
             self.stop_winws_btn.setVisible(True)
             self.stop_and_exit_btn.setVisible(True)
+        elif phase == "autostart_pending":
+            self.status_title.setText("Автозапуск Zapret запланирован")
+            self.status_desc.setText("Подготавливаем стартовый запуск выбранного пресета")
+            self.status_dot.set_color("#f5a623")
+            self.status_dot.start_pulse()
+            self.start_btn.setVisible(False)
+            self.stop_winws_btn.setVisible(False)
+            self.stop_and_exit_btn.setVisible(False)
         elif phase == "starting":
             self.status_title.setText("Zapret запускается")
             self.status_desc.setText("Ждём подтверждение процесса winws")

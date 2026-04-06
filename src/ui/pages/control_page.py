@@ -757,7 +757,7 @@ class ControlPage(BasePage):
     def update_status(self, state: str | bool, last_error: str = ""):
         """Обновляет отображение статуса"""
         phase = str(state or "").strip().lower()
-        if phase not in {"starting", "running", "stopping", "failed", "stopped"}:
+        if phase not in {"autostart_pending", "starting", "running", "stopping", "failed", "stopped"}:
             phase = "running" if bool(state) else "stopped"
 
         self._last_known_dpi_running = phase == "running"
@@ -774,6 +774,14 @@ class ControlPage(BasePage):
             self._update_stop_winws_button_text()
             self.stop_winws_btn.setVisible(True)
             self.stop_and_exit_btn.setVisible(True)
+        elif phase == "autostart_pending":
+            self.status_title.setText("Автозапуск Zapret запланирован")
+            self.status_desc.setText("Ждём завершения стартовой инициализации перед запуском")
+            self.status_dot.set_color('#f5a623')
+            self.status_dot.start_pulse()
+            self.start_btn.setVisible(False)
+            self.stop_winws_btn.setVisible(False)
+            self.stop_and_exit_btn.setVisible(False)
         elif phase == "starting":
             self.status_title.setText("Zapret запускается")
             self.status_desc.setText("Ждём подтверждение процесса winws")

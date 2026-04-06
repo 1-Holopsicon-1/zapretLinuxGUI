@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import re
 import time
@@ -48,6 +49,7 @@ class DirectFlowCoordinator:
     def __init__(self) -> None:
         self._prepared_support_methods: set[str] = set()
         self._selected_manifest_cache: dict[str, tuple[tuple[object, ...], PresetManifest]] = {}
+        self._index_kind_cache: dict[str, tuple[tuple[object, ...], dict[str, str]]] = {}
 
     def ensure_launch_profile(
         self,
@@ -70,7 +72,10 @@ class DirectFlowCoordinator:
         self._emit_timing(timing_callback, f"{label}.selected_manifest", t_selected)
 
         t_path = time.perf_counter()
-        launch_config_path = self.get_selected_source_path(method)
+        launch_config_path = self._get_source_preset_path(
+            self._METHOD_TO_ENGINE[method],
+            selected.file_name,
+        )
         self._emit_timing(timing_callback, f"{label}.selected_source_path", t_path)
         if not launch_config_path.exists():
             raise DirectFlowError(f"Selected source preset not found: {launch_config_path}")
@@ -188,14 +193,6 @@ class DirectFlowCoordinator:
         t_selection_service = time.perf_counter()
         selection = get_selection_service()
         self._emit_timing(timing_callback, f"{label}.selection_service", t_selection_service)
-        t_list = time.perf_counter()
-        preset_paths = self._list_source_preset_paths(engine)
-        self._emit_timing(timing_callback, f"{label}.list_source_presets", t_list)
-        if not preset_paths:
-            raise DirectFlowError(
-                "Пресеты не найдены. Скачайте файлы пресетов вручную: "
-                f"{self.PRESETS_DOWNLOAD_URL}"
-            )
 
         t_selected_name = time.perf_counter()
         selected_file_name = str(selection.get_selected_file_name(engine) or "").strip()
@@ -216,7 +213,14 @@ class DirectFlowCoordinator:
             self._emit_timing(timing_callback, f"{label}.selected_path", t_selected_path)
             if selected_path.exists():
                 t_manifest = time.perf_counter()
-                manifest = self._remember_manifest_from_path(method, engine, selected_path, cache_key=cache_key)
+                manifest = self._remember_manifest_from_path(
+                    method,
+                    engine,
+                    selected_path,
+                    cache_key=cache_key,
+                    timing_callback=timing_callback,
+                    timing_label=label,
+                )
                 self._emit_timing(timing_callback, f"{label}.remember_selected_manifest", t_manifest)
                 self._emit_timing(timing_callback, f"{label}.total", started_at)
                 return manifest
@@ -230,12 +234,27 @@ class DirectFlowCoordinator:
             self._emit_timing(timing_callback, f"{label}.total", started_at)
             return manifest
 
+        t_list = time.perf_counter()
+        preset_paths = self._list_source_preset_paths(engine)
+        self._emit_timing(timing_callback, f"{label}.list_source_presets", t_list)
+        if not preset_paths:
+            raise DirectFlowError(
+                "Пресеты не найдены. Скачайте файлы пресетов вручную: "
+                f"{self.PRESETS_DOWNLOAD_URL}"
+            )
+
         t_first = time.perf_counter()
         first_path = preset_paths[0]
         selected_file_name = selection.select_preset_file_name_fast(engine, first_path.name)
         selected_path = self._get_source_preset_path(engine, selected_file_name)
         if selected_path.exists():
-            manifest = self._remember_manifest_from_path(method, engine, selected_path)
+            manifest = self._remember_manifest_from_path(
+                method,
+                engine,
+                selected_path,
+                timing_callback=timing_callback,
+                timing_label=label,
+            )
             self._emit_timing(timing_callback, f"{label}.first_available_manifest", t_first)
             self._emit_timing(timing_callback, f"{label}.total", started_at)
             return manifest
@@ -333,8 +352,18 @@ class DirectFlowCoordinator:
         path: Path,
         *,
         cache_key: tuple[object, ...] | None = None,
+        timing_callback: Callable[[str, float], None] | None = None,
+        timing_label: str | None = None,
     ) -> PresetManifest:
-        manifest = self._manifest_from_source_path(engine, path)
+        manifest_started = time.perf_counter()
+        manifest = self._manifest_from_source_path(
+            engine,
+            path,
+            timing_callback=timing_callback,
+            timing_label=timing_label,
+        )
+        label = str(timing_label or f"direct_flow.{self._normalize_method(launch_method)}.manifest")
+        self._emit_timing(timing_callback, f"{label}.manifest_from_source_path", manifest_started)
         resolved_key = cache_key
         if resolved_key is None:
             resolved_key = self._selected_manifest_cache_key(launch_method, engine, path.name)
@@ -357,32 +386,39 @@ class DirectFlowCoordinator:
         )
 
     @classmethod
-    def _read_display_name_from_source(cls, path: Path, *, fallback: str) -> str:
+    def _read_header_metadata_from_source(
+        cls,
+        path: Path,
+        *,
+        fallback: str,
+    ) -> tuple[str, str | None]:
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            lines: list[str] = []
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for raw in handle:
+                    stripped = raw.strip()
+                    if stripped and not stripped.startswith("#"):
+                        break
+                    lines.append(raw.rstrip("\n"))
         except Exception:
-            return str(fallback or "Preset").strip() or "Preset"
+            return str(fallback or "Preset").strip() or "Preset", None
 
+        text = "\n".join(lines)
+        display_name = str(fallback or "Preset").strip() or "Preset"
         match = cls._PRESET_HEADER_RE.search(text or "")
         if match:
             value = str(match.group(1) or "").strip()
             if value:
-                return value
-        return str(fallback or "Preset").strip() or "Preset"
+                display_name = value
 
-    @classmethod
-    def _read_template_origin_from_source(cls, path: Path) -> str | None:
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            return None
-
+        template_origin = None
         match = cls._TEMPLATE_ORIGIN_RE.search(text or "")
         if match:
             value = str(match.group(1) or "").strip()
             if value:
-                return value
-        return None
+                template_origin = value
+
+        return display_name, template_origin
 
     def _get_source_preset_path(self, engine: str, file_name: str) -> Path:
         from core.services import get_app_paths
@@ -408,20 +444,28 @@ class DirectFlowCoordinator:
             return ""
         return datetime.fromtimestamp(value, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
-    def _manifest_from_source_path(self, engine: str, path: Path) -> PresetManifest:
+    def _manifest_from_source_path(
+        self,
+        engine: str,
+        path: Path,
+        *,
+        timing_callback: Callable[[str, float], None] | None = None,
+        timing_label: str | None = None,
+    ) -> PresetManifest:
+        label = str(timing_label or f"direct_flow.{engine}.manifest")
         file_name = path.name
-        display_name = self._read_display_name_from_source(path, fallback=path.stem)
-        template_origin = self._read_template_origin_from_source(path)
+        t_header = time.perf_counter()
+        display_name, template_origin = self._read_header_metadata_from_source(path, fallback=path.stem)
+        self._emit_timing(timing_callback, f"{label}.manifest_header_metadata", t_header)
+        t_timestamp = time.perf_counter()
         timestamp = self._file_time_to_iso(path)
+        self._emit_timing(timing_callback, f"{label}.manifest_timestamp", t_timestamp)
         kind = "builtin" if self._is_builtin_preset(engine, path, template_origin) else "user"
-        try:
-            from core.services import get_preset_repository
-
-            current = get_preset_repository().get_manifest(engine, file_name)
-            if current is not None and str(current.kind or "").strip().lower() == "imported":
-                kind = "imported"
-        except Exception:
-            pass
+        t_kind = time.perf_counter()
+        imported_kind = self._get_index_kind_hint(engine, file_name)
+        if imported_kind == "imported":
+            kind = "imported"
+        self._emit_timing(timing_callback, f"{label}.manifest_kind_hint", t_kind)
         return PresetManifest(
             file_name=file_name,
             name=display_name,
@@ -430,6 +474,43 @@ class DirectFlowCoordinator:
             updated_at=timestamp,
             kind=kind,
         )
+
+    def _get_index_kind_hint(self, engine: str, file_name: str) -> str | None:
+        normalized_engine = str(engine or "").strip().lower()
+        target = str(file_name or "").strip().lower()
+        if not normalized_engine or not target:
+            return None
+
+        try:
+            from core.services import get_app_paths
+
+            index_path = get_app_paths().engine_paths(normalized_engine).ensure_directories().index_path
+        except Exception:
+            return None
+
+        signature = path_cache_signature(index_path)
+        cached = self._index_kind_cache.get(normalized_engine)
+        if cached is not None and cached[0] == signature:
+            return cached[1].get(target)
+
+        kinds: dict[str, str] = {}
+        if index_path.exists():
+            try:
+                payload = json.loads(index_path.read_text(encoding="utf-8", errors="replace") or "[]")
+            except Exception:
+                payload = []
+
+            if isinstance(payload, list):
+                for item in payload:
+                    if not isinstance(item, dict):
+                        continue
+                    item_file_name = str(item.get("file_name") or "").strip().lower()
+                    item_kind = str(item.get("kind") or "").strip().lower()
+                    if item_file_name and item_kind:
+                        kinds[item_file_name] = item_kind
+
+        self._index_kind_cache[normalized_engine] = (signature, kinds)
+        return kinds.get(target)
 
     @staticmethod
     def _is_builtin_preset(engine: str, path: Path, template_origin: str | None) -> bool:

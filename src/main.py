@@ -357,6 +357,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
     deferred_init_requested = pyqtSignal()
     continue_startup_requested = pyqtSignal()
     finalize_ui_bootstrap_requested = pyqtSignal()
+    startup_interactive_ready = pyqtSignal(str)
+    startup_post_init_ready = pyqtSignal(str)
 
     from ui.theme import ThemeHandler
     # ✅ ДОБАВЛЯЕМ TYPE HINTS для менеджеров
@@ -372,7 +374,7 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
 
     @staticmethod
     def _build_initial_ui_state() -> AppUiState:
-        """Стартовое optimistic-состояние UI до фоновой проверки процессов."""
+        """Честное стартовое состояние UI до реальной проверки и автозапуска."""
         try:
             from config import get_dpi_autostart, get_winws_exe_for_method
             from strategy_menu import get_strategy_launch_method
@@ -383,17 +385,17 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
             if launch_method and launch_method != "orchestra":
                 expected_process = os.path.basename(get_winws_exe_for_method(launch_method)).strip().lower()
 
-            optimistic_running_methods = {
+            autostart_pending_methods = {
                 "direct_zapret2",
                 "direct_zapret1",
                 "direct_zapret2_orchestra",
                 "orchestra",
             }
 
-            if launch_method in optimistic_running_methods:
+            if autostart_enabled and launch_method in autostart_pending_methods:
                 return AppUiState(
-                    dpi_phase="running",
-                    dpi_running=True,
+                    dpi_phase="autostart_pending",
+                    dpi_running=False,
                     dpi_expected_process=expected_process,
                     autostart_enabled=autostart_enabled,
                 )
@@ -402,7 +404,7 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
                 dpi_phase="stopped",
                 dpi_running=False,
                 dpi_expected_process=expected_process,
-                autostart_enabled=False,
+                autostart_enabled=autostart_enabled,
             )
         except Exception:
             return AppUiState()
@@ -715,91 +717,13 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
             if hasattr(self, 'update_current_strategy_display'):
                 self.update_current_strategy_display(strategy_name)
 
-            # Direct launch methods are preset-based only.
+            # Direct launch methods now go through one canonical controller path.
             if launch_method in ("direct_zapret2", "direct_zapret2_orchestra", "direct_zapret1"):
-                if launch_method == "direct_zapret2":
-                    try:
-                        from core.services import get_direct_flow_coordinator
-
-                        coordinator = get_direct_flow_coordinator()
-                        selected_mode = coordinator.ensure_launch_profile(
-                            "direct_zapret2",
-                            require_filters=True,
-                        ).to_selected_mode()
-                    except Exception as e:
-                        log(f"Не удалось подготовить запуск direct_zapret2: {e}", "ERROR")
-                        self.set_status(str(e))
-                        return
-
-                    log(
-                        f"Запуск direct_zapret2 из выбранного source-пресета: {selected_mode.get('preset_path', '')}",
-                        "INFO",
-                    )
-                    self.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=launch_method)
-
-                elif launch_method == "direct_zapret1":
-                    try:
-                        from core.services import get_direct_flow_coordinator
-
-                        coordinator = get_direct_flow_coordinator()
-                        selected_mode = coordinator.ensure_launch_profile(
-                            "direct_zapret1",
-                            require_filters=True,
-                        ).to_selected_mode()
-                    except Exception as e:
-                        log(f"Не удалось подготовить запуск direct_zapret1: {e}", "ERROR")
-                        self.set_status(str(e))
-                        return
-
-                    log(
-                        f"Запуск Zapret1 из выбранного source-пресета: {selected_mode.get('preset_path', '')}",
-                        "INFO",
-                    )
-                    self.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=launch_method)
-
-                else:
-                    from preset_orchestra_zapret2 import (
-                        get_active_preset_path,
-                        get_active_preset_name,
-                        ensure_default_preset_exists,
-                    )
-
-                    if not ensure_default_preset_exists():
-                        log(
-                            "Не удалось создать preset-zapret2-orchestra.txt: отсутствует шаблон Default",
-                            "ERROR",
-                        )
-                        self.set_status("Ошибка: отсутствует шаблон Default для оркестра")
-                        return
-
-                    preset_path = get_active_preset_path()
-                    preset_name = get_active_preset_name() or "Default"
-
-                    if not preset_path.exists():
-                        log(f"preset-zapret2-orchestra.txt не найден: {preset_path}", "ERROR")
-                        self.set_status("Выберите стратегию в разделе Оркестратор Z2")
-                        return
-
-                    try:
-                        content = preset_path.read_text(encoding='utf-8').strip()
-                        has_filters = any(f in content for f in ['--wf-tcp-out', '--wf-udp-out', '--wf-raw-part'])
-                        if not has_filters:
-                            log("Orchestra preset файл не содержит активных фильтров", "WARNING")
-                            self.set_status("Выберите хотя бы одну категорию для запуска")
-                            return
-                    except Exception as e:
-                        log(f"Ошибка чтения orchestra preset файла: {e}", "ERROR")
-                        self.set_status(f"Ошибка чтения preset: {e}")
-                        return
-
-                    selected_mode = {
-                        'is_preset_file': True,
-                        'name': f"Пресет оркестра: {preset_name}",
-                        'preset_path': str(preset_path),
-                    }
-
-                    log(f"Запуск direct_zapret2_orchestra из preset файла: {preset_path}", "INFO")
-                    self.dpi_controller.start_dpi_async(selected_mode=selected_mode, launch_method=launch_method)
+                log(
+                    f"Запуск {launch_method} передан в единый DPI controller pipeline",
+                    "INFO",
+                )
+                self.dpi_controller.start_dpi_async(selected_mode=None, launch_method=launch_method)
             else:
                 # BAT режим
                 try:
@@ -957,9 +881,6 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         self.ui_manager = UIManager(self)
         log(f"⏱ Startup: managers init {( _time.perf_counter() - _t_mgr ) * 1000:.0f}ms", "DEBUG")
 
-        # Базовый donate checker нужен только как лёгкая оболочка до фоновой
-        # полной инициализации подписки.
-        self._init_real_donate_checker()
         self.update_title_with_subscription_status(False, None, 0, source="init")
 
         # Стартовый порядок теперь управляется самим initialization_manager.
@@ -991,6 +912,10 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
             _log_startup_metric("Interactive", f"{source}, +{delta_ms}ms after TTFF")
         else:
             _log_startup_metric("Interactive", source)
+        try:
+            self.startup_interactive_ready.emit(str(source or "interactive"))
+        except Exception:
+            pass
 
     def _mark_startup_managers_ready(self, source: str = "managers_init_done") -> None:
         if self._startup_managers_ready_logged:
@@ -1009,7 +934,7 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
             delta_ms = max(0, managers_ready_ms - self._startup_ttff_ms)
             details = f"{source}, +{delta_ms}ms after TTFF"
 
-        _log_startup_metric("ManagersReady", details)
+        _log_startup_metric("CoreStartupReady", details)
 
     def _mark_startup_post_init_done(self, source: str = "post_init_tasks") -> None:
         if self._startup_post_init_done_logged:
@@ -1023,13 +948,17 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         managers_ready_ms = self._startup_managers_ready_ms
         if isinstance(managers_ready_ms, int):
             delta_ms = max(0, post_init_ms - managers_ready_ms)
-            details = f"{source}, +{delta_ms}ms after ManagersReady"
+            details = f"{source}, +{delta_ms}ms after CoreStartupReady"
         elif isinstance(self._startup_interactive_ms, int):
             delta_ms = max(0, post_init_ms - self._startup_interactive_ms)
             details = f"{source}, +{delta_ms}ms after Interactive"
 
-        _log_startup_metric("PostInitDone", details)
+        _log_startup_metric("PostInitDispatched", details)
         self._startup_post_init_ready = True
+        try:
+            self.startup_post_init_ready.emit(str(source or "post_init"))
+        except Exception:
+            pass
         self._start_background_init()
         notification_controller = getattr(self, "window_notification_controller", None)
         if notification_controller is not None:
@@ -1090,15 +1019,6 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
         except Exception as e:
             log(f"Ошибка обновления стилей: {e}", "DEBUG")
     
-    def _init_real_donate_checker(self) -> None:
-        """Создает базовый DonateChecker (полная инициализация в SubscriptionManager)"""
-        try:
-            from donater import DonateChecker
-            self.donate_checker = DonateChecker()
-            log("Базовый DonateChecker создан", "DEBUG")
-        except Exception as e:
-            log(f"Ошибка создания DonateChecker: {e}", "❌ ERROR")
-
     def show_subscription_dialog(self) -> None:
         """Переключается на страницу Premium."""
         try:
@@ -1530,36 +1450,28 @@ def main():
 
     _deferred_maintenance_bridge.finished.connect(_on_deferred_maintenance_finished)
 
-    def _run_after_startup_flag(
-        flag_attr: str,
-        callback,
-        *,
-        gate_name: str,
-        check_every_ms: int = 250,
-        timeout_ms: int = 20000,
-    ) -> None:
-        """Run callback when a startup flag becomes True (or after timeout)."""
-        started_at = time.perf_counter()
+    def _bind_startup_gate(signal, callback, *, gate_name: str, is_ready) -> None:
+        """Привязывает startup-задачу к честному событию вместо polling по флагу."""
+        started = False
 
-        def _try_start() -> None:
-            try:
-                ready = bool(getattr(window, flag_attr, False))
-                elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        def _run(*_args) -> None:
+            nonlocal started
+            if started:
+                return
+            started = True
+            callback()
 
-                if ready or elapsed_ms >= int(timeout_ms):
-                    if not ready:
-                        log(
-                            f"Startup gate timeout: {gate_name} ({flag_attr}) after {elapsed_ms}ms",
-                            "DEBUG",
-                        )
-                    callback()
-                    return
+        try:
+            signal.connect(_run)
+        except Exception:
+            QTimer.singleShot(0, _run)
+            return
 
-                QTimer.singleShot(max(50, int(check_every_ms)), _try_start)
-            except Exception:
-                callback()
-
-        QTimer.singleShot(0, _try_start)
+        try:
+            if bool(is_ready()):
+                QTimer.singleShot(0, _run)
+        except Exception:
+            QTimer.singleShot(0, _run)
 
     def _startup_checks_worker():
         started_at = time.perf_counter()
@@ -1669,12 +1581,11 @@ def main():
         window.log_startup_metric("StartupChecksStarted", "startup_checks_worker")
         threading.Thread(target=_startup_checks_worker, daemon=True).start()
 
-    _run_after_startup_flag(
-        "_startup_interactive_logged",
+    _bind_startup_gate(
+        window.startup_interactive_ready,
         _start_startup_checks,
         gate_name="startup_checks",
-        check_every_ms=250,
-        timeout_ms=20000,
+        is_ready=lambda: bool(getattr(window, "_startup_interactive_logged", False)),
     )
 
     def _deferred_maintenance_worker():
@@ -1736,12 +1647,11 @@ def main():
         )
         QTimer.singleShot(delay_ms, _start_deferred_maintenance)
 
-    _run_after_startup_flag(
-        "_startup_post_init_ready",
+    _bind_startup_gate(
+        window.startup_post_init_ready,
         _schedule_deferred_maintenance,
         gate_name="deferred_maintenance",
-        check_every_ms=350,
-        timeout_ms=30000,
+        is_ready=lambda: bool(getattr(window, "_startup_post_init_ready", False)),
     )
 
     # ─── Автопроверка обновлений при запуске ───────────────────────────────────
@@ -1858,12 +1768,11 @@ def main():
         log(f"Автопроверка обновлений отложена на {delay_ms}ms после готовности UI", "DEBUG")
         QTimer.singleShot(delay_ms, _schedule_startup_update_check)
 
-    _run_after_startup_flag(
-        "_startup_post_init_ready",
+    _bind_startup_gate(
+        window.startup_post_init_ready,
         _schedule_startup_update_check_deferred,
         gate_name="startup_update_check",
-        check_every_ms=350,
-        timeout_ms=30000,
+        is_ready=lambda: bool(getattr(window, "_startup_post_init_ready", False)),
     )
 
     # ─── CPU Diagnostic ────────────────────────────────────────────────────────

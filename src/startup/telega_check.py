@@ -87,8 +87,10 @@ def _check_telega_warning_disabled() -> bool:
     """Проверяет, отключено ли предупреждение о Telega в реестре."""
     try:
         import winreg
+        from config.config import REGISTRY_PATH
+
         with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER, r"Software\ZapretReg2", 0, winreg.KEY_READ
+            winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_READ
         ) as key:
             value, _ = winreg.QueryValueEx(key, "DisableTelegaWarning")
             return value == 1
@@ -96,21 +98,24 @@ def _check_telega_warning_disabled() -> bool:
         return False
 
 
-def _set_telega_warning_disabled(disabled: bool) -> None:
+def _set_telega_warning_disabled(disabled: bool) -> bool:
     """Сохраняет в реестре настройку отключения предупреждения о Telega."""
     try:
         import winreg
+        from config.config import REGISTRY_PATH
+
         with winreg.CreateKeyEx(
-            winreg.HKEY_CURRENT_USER, r"Software\ZapretReg2", 0, winreg.KEY_WRITE
+            winreg.HKEY_CURRENT_USER, REGISTRY_PATH, 0, winreg.KEY_WRITE
         ) as key:
             winreg.SetValueEx(key, "DisableTelegaWarning", 0, winreg.REG_DWORD, 1 if disabled else 0)
+        return True
     except Exception:
-        pass
+        return False
 
 
-def disable_telega_warning_forever() -> None:
+def disable_telega_warning_forever() -> bool:
     """Отключает дальнейшие предупреждения о Telega Desktop."""
-    _set_telega_warning_disabled(True)
+    return _set_telega_warning_disabled(True)
 
 
 def build_telega_notification(found_path: str = "") -> dict | None:

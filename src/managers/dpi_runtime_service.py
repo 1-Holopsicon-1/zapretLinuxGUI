@@ -75,6 +75,25 @@ class DpiRuntimeService:
             changes["launch_method"] = str(launch_method or "").strip().lower()
         return self._apply(**changes)
 
+    def mark_autostart_pending(
+        self,
+        *,
+        launch_method: str | None = None,
+        expected_process: str = "",
+    ) -> bool:
+        changes = self._runtime_changes(
+            phase="autostart_pending",
+            running=False,
+            expected_process=expected_process,
+            expected_preset_path="",
+            pid=None,
+            last_error="",
+            last_exit_code=None,
+        )
+        if launch_method is not None:
+            changes["launch_method"] = str(launch_method or "").strip().lower()
+        return self._apply(**changes)
+
     def begin_stop(self) -> bool:
         snap = self.snapshot()
         return self._apply(
@@ -146,10 +165,18 @@ class DpiRuntimeService:
         launch_method: str | None = None,
         expected_process: str = "",
     ) -> bool:
+        current_phase = self.current_phase()
+        if running:
+            phase = "running"
+        elif current_phase == "autostart_pending":
+            phase = "autostart_pending"
+        else:
+            phase = "stopped"
+
         changes = self._runtime_changes(
-            phase="running" if running else "stopped",
+            phase=phase,
             running=bool(running),
-            expected_process=expected_process if running else "",
+            expected_process=expected_process if (running or phase == "autostart_pending") else "",
             expected_preset_path="",
             pid=None,
             last_error="",
@@ -177,7 +204,7 @@ class DpiRuntimeService:
 
         matched_pid = matched_pids[0] if matched_pids else None
 
-        if snap.phase == "starting":
+        if snap.phase in {"starting", "autostart_pending"}:
             if matched_pid is not None:
                 return self.mark_running(
                     pid=matched_pid,

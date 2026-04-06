@@ -329,10 +329,10 @@ class WindowNotificationController(QObject):
             return self._disable_proxy_with_feedback
 
         if kind == "disable_kaspersky_warning":
-            return self._disable_kaspersky_warning_forever
+            return lambda: self._disable_kaspersky_warning_forever(bar)
 
         if kind == "disable_telega_warning":
-            return self._disable_telega_warning_forever
+            return lambda: self._disable_telega_warning_forever(bar)
 
         if kind == "autofix":
             return lambda: self._run_windivert_autofix(str(action.get("value") or ""), bar)
@@ -363,21 +363,69 @@ class WindowNotificationController(QObject):
             )
         )
 
-    def _disable_kaspersky_warning_forever(self) -> None:
+    def _disable_kaspersky_warning_forever(self, bar=None) -> None:
         try:
             from startup.kaspersky import disable_kaspersky_warning_forever
 
-            disable_kaspersky_warning_forever()
+            success = bool(disable_kaspersky_warning_forever())
         except Exception as e:
             log(f"Не удалось отключить предупреждение Kaspersky: {e}", "DEBUG")
+            success = False
 
-    def _disable_telega_warning_forever(self) -> None:
+        try:
+            if success and bar is not None:
+                bar.close()
+        except Exception:
+            pass
+
+        self.notify(
+            advisory_notification(
+                level="success" if success else "warning",
+                title="Напоминание отключено" if success else "Не удалось отключить напоминание",
+                content=(
+                    "Предупреждение о Kaspersky больше не будет показываться."
+                    if success else
+                    "Не удалось сохранить настройку для предупреждения о Kaspersky."
+                ),
+                source="startup.kaspersky.action",
+                presentation="infobar",
+                queue="immediate",
+                duration=5000 if success else 8000,
+                dedupe_key="startup.kaspersky.action.disable_warning",
+            )
+        )
+
+    def _disable_telega_warning_forever(self, bar=None) -> None:
         try:
             from startup.telega_check import disable_telega_warning_forever
 
-            disable_telega_warning_forever()
+            success = bool(disable_telega_warning_forever())
         except Exception as e:
             log(f"Не удалось отключить предупреждение Telega: {e}", "DEBUG")
+            success = False
+
+        try:
+            if success and bar is not None:
+                bar.close()
+        except Exception:
+            pass
+
+        self.notify(
+            advisory_notification(
+                level="success" if success else "warning",
+                title="Напоминание отключено" if success else "Не удалось отключить напоминание",
+                content=(
+                    "Предупреждение о Telega Desktop больше не будет показываться."
+                    if success else
+                    "Не удалось сохранить настройку для предупреждения о Telega Desktop."
+                ),
+                source="startup.telega.action",
+                presentation="infobar",
+                queue="immediate",
+                duration=5000 if success else 8000,
+                dedupe_key="startup.telega.action.disable_warning",
+            )
+        )
 
     def _run_windivert_autofix(self, action: str, bar) -> None:
         if not action:
