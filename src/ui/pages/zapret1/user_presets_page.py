@@ -1317,10 +1317,9 @@ class Zapret1UserPresetsPage(BasePage):
         self._preset_search_input: Optional[QLineEdit] = None
         self._toolbar_layout: Optional[UserPresetsToolbarLayout] = None
 
-        self._ui_initialized = False
-        self._lazy_show_scheduled = False
         self._ui_state_store: Optional[MainWindowStateStore] = None
         self._ui_state_unsubscribe = None
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         return _tr_text(key, self._ui_language, default, **kwargs)
@@ -1535,11 +1534,6 @@ class Zapret1UserPresetsPage(BasePage):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not self._ui_initialized:
-            if not self._lazy_show_scheduled:
-                self._lazy_show_scheduled = True
-                QTimer.singleShot(0, self._finish_lazy_show)
-            return
         self._start_watching_presets()
         self._resync_layout_metrics()
         if self._ui_dirty:
@@ -1581,12 +1575,8 @@ class Zapret1UserPresetsPage(BasePage):
         self._stop_watching_presets()
         super().hideEvent(event)
 
-    def _ensure_ui_initialized(self) -> None:
-        if self._ui_initialized:
-            return
-
+    def _after_ui_built(self) -> None:
         started_at = time.perf_counter()
-        self._build_ui()
         self._apply_page_theme()
 
         try:
@@ -1597,23 +1587,8 @@ class Zapret1UserPresetsPage(BasePage):
         except Exception:
             pass
 
-        self._ui_initialized = True
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
         log(f"Z1UserPresetsPage: lazy ui init {elapsed_ms}ms", "DEBUG")
-
-    def _finish_lazy_show(self) -> None:
-        self._lazy_show_scheduled = False
-        if not self.isVisible():
-            return
-
-        self._ensure_ui_initialized()
-        self._start_watching_presets()
-        self._resync_layout_metrics()
-        if self._ui_dirty:
-            self.refresh_presets_view_if_possible()
-        else:
-            self._update_presets_view_height()
-        self._schedule_layout_resync(include_delayed=True)
 
     def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
         if self._ui_state_store is store:

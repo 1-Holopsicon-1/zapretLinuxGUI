@@ -116,7 +116,9 @@ class CustomDomainsPage(BasePage):
         qconfig.themeChanged.connect(lambda _: self._apply_theme_styles())
         qconfig.themeColorChanged.connect(lambda _: self._apply_theme_styles())
 
-        self._build_ui()
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+
+    def _after_ui_built(self) -> None:
         QTimer.singleShot(100, self._load_domains)
 
     def _tr(self, key: str, default: str) -> str:

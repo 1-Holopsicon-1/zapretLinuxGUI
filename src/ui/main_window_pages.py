@@ -31,9 +31,9 @@ _IDLE_PRELOAD_PAGE_PRIORITY: tuple[PageName, ...] = (
 )
 _IDLE_WARM_PAGE_ACTIONS: tuple[tuple[PageName, str], ...] = (
     (PageName.DPI_SETTINGS, ""),
-    (PageName.BLOCKCHECK, "_ensure_ui_built"),
-    (PageName.LOGS, "_ensure_ui_built"),
-    (PageName.APPEARANCE, "_ensure_ui_built"),
+    (PageName.BLOCKCHECK, ""),
+    (PageName.LOGS, ""),
+    (PageName.APPEARANCE, ""),
     (PageName.SERVERS, ""),
 )
 
@@ -159,10 +159,15 @@ def _run_next_idle_page_preload(window) -> None:
                 return
             label = task_target.name
             page = ensure_page(window, task_target)
-            if page is not None and action_name:
-                action = getattr(page, action_name, None)
-                if callable(action):
-                    action()
+            if page is not None:
+                if action_name:
+                    action = getattr(page, action_name, None)
+                    if callable(action):
+                        action()
+                else:
+                    ensure_built = getattr(page, "ensure_deferred_ui_built", None)
+                    if callable(ensure_built):
+                        ensure_built()
         else:
             return
     except Exception as e:
@@ -349,10 +354,43 @@ def bind_page_ui_state(window, page: QWidget | None) -> None:
     binder = getattr(page, "bind_ui_state_store", None)
     if store is None or page is None or not callable(binder):
         return
+
+    is_deferred_pending = getattr(page, "is_deferred_ui_build_pending", None)
+    if callable(is_deferred_pending):
+        try:
+            if is_deferred_pending():
+                queue_binding = getattr(page, "queue_ui_state_store_binding", None)
+                if callable(queue_binding):
+                    queue_binding(store)
+                return
+        except Exception:
+            pass
+
     try:
         binder(store)
     except Exception:
         pass
+
+
+def _finalize_page_after_ui_build(window, page_name: PageName, page: QWidget) -> None:
+    window._apply_ui_language_to_page(page)
+    bind_page_ui_state(window, page)
+    if bool(getattr(window, "_page_signal_bootstrap_complete", False)):
+        connect_lazy_page_signals(window, page_name, page)
+        ensure_page_in_stacked_widget(window, page)
+
+
+def _register_deferred_page_build_hook(window, page_name: PageName, page: QWidget) -> None:
+    signal_obj = getattr(page, "ui_built", None)
+    if signal_obj is None:
+        return
+
+    connect_signal_once(
+        window,
+        f"page_ui_built.{page_name.name}",
+        signal_obj,
+        lambda p=page, n=page_name: _finalize_page_after_ui_build(window, n, p),
+    )
 
 
 def connect_lazy_page_signals(window, page_name: PageName, page: QWidget) -> None:
@@ -814,10 +852,19 @@ def ensure_page(window, name: PageName) -> QWidget | None:
     setattr(window, attr_name, page)
     window._apply_ui_language_to_page(page)
     bind_page_ui_state(window, page)
+    _register_deferred_page_build_hook(window, resolved_name, page)
 
     if bool(getattr(window, "_page_signal_bootstrap_complete", False)):
-        connect_lazy_page_signals(window, resolved_name, page)
-        ensure_page_in_stacked_widget(window, page)
+        is_deferred_pending = getattr(page, "is_deferred_ui_build_pending", None)
+        deferred_pending = False
+        if callable(is_deferred_pending):
+            try:
+                deferred_pending = bool(is_deferred_pending())
+            except Exception:
+                deferred_pending = False
+        if not deferred_pending:
+            connect_lazy_page_signals(window, resolved_name, page)
+            ensure_page_in_stacked_widget(window, page)
 
     elapsed_ms = int((_time.perf_counter() - _t_page) * 1000)
     window._record_startup_page_init_metric(resolved_name, elapsed_ms)

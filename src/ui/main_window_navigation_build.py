@@ -530,6 +530,15 @@ def apply_ui_language_to_page(window, page: QWidget | None) -> None:
     if page is None:
         return
 
+    is_deferred_pending = getattr(page, "is_deferred_ui_build_pending", None)
+    if callable(is_deferred_pending):
+        try:
+            if is_deferred_pending():
+                page._ui_language = window._ui_language
+                return
+        except Exception:
+            pass
+
     for method_name in ("set_ui_language", "retranslate_ui", "apply_ui_language"):
         method = getattr(page, method_name, None)
         if callable(method):

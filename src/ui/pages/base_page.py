@@ -2,7 +2,7 @@
 """Базовый класс для страниц — использует qfluentwidgets ScrollArea."""
 
 import sys
-from PyQt6.QtCore import Qt, QEvent, QTimer
+from PyQt6.QtCore import Qt, QEvent, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QFrame,
     QSizePolicy, QPlainTextEdit, QTextEdit,
@@ -134,6 +134,8 @@ class BasePage(_FluentScrollArea):
     backward-compatible so all 40+ pages work without changes.
     """
 
+    ui_built = pyqtSignal()
+
     def __init__(
         self,
         title: str,
@@ -151,6 +153,10 @@ class BasePage(_FluentScrollArea):
         self._title_fallback = title
         self._subtitle_fallback = subtitle
         self._section_title_bindings: list[tuple[object, str, str]] = []
+        self._deferred_ui_build_enabled = False
+        self._deferred_ui_build_done = True
+        self._deferred_ui_after_build = None
+        self._pending_ui_state_store = None
 
         # Ensure objectName is set (required by FluentWindow.addSubInterface)
         if not self.objectName():
@@ -221,6 +227,42 @@ class BasePage(_FluentScrollArea):
         else:
             self.subtitle_label = None
 
+    def enable_deferred_ui_build(self, *, after_build=None) -> None:
+        """Переводит страницу на канонический deferred-build путь.
+
+        После этого основной UI страницы должен собираться не в `__init__`,
+        а при первом реальном показе страницы. Это уменьшает стоимость
+        lazy-инициализации страницы в момент первого клика по навигации.
+        """
+        self._deferred_ui_build_enabled = True
+        self._deferred_ui_build_done = False
+        self._deferred_ui_after_build = after_build
+
+    def is_deferred_ui_build_pending(self) -> bool:
+        return bool(self._deferred_ui_build_enabled) and not bool(self._deferred_ui_build_done)
+
+    def queue_ui_state_store_binding(self, store) -> None:
+        self._pending_ui_state_store = store
+
+    def ensure_deferred_ui_built(self) -> bool:
+        if not self.is_deferred_ui_build_pending():
+            return False
+
+        builder = getattr(self, "_build_ui", None)
+        if not callable(builder):
+            self._deferred_ui_build_done = True
+            return False
+
+        builder()
+        self._deferred_ui_build_done = True
+
+        after_build = getattr(self, "_deferred_ui_after_build", None)
+        if callable(after_build):
+            after_build()
+
+        self.ui_built.emit()
+        return True
+
     def _resolve_ui_language(self) -> str:
         try:
             from config.reg import get_ui_language
@@ -271,6 +313,14 @@ class BasePage(_FluentScrollArea):
     def set_ui_language(self, language: str) -> None:
         self._ui_language = normalize_language(language)
         self._retranslate_base_texts()
+
+    def showEvent(self, event):  # noqa: N802 (Qt override)
+        super().showEvent(event)
+        if not bool(getattr(self, "_deferred_ui_build_enabled", False)):
+            return
+        if event is not None and event.spontaneous():
+            return
+        self.ensure_deferred_ui_built()
 
     def _retranslate_base_texts(self) -> None:
         if self._title_key and hasattr(self, "title_label") and self.title_label is not None:

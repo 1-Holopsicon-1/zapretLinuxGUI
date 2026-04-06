@@ -61,7 +61,7 @@ except ImportError:
 from ui.pages.base_page import BasePage
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.compat_widgets import ActionButton, PrimaryActionButton, ResetActionButton, SettingsRow, set_tooltip, SettingsCard
-from ui.pages.dpi_settings_page import Win11ToggleRow, Win11ComboRow, Win11NumberRow
+from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow, Win11NumberRow
 from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree, StrategyTreeRow
 from ui.popup_menu import exec_popup_menu
 from strategy_menu.args_preview_dialog import ArgsPreviewDialog

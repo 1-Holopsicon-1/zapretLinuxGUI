@@ -238,7 +238,7 @@ class TelegramProxyPage(BasePage):
         self._settings_card.add_layout(host_port_row)
 
         # Auto-start toggle
-        from ui.pages.dpi_settings_page import Win11ToggleRow, Win11ComboRow
+        from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow
         self._autostart_toggle = Win11ToggleRow(
             "mdi.play-circle-outline",
             "Автозапуск прокси",

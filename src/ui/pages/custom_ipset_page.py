@@ -70,12 +70,14 @@ class CustomIpSetPage(BasePage):
             "error_kwargs": {},
         }
         self._invalid_line_items: list[tuple[int, str]] = []
-        self._build_ui()
 
         self._status_timer = QTimer()
         self._status_timer.setSingleShot(True)
         self._status_timer.timeout.connect(self._update_status)
 
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+
+    def _after_ui_built(self) -> None:
         QTimer.singleShot(100, self._load_entries)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:

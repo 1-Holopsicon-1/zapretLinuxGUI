@@ -62,7 +62,7 @@ class Zapret1DirectControlPage(BasePage):
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._last_known_dpi_running = False
-        self._build_ui()
+        self.enable_deferred_ui_build()
 
     def _start_dpi(self) -> None:
         start_dpi(self)
@@ -286,7 +286,7 @@ class Zapret1DirectControlPage(BasePage):
         program_settings_card = SettingsCard()
 
         try:
-            from ui.pages.dpi_settings_page import Win11ToggleSwitch
+            from ui.widgets.win11_controls import Win11ToggleSwitch
         except Exception:
             Win11ToggleSwitch = None
 

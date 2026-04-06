@@ -229,18 +229,12 @@ class LogsPage(BasePage):
 
         # qtawesome animations (e.g. qta.Spin) are not QAbstractAnimation; track state ourselves.
         self._refresh_spin_active = False
-        self._ui_built = False
-
-    def _ensure_ui_built(self) -> None:
-        if self._ui_built:
-            return
-        self._ui_built = True
-        self._build_ui()
+        self.enable_deferred_ui_build()
 
     def changeEvent(self, event):
         if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange):
             try:
-                if not self._ui_built:
+                if self.is_deferred_ui_build_pending():
                     self._theme_apply_pending_when_hidden = True
                     return super().changeEvent(event)
                 tokens = get_theme_tokens()
@@ -531,7 +525,7 @@ class LogsPage(BasePage):
             except Exception:
                 pass
 
-        if not self._ui_built:
+        if self.is_deferred_ui_build_pending():
             return
 
         self._retranslate_logs_tab()
@@ -1195,9 +1189,6 @@ class LogsPage(BasePage):
     def showEvent(self, event):
         """При показе страницы запускаем мониторинг"""
         super().showEvent(event)
-
-        if not event.spontaneous() and not self._ui_built:
-            self._ensure_ui_built()
 
         if self._theme_apply_pending_when_hidden:
             self._theme_apply_pending_when_hidden = False

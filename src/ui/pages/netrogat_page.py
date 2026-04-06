@@ -111,7 +111,9 @@ class NetrogatPage(BasePage):
             "user": 0,
             "saved": False,
         }
-        self._build_ui()
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+
+    def _after_ui_built(self) -> None:
         QTimer.singleShot(100, self._load)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:

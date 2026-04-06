@@ -1763,17 +1763,11 @@ def main():
             window.show_page(_PageName.SERVERS)
             sp = window.pages.get(_PageName.SERVERS)
             if sp is not None:
-                if sp._update_in_progress or sp.changelog_card._is_downloading:
-                    log("Обновление уже загружается, пропускаем startup-триггер", "🔄 UPDATE")
-                    return
-                sp._remote_version = version
-                sp._release_notes = release_notes
-                sp._found_update = True
-                try:
-                    sp.changelog_card.show_update(version, release_notes)
-                except Exception:
-                    pass
-                QTimer.singleShot(300, sp._install_update)
+                sp.present_startup_update(
+                    version,
+                    release_notes,
+                    install_after_show=True,
+                )
         except Exception as e:
             log(f"Ошибка при показе диалога обновления: {e}", "❌ ERROR")
 

@@ -270,17 +270,15 @@ class Zapret2DirectControlPage(BasePage):
             self._run_deferred_show_work,
             Qt.ConnectionType.QueuedConnection,
         )
-        _t_build = _time.perf_counter()
-        self._build_ui()
-        _log_startup_z2_control_metric("__init__.build_ui", (_time.perf_counter() - _t_build) * 1000)
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+        _log_startup_z2_control_metric("__init__.total", (_time.perf_counter() - _t_init) * 1000)
+
+    def _after_ui_built(self) -> None:
         try:
             self._apply_optimistic_startup_view()
         except Exception:
             pass
-        _t_stop_text = _time.perf_counter()
         self._update_stop_winws_button_text()
-        _log_startup_z2_control_metric("__init__.stop_button_text", (_time.perf_counter() - _t_stop_text) * 1000)
-        _log_startup_z2_control_metric("__init__.total", (_time.perf_counter() - _t_init) * 1000)
 
     def _start_dpi(self) -> None:
         start_dpi(self)
@@ -532,7 +530,7 @@ class Zapret2DirectControlPage(BasePage):
 
         _t_program_toggles = _time.perf_counter()
         try:
-            from ui.pages.dpi_settings_page import Win11ToggleSwitch
+            from ui.widgets.win11_controls import Win11ToggleSwitch
         except Exception:
             Win11ToggleSwitch = None  # type: ignore[assignment]
 
@@ -638,7 +636,7 @@ class Zapret2DirectControlPage(BasePage):
         advanced_layout.addWidget(self.advanced_desc)
 
         try:
-            from ui.pages.dpi_settings_page import Win11ToggleRow
+            from ui.widgets.win11_controls import Win11ToggleRow
         except Exception:
             Win11ToggleRow = None  # type: ignore[assignment]
 

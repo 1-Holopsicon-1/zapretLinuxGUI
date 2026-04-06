@@ -168,7 +168,7 @@ class PremiumPage(BasePage):
         self._pairing_status_timer.setInterval(self._PAIRING_AUTOPOLL_INTERVAL_MS)
         self._pairing_status_timer.timeout.connect(self._poll_pairing_status)
 
-        self._build_ui()
+        self.enable_deferred_ui_build()
         self._initialized = False
         self._ui_state_store = None
         self._ui_state_unsubscribe = None

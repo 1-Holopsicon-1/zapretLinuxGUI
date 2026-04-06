@@ -1,17 +1,31 @@
-"""Orchestra Zapret2 pages.
+"""Ленивые экспорты Orchestra Zapret2 pages."""
 
-Thin wrappers over Zapret2 pages to keep a dedicated namespace for
-direct_zapret2_orchestra preset flow.
-"""
+from __future__ import annotations
 
-from .direct_control_page import OrchestraZapret2DirectControlPage
-from .preset_detail_page import OrchestraZapret2PresetDetailPage
-from .strategy_detail_page import OrchestraZapret2StrategyDetailPage
-from .user_presets_page import OrchestraZapret2UserPresetsPage
+from importlib import import_module
 
-__all__ = [
-    "OrchestraZapret2DirectControlPage",
-    "OrchestraZapret2PresetDetailPage",
-    "OrchestraZapret2StrategyDetailPage",
-    "OrchestraZapret2UserPresetsPage",
-]
+
+_PAGE_EXPORTS: dict[str, tuple[str, str]] = {
+    "OrchestraZapret2DirectControlPage": (".direct_control_page", "OrchestraZapret2DirectControlPage"),
+    "OrchestraZapret2PresetDetailPage": (".preset_detail_page", "OrchestraZapret2PresetDetailPage"),
+    "OrchestraZapret2StrategyDetailPage": (".strategy_detail_page", "OrchestraZapret2StrategyDetailPage"),
+    "OrchestraZapret2UserPresetsPage": (".user_presets_page", "OrchestraZapret2UserPresetsPage"),
+}
+
+__all__ = list(_PAGE_EXPORTS)
+
+
+def __getattr__(name: str):
+    spec = _PAGE_EXPORTS.get(name)
+    if spec is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    module_name, attr_name = spec
+    module = import_module(module_name, __name__)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

@@ -83,7 +83,7 @@ class OrchestraPage(BasePage):
         qconfig.themeChanged.connect(lambda _: self._apply_theme())
         qconfig.themeColorChanged.connect(lambda _: self._apply_theme())
 
-        self._build_ui()
+        self.enable_deferred_ui_build()
 
         # Путь к лог-файлу (берём из runner динамически)
         self._log_file_path = None  # Устанавливается в _update_log_file_path()

@@ -90,7 +90,6 @@ class HostlistPage(BasePage):
             title_key="page.hostlist.title",
             subtitle_key="page.hostlist.subtitle",
         )
-        self._ui_built = False
         self._info_loaded_once = False
         self._domains_loaded = False
         self._ips_loaded = False
@@ -129,6 +128,7 @@ class HostlistPage(BasePage):
         from qfluentwidgets import qconfig
         qconfig.themeChanged.connect(lambda _: self._apply_editor_styles())
         qconfig.themeColorChanged.connect(lambda _: self._apply_editor_styles())
+        self.enable_deferred_ui_build()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)
@@ -147,9 +147,6 @@ class HostlistPage(BasePage):
         super().showEvent(event)
         if event.spontaneous():
             return
-        if not self._ui_built:
-            self._build_ui()
-            self._ui_built = True
         if not self._info_loaded_once:
             self._info_loaded_once = True
             QTimer.singleShot(0, self._load_info)
@@ -1908,7 +1905,7 @@ class HostlistPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-        if not self._ui_built:
+        if self.is_deferred_ui_build_pending():
             return
 
         if self.pivot is not None:

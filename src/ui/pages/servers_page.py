@@ -1,7 +1,7 @@
 # ui/pages/servers_page.py
 """Страница мониторинга серверов обновлений"""
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QSize
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QStackedWidget, QTableWidgetItem, QHeaderView,
@@ -9,12 +9,12 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QColor
 import qtawesome as qta
 import time
-from datetime import datetime
 
 from .base_page import BasePage
 from ui.compat_widgets import SettingsCard, ActionButton, PrimaryActionButton
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
+from updater.update_page_controller import UpdatePageController
 
 try:
     from qfluentwidgets import (
@@ -43,12 +43,8 @@ except ImportError:
     _HAS_FLUENT = False
 
 from config import APP_VERSION, CHANNEL
-from log import log
-from updater.telegram_updater import TELEGRAM_CHANNELS
 from config.telegram_links import open_telegram_link
-from updater.github_release import normalize_version
-from updater.channel_utils import normalize_update_channel, is_test_update_channel
-from updater.rate_limiter import UpdateRateLimiter
+from updater.channel_utils import is_test_update_channel
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -373,354 +369,6 @@ class UpdateStatusCard(CardWidget):
     def set_ui_language(self, language: str) -> None:
         self._ui_language = language
         self._apply_state_text()
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ВОРКЕРЫ
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class ServerCheckWorker(QThread):
-    """Воркер для проверки статуса серверов"""
-
-    server_checked = pyqtSignal(str, dict)
-    all_complete = pyqtSignal()
-    dpi_restart_needed = pyqtSignal()
-
-    def __init__(self, update_pool_stats: bool = False, telegram_only: bool = False, *, language: str = "ru"):
-        super().__init__()
-        self._update_pool_stats = update_pool_stats
-        self._telegram_only = telegram_only  # Если True - проверяем только Telegram
-        self._ui_language = language
-        self._first_online_server_id = None
-
-    def _tr(self, key: str, default: str) -> str:
-        return tr_catalog(key, language=self._ui_language, default=default)
-
-    @staticmethod
-    def _request_versions_json(url: str, *, timeout, verify_ssl: bool):
-        """Запрашивает all_versions.json без системного прокси.
-
-        Returns:
-            (data, error, route)
-            - data: dict | None
-            - error: str | None
-            - route: "direct"
-        """
-        import requests
-        from updater.proxy_bypass import request_get_bypass_proxy
-
-        headers = {
-            "Accept": "application/json",
-            "User-Agent": "Zapret-Updater/3.1",
-        }
-
-        if not verify_ssl:
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-        def _decode_response(resp):
-            if resp.status_code != 200:
-                return None, f"HTTP {resp.status_code}"
-            try:
-                return resp.json(), None
-            except Exception as e:
-                return None, f"json error: {str(e)[:60]}"
-
-        try:
-            response = request_get_bypass_proxy(
-                url,
-                timeout=timeout,
-                verify=verify_ssl,
-                headers=headers,
-            )
-            data, error = _decode_response(response)
-            return data, error, "direct"
-        except requests.exceptions.Timeout:
-            return None, "timeout", "direct"
-        except requests.exceptions.ConnectionError as e:
-            return None, f"connection error: {str(e)[:80]}", "direct"
-        except requests.exceptions.RequestException as e:
-            return None, str(e)[:80], "direct"
-        except Exception as e:
-            return None, str(e)[:80], "direct"
-
-    def run(self):
-        from updater.github_release import check_rate_limit
-        from updater.server_pool import get_server_pool
-        from updater.server_config import should_verify_ssl, CONNECT_TIMEOUT, READ_TIMEOUT
-        import time as _time
-
-        pool = get_server_pool()
-        self._first_online_server_id = None
-
-        # 1. Telegram Bot (основной источник) — опрашиваем только текущий канал
-        try:
-            from updater.telegram_updater import is_telegram_available, get_telegram_version_info
-
-            if is_telegram_available():
-                start_time = _time.time()
-                tg_channel = normalize_update_channel(CHANNEL)
-                tg_info = get_telegram_version_info(tg_channel)
-                response_time = _time.time() - start_time
-
-                stable_version = tg_info.get('version') if tg_channel == 'stable' and tg_info else '—'
-                test_version = tg_info.get('version') if tg_channel == 'test' and tg_info else '—'
-                stable_notes = tg_info.get('release_notes') if tg_channel == 'stable' and tg_info else ''
-                test_notes = tg_info.get('release_notes') if tg_channel == 'test' and tg_info else ''
-
-                if tg_info and tg_info.get('version'):
-                    tg_status = {
-                        'status': 'online',
-                        'response_time': response_time,
-                        'stable_version': stable_version,
-                        'test_version': test_version,
-                        'stable_notes': stable_notes,
-                        'test_notes': test_notes,
-                        'is_current': True,
-                    }
-                    self._first_online_server_id = 'telegram'
-
-                    # ✅ Сохраняем версию от Telegram в кэш all_versions
-                    from updater.update_cache import set_cached_all_versions, get_cached_all_versions
-                    all_versions = get_cached_all_versions() or {}
-                    all_versions[tg_channel] = {
-                        'version': tg_info['version'],
-                        'release_notes': tg_info.get('release_notes', ''),
-                    }
-                    set_cached_all_versions(all_versions, f"Telegram @{TELEGRAM_CHANNELS.get(tg_channel, tg_channel)}")
-                else:
-                    tg_status = {
-                        'status': 'error',
-                        'response_time': response_time,
-                        'error': self._tr("page.servers.error.version_not_found", "Версия не найдена"),
-                        'is_current': False,
-                    }
-            else:
-                tg_status = {
-                    'status': 'offline',
-                    'response_time': 0,
-                    'error': self._tr("page.servers.error.bot_not_configured", "Бот не настроен"),
-                    'is_current': False,
-                }
-
-            self.server_checked.emit('Telegram Bot', tg_status)
-            _time.sleep(0.02)
-        except Exception as e:
-            self.server_checked.emit('Telegram Bot', {
-                'status': 'error',
-                'error': str(e)[:40],
-                'is_current': False,
-            })
-
-        # Если режим telegram_only - показываем VPS серверы без проверки
-        if self._telegram_only:
-            for server in pool.servers:
-                self.server_checked.emit(server['name'], {
-                    'status': 'skipped',
-                    'response_time': 0,
-                    'error': self._tr("page.servers.status.rate_limited", "Ожидание"),
-                    'is_current': False,
-                })
-                _time.sleep(0.02)
-            self.all_complete.emit()
-            return
-
-        # ── Проверяем, не блокирует ли DPI доступ к VPS серверам ──
-        dpi_was_stopped = False
-        if pool.servers:
-            first = pool.servers[0]
-            test_url = f"https://{first['host']}:{first['https_port']}/api/all_versions.json"
-            data, error, _ = self._request_versions_json(
-                test_url, timeout=(5, 5), verify_ssl=should_verify_ssl()
-            )
-            if data is None:
-                from utils.process_killer import is_process_running, kill_winws_force
-                if is_process_running("winws.exe") or is_process_running("winws2.exe"):
-                    log("⚠️ DPI мешает проверке серверов — временно останавливаем", "🔄 UPDATE")
-                    kill_winws_force()
-                    _time.sleep(0.5)
-                    dpi_was_stopped = True
-
-        # 2. VPS серверы
-        for server in pool.servers:
-            server_id = server['id']
-            server_name = f"{server['name']}"
-
-            stats = pool.stats.get(server_id, {})
-            blocked_until = stats.get('blocked_until')
-            current_time = _time.time()
-
-            if blocked_until and current_time < blocked_until:
-                until_dt = datetime.fromtimestamp(blocked_until)
-                status = {
-                    'status': 'blocked',
-                    'response_time': 0,
-                    'error': self._tr(
-                        "page.servers.error.blocked_until_template",
-                        "Заблокирован до {time}",
-                    ).format(time=until_dt.strftime('%H:%M:%S')),
-                    'is_current': False,
-                }
-                self.server_checked.emit(server_name, status)
-                _time.sleep(0.02)
-                continue
-
-            monitor_timeout = (min(CONNECT_TIMEOUT, 3), min(READ_TIMEOUT, 5))
-            status = None
-            response_time = 0.0
-            last_error = self._tr("page.servers.error.connect_failed", "Не удалось подключиться")
-
-            protocol_attempts = [
-                (
-                    "HTTPS",
-                    f"https://{server['host']}:{server['https_port']}/api/all_versions.json",
-                    should_verify_ssl(),
-                ),
-                (
-                    "HTTP",
-                    f"http://{server['host']}:{server['http_port']}/api/all_versions.json",
-                    False,
-                ),
-            ]
-
-            for protocol, api_url, verify_ssl in protocol_attempts:
-                attempt_start = _time.time()
-                data, error, route = self._request_versions_json(
-                    api_url,
-                    timeout=monitor_timeout,
-                    verify_ssl=verify_ssl,
-                )
-                response_time = _time.time() - attempt_start
-
-                if data:
-                    stable_notes = data.get('stable', {}).get('release_notes', '')
-                    test_notes = data.get('test', {}).get('release_notes', '')
-
-                    is_first_online = self._first_online_server_id is None
-                    if is_first_online:
-                        self._first_online_server_id = server_id
-
-                    status = {
-                        'status': 'online',
-                        'response_time': response_time,
-                        'stable_version': data.get('stable', {}).get('version', '—'),
-                        'test_version': data.get('test', {}).get('version', '—'),
-                        'stable_notes': stable_notes,
-                        'test_notes': test_notes,
-                        'is_current': is_first_online,
-                    }
-
-                    from updater.update_cache import set_cached_all_versions
-                    source = f"{server_name} ({protocol}{' bypass' if route == 'bypass' else ''})"
-                    set_cached_all_versions(data, source)
-
-                    if self._update_pool_stats:
-                        pool.record_success(server_id, response_time)
-                    break
-
-                if error:
-                    last_error = f"{protocol}: {error}"
-
-            if status is None:
-                status = {
-                    'status': 'error',
-                    'response_time': response_time,
-                    'error': last_error[:80],
-                    'is_current': False,
-                }
-                if self._update_pool_stats:
-                    pool.record_failure(server_id, last_error[:80])
-
-            self.server_checked.emit(server_name, status)
-            _time.sleep(0.02)
-
-        # 3. GitHub API
-        try:
-            rate_info = check_rate_limit()
-            github_status = {
-                'status': 'online',
-                'response_time': 0.5,
-                'rate_limit': rate_info['remaining'],
-                'rate_limit_max': rate_info['limit'],
-            }
-        except Exception as e:
-            github_status = {
-                'status': 'error',
-                'error': str(e)[:50],
-            }
-
-        self.server_checked.emit('GitHub API', github_status)
-
-        if dpi_was_stopped:
-            self.dpi_restart_needed.emit()
-
-        self.all_complete.emit()
-
-
-class VersionCheckWorker(QThread):
-    """Воркер для получения версий"""
-
-    version_found = pyqtSignal(str, dict)
-    complete = pyqtSignal()
-
-    def run(self):
-        from updater.update_cache import get_cached_all_versions, get_all_versions_source, set_cached_all_versions
-        from updater.github_release import normalize_version
-
-        all_versions = get_cached_all_versions()
-        source_name = get_all_versions_source() if all_versions else None
-
-        if not all_versions:
-            from updater.server_pool import get_server_pool
-            from updater.server_config import should_verify_ssl, CONNECT_TIMEOUT, READ_TIMEOUT
-
-            pool = get_server_pool()
-            current_server = pool.get_current_server()
-            server_urls = pool.get_server_urls(current_server)
-            monitor_timeout = (min(CONNECT_TIMEOUT, 3), min(READ_TIMEOUT, 5))
-
-            for protocol, base_url in [('HTTPS', server_urls['https']), ('HTTP', server_urls['http'])]:
-                verify_ssl = should_verify_ssl() if protocol == 'HTTPS' else False
-                data, _, route = ServerCheckWorker._request_versions_json(
-                    f"{base_url}/api/all_versions.json",
-                    timeout=monitor_timeout,
-                    verify_ssl=verify_ssl,
-                )
-                if data:
-                    all_versions = data
-                    source_name = f"{current_server['name']} ({protocol}{' bypass' if route == 'bypass' else ''})"
-                    set_cached_all_versions(all_versions, source_name)
-                    break
-
-        if not all_versions:
-            from updater.release_manager import get_latest_release
-            for channel in ['stable', 'test']:
-                try:
-                    release = get_latest_release(channel, use_cache=False)
-                    if release:
-                        self.version_found.emit(channel, release)
-                    else:
-                        self.version_found.emit(channel, {'error': 'Не удалось получить'})
-                except Exception as e:
-                    self.version_found.emit(channel, {'error': str(e)})
-            self.complete.emit()
-            return
-
-        channel_mapping = {'stable': 'stable', 'test': 'test'}
-
-        for ui_channel, api_channel in channel_mapping.items():
-            data = all_versions.get(api_channel, {})
-            if data and data.get('version'):
-                result = {
-                    'version': normalize_version(data.get('version', '0.0.0')),
-                    'release_notes': data.get('release_notes', ''),
-                    'source': source_name,
-                }
-                self.version_found.emit(ui_channel, result)
-            else:
-                self.version_found.emit(ui_channel, {'error': 'Нет данных'})
-
-        self.complete.emit()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1218,26 +866,11 @@ class ServersPage(BasePage):
         )
 
         self._tokens = get_theme_tokens()
-
-        self.server_worker = None
-        self.version_worker = None
-        self._checking = False
-        self._found_update = False
-        self._remote_version = ""
-        self._release_notes = ""
-        self._update_in_progress = False
-
-        self._last_check_time = 0.0
-        self._check_cooldown = 60
-
-        self._auto_check_enabled = True
-        self._has_cached_data = False
-        self._keep_existing_server_rows = False
-
         self._server_status_map: dict[str, dict] = {}
         self._server_row_map: dict[str, int] = {}
+        self._update_controller = UpdatePageController(self)
 
-        self._build_ui()
+        self.enable_deferred_ui_build()
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)
@@ -1412,13 +1045,13 @@ class ServersPage(BasePage):
 
         # Update status card
         self.update_card = UpdateStatusCard(language=self._ui_language)
-        self.update_card.check_clicked.connect(self._check_updates)
+        self.update_card.check_clicked.connect(self._request_check_updates)
         self.add_widget(self.update_card)
 
         # Changelog card (hidden by default)
         self.changelog_card = ChangelogCard(language=self._ui_language)
-        self.changelog_card.install_clicked.connect(self._install_update)
-        self.changelog_card.dismiss_clicked.connect(self._dismiss_update)
+        self.changelog_card.install_clicked.connect(self._request_install_update)
+        self.changelog_card.dismiss_clicked.connect(self._request_dismiss_update)
         self.add_widget(self.changelog_card)
 
         # Table header row
@@ -1468,12 +1101,7 @@ class ServersPage(BasePage):
         toggle_row.setSpacing(12)
 
         self.auto_check_toggle = SwitchButton()
-        try:
-            from config import get_auto_update_enabled
-            self._auto_check_enabled = get_auto_update_enabled()
-        except Exception:
-            self._auto_check_enabled = True
-        self.auto_check_toggle.setChecked(self._auto_check_enabled)
+        self.auto_check_toggle.setChecked(self._update_controller.auto_check_enabled)
         if _HAS_FLUENT:
             self.auto_check_toggle.checkedChanged.connect(self._on_auto_check_toggled)
         else:
@@ -1533,133 +1161,17 @@ class ServersPage(BasePage):
         if event.spontaneous():
             return
 
-        if self._update_in_progress or self.changelog_card._is_downloading:
-            return
+        self._update_controller.on_page_shown()
 
-        elapsed = time.time() - self._last_check_time
-        if self._has_cached_data and elapsed < self._check_cooldown:
-            self.update_card.show_checked_ago(elapsed)
-            return
+    def get_ui_language(self) -> str:
+        return self._ui_language
 
-        if self._auto_check_enabled:
-            if elapsed >= self._check_cooldown:
-                QTimer.singleShot(200, self.start_checks)
-        else:
-            self.update_card.show_manual_hint()
+    def reset_server_rows(self) -> None:
+        self.servers_table.setRowCount(0)
+        self._server_row_map.clear()
+        self._server_status_map.clear()
 
-    def start_checks(self, telegram_only: bool = False, skip_server_rate_limit: bool = False):
-        """Запускает проверку серверов"""
-        if self._checking:
-            return
-
-        if self._update_in_progress or self.changelog_card._is_downloading:
-            log("⏭️ Пропуск проверки - идёт скачивание обновления", "🔄 UPDATE")
-            return
-
-        keep_existing_rows = False
-
-        if not telegram_only:
-            if not skip_server_rate_limit:
-                can_full, msg = UpdateRateLimiter.can_check_servers_full()
-                if not can_full:
-                    telegram_only = True
-                    keep_existing_rows = True
-                    log(f"⏱️ Полная проверка VPS заблокирована: {msg}. fallback=telegram-only", "🔄 UPDATE")
-
-            if not telegram_only:
-                UpdateRateLimiter.record_servers_full_check()
-                self._last_check_time = time.time()
-
-        self._checking = True
-        self._found_update = False
-        self.update_card.start_checking()
-        self._keep_existing_server_rows = keep_existing_rows
-        if not keep_existing_rows:
-            self.servers_table.setRowCount(0)
-            self._server_row_map.clear()
-            self._server_status_map.clear()
-
-        if self.server_worker and self.server_worker.isRunning():
-            self.server_worker.terminate()
-            self.server_worker.wait(500)
-
-        if self.version_worker and self.version_worker.isRunning():
-            self.version_worker.terminate()
-            self.version_worker.wait(500)
-
-        self.server_worker = ServerCheckWorker(
-            update_pool_stats=False,
-            telegram_only=telegram_only,
-            language=self._ui_language,
-        )
-        self.server_worker.server_checked.connect(self._on_server_checked)
-        self.server_worker.all_complete.connect(self._on_servers_complete)
-        self.server_worker.dpi_restart_needed.connect(self._restart_dpi_after_update)
-        self.server_worker.start()
-
-    def _get_candidate_version_and_notes(self, status: dict) -> tuple[str | None, str]:
-        if is_test_update_channel(CHANNEL):
-            raw_version = status.get("test_version")
-            notes = status.get("test_notes", "") or ""
-        else:
-            raw_version = status.get("stable_version")
-            notes = status.get("stable_notes", "") or ""
-
-        if not raw_version or raw_version == "—":
-            return None, ""
-
-        try:
-            return normalize_version(str(raw_version)), notes
-        except Exception:
-            return None, ""
-
-    def _maybe_offer_update_from_server(self, server_name: str, status: dict) -> None:
-        if getattr(self, "_checking", False) is False:
-            return
-
-        if getattr(self, "_found_update", False) is False and not status.get("is_current"):
-            return
-
-        if getattr(self, "_update_in_progress", False):
-            return
-
-        if hasattr(self, "changelog_card") and getattr(self.changelog_card, "_is_downloading", False):
-            return
-
-        candidate_version, candidate_notes = self._get_candidate_version_and_notes(status)
-        if not candidate_version:
-            return
-
-        from updater.update import compare_versions
-
-        try:
-            if compare_versions(APP_VERSION, candidate_version) >= 0:
-                return
-        except Exception:
-            return
-
-        if getattr(self, "_remote_version", ""):
-            try:
-                if compare_versions(self._remote_version, candidate_version) >= 0:
-                    return
-            except Exception:
-                return
-
-        self._found_update = True
-        self._remote_version = candidate_version
-        self._release_notes = candidate_notes or ""
-
-        try:
-            self.changelog_card.show_update(self._remote_version, self._release_notes)
-        except Exception:
-            pass
-
-        try:
-            self.update_card.show_found_update(self._remote_version, server_name)
-        except Exception:
-            pass
-
-    def _on_server_checked(self, server_name: str, status: dict):
+    def upsert_server_status(self, server_name: str, status: dict) -> None:
         row = self._server_row_map.get(server_name)
         if row is None:
             row = self.servers_table.rowCount()
@@ -1668,128 +1180,76 @@ class ServersPage(BasePage):
 
         self._server_status_map[server_name] = dict(status or {})
         self._render_server_row(row, server_name, self._server_status_map[server_name])
-        self._maybe_offer_update_from_server(server_name, status)
 
-    def _on_servers_complete(self):
-        if self.version_worker and self.version_worker.isRunning():
-            self.version_worker.terminate()
-            self.version_worker.wait(500)
+    def start_checking(self) -> None:
+        self.update_card.start_checking()
 
-        self.version_worker = VersionCheckWorker()
-        self.version_worker.version_found.connect(self._on_version_found)
-        self.version_worker.complete.connect(self._on_versions_complete)
-        self.version_worker.start()
+    def finish_checking(self, found_update: bool, version: str) -> None:
+        self.update_card.stop_checking(found_update, version)
 
-    def _on_version_found(self, channel: str, version_info: dict):
-        target_channel = 'test' if is_test_update_channel(CHANNEL) else 'stable'
-        if channel in {'stable', 'test'} and channel == target_channel and not version_info.get('error'):
-            version = version_info.get('version', '')
-            from updater.update import compare_versions
-            try:
-                if compare_versions(APP_VERSION, version) < 0:
-                    self._found_update = True
-                    self._remote_version = version
-                    self._release_notes = version_info.get('release_notes', '')
-            except Exception:
-                pass
+    def show_found_update_source(self, version: str, source: str) -> None:
+        self.update_card.show_found_update(version, source)
 
-    def _on_versions_complete(self):
-        self._checking = False
-        self._has_cached_data = True
-        self.update_card.stop_checking(self._found_update, self._remote_version)
+    def show_update_offer(self, version: str, release_notes: str) -> None:
+        self.changelog_card.show_update(version, release_notes)
 
-        if self._found_update and not self._update_in_progress and not self.changelog_card._is_downloading:
-            self.changelog_card.show_update(self._remote_version, self._release_notes)
-
-    def _check_updates(self):
-        if self._update_in_progress or self.changelog_card._is_downloading:
-            return
-
+    def hide_update_offer(self) -> None:
         self.changelog_card.hide()
-        self._found_update = False
-        self._remote_version = ""
-        self._release_notes = ""
 
-        from updater import invalidate_cache
-        invalidate_cache(CHANNEL)
-        log("🔄 Полная проверка всех серверов (ручная)", "🔄 UPDATE")
+    def is_update_download_in_progress(self) -> bool:
+        return bool(getattr(self.changelog_card, "_is_downloading", False))
 
-        self.start_checks(telegram_only=False, skip_server_rate_limit=True)
+    def start_update_download(self, version: str) -> None:
+        self.changelog_card.start_download(version)
 
-    def _install_update(self):
-        if self._update_in_progress:
-            log("Загрузка уже выполняется, повторный запуск проигнорирован", "🔄 UPDATE")
-            return
+    def update_download_progress(self, percent: int, done_bytes: int, total_bytes: int) -> None:
+        self.changelog_card.update_progress(percent, done_bytes, total_bytes)
 
-        self._update_in_progress = True
+    def mark_update_download_complete(self) -> None:
+        self.changelog_card.download_complete()
 
-        log(f"Запуск установки обновления v{self._remote_version}", "🔄 UPDATE")
+    def mark_update_download_failed(self, error: str) -> None:
+        self.changelog_card.download_failed(error)
 
-        from updater import invalidate_cache
-        invalidate_cache(CHANNEL)
-
-        self.changelog_card.start_download(self._remote_version)
-        self.update_card.hide()
-        self.update_card.check_btn.setEnabled(False)
-
-        try:
-            from updater.update import UpdateWorker
-            from PyQt6.QtCore import QThread
-
-            parent_window = self.window()
-
-            self._update_thread = QThread(parent_window)
-            self._update_worker = UpdateWorker(parent_window, silent=True, skip_rate_limit=True)
-            self._update_worker.moveToThread(self._update_thread)
-
-            self._update_thread.started.connect(self._update_worker.run)
-            self._update_worker.finished.connect(self._update_thread.quit)
-            self._update_worker.finished.connect(self._update_worker.deleteLater)
-            self._update_thread.finished.connect(self._update_thread.deleteLater)
-
-            def _on_thread_done():
-                self._update_in_progress = False
-                self._update_thread = None
-                self._update_worker = None
-                self.update_card.check_btn.setEnabled(True)
-            self._update_thread.finished.connect(_on_thread_done)
-
-            self._update_worker.progress_bytes.connect(
-                lambda p, d, t: self.changelog_card.update_progress(p, d, t)
-            )
-            self._update_worker.download_complete.connect(self.changelog_card.download_complete)
-            self._update_worker.download_failed.connect(self.changelog_card.download_failed)
-            self._update_worker.download_failed.connect(self._on_download_failed)
-            self._update_worker.dpi_restart_needed.connect(self._restart_dpi_after_update)
-            self._update_worker.progress.connect(lambda m: log(f'{m}', "🔁 UPDATE"))
-
-            self._update_thread.start()
-
-        except Exception as e:
-            log(f"Ошибка при запуске обновления: {e}", "❌ ERROR")
-            self._update_in_progress = False
-            self._update_thread = None
-            self._update_worker = None
-            self.update_card.check_btn.setEnabled(True)
-            self.changelog_card.download_failed(str(e)[:50])
-
-    def _on_download_failed(self, error: str):
-        self.update_card.show()
+    def show_update_download_error(self) -> None:
         self.update_card.show_download_error()
 
-    def _restart_dpi_after_update(self):
-        """Перезапуск DPI после временной остановки для скачивания обновления."""
-        try:
-            win = self.window()
-            if hasattr(win, 'dpi_controller') and win.dpi_controller:
-                log("🔄 Перезапуск DPI после скачивания обновления", "🔁 UPDATE")
-                win.dpi_controller.restart_dpi_async()
-        except Exception as e:
-            log(f"Не удалось перезапустить DPI: {e}", "❌ ERROR")
+    def show_update_deferred(self, version: str) -> None:
+        self.update_card.show_deferred(version)
 
-    def _dismiss_update(self):
-        log("Обновление отложено пользователем", "🔄 UPDATE")
-        self.update_card.show_deferred(self._remote_version)
+    def show_checked_ago(self, elapsed: float) -> None:
+        self.update_card.show_checked_ago(elapsed)
+
+    def show_manual_hint(self) -> None:
+        self.update_card.show_manual_hint()
+
+    def show_auto_enabled_hint(self) -> None:
+        self.update_card.show_auto_enabled_hint()
+
+    def hide_update_status_card(self) -> None:
+        self.update_card.hide()
+
+    def show_update_status_card(self) -> None:
+        self.update_card.show()
+
+    def set_update_check_enabled(self, enabled: bool) -> None:
+        self.update_card.check_btn.setEnabled(bool(enabled))
+
+    def present_startup_update(self, version: str, release_notes: str, *, install_after_show: bool = True) -> bool:
+        return self._update_controller.present_startup_update(
+            version,
+            release_notes,
+            install_after_show=install_after_show,
+        )
+
+    def _request_check_updates(self) -> None:
+        self._update_controller.request_manual_check()
+
+    def _request_install_update(self) -> None:
+        self._update_controller.install_update()
+
+    def _request_dismiss_update(self) -> None:
+        self._update_controller.dismiss_update()
 
     def _open_telegram_channel(self):
         open_telegram_link("zapretguidev" if is_test_update_channel(CHANNEL) else "zapretnetdiscordyoutube")
@@ -1804,37 +1264,7 @@ class ServersPage(BasePage):
             pass
 
     def _on_auto_check_toggled(self, enabled: bool):
-        self._auto_check_enabled = enabled
-
-        try:
-            from config import set_auto_update_enabled
-            set_auto_update_enabled(enabled)
-        except Exception:
-            pass
-
-        if enabled:
-            self.update_card.show_auto_enabled_hint()
-        else:
-            self.update_card.show_manual_hint()
-
-        log(f"Автопроверка при запуске: {'включена' if enabled else 'отключена'}", "🔄 UPDATE")
+        self._update_controller.set_auto_check_enabled(bool(enabled))
 
     def cleanup(self):
-        try:
-            if self.server_worker and self.server_worker.isRunning():
-                log("Останавливаем server_worker...", "DEBUG")
-                self.server_worker.quit()
-                if not self.server_worker.wait(2000):
-                    log("⚠ server_worker не завершился, принудительно завершаем", "WARNING")
-                    self.server_worker.terminate()
-                    self.server_worker.wait(500)
-
-            if self.version_worker and self.version_worker.isRunning():
-                log("Останавливаем version_worker...", "DEBUG")
-                self.version_worker.quit()
-                if not self.version_worker.wait(2000):
-                    log("⚠ version_worker не завершился, принудительно завершаем", "WARNING")
-                    self.version_worker.terminate()
-                    self.version_worker.wait(500)
-        except Exception as e:
-            log(f"Ошибка при очистке servers_page: {e}", "DEBUG")
+        self._update_controller.cleanup()

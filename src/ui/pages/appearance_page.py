@@ -103,15 +103,9 @@ class AppearancePage(BasePage):
         self._mica_switch = None
         self._animations_switch = None
         self._smooth_scroll_switch = None
-        self._ui_built = False
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
-    def _ensure_ui_built(self) -> None:
-        if self._ui_built:
-            return
-
-        self._build_ui()
-        self._ui_built = True
-
+    def _after_ui_built(self) -> None:
         try:
             self.set_premium_status(self._is_premium)
         except Exception:
@@ -152,12 +146,6 @@ class AppearancePage(BasePage):
         self.set_garland_state(state.garland_enabled)
         self.set_snowflakes_state(state.snowflakes_enabled)
         self.set_opacity_value(state.window_opacity)
-
-    def showEvent(self, a0):  # noqa: N802 (Qt naming)
-        super().showEvent(a0)
-        if a0 is None or a0.spontaneous():
-            return
-        self._ensure_ui_built()
 
     def _build_ui(self):
         # ═══════════════════════════════════════════════════════════
@@ -816,7 +804,7 @@ class AppearancePage(BasePage):
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
 
-        if not self._ui_built:
+        if self.is_deferred_ui_build_pending():
             return
 
         from ui.text_catalog import tr as tr_catalog

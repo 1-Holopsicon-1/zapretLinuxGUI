@@ -305,7 +305,7 @@ def load_presets(page) -> None:
 
 
 def refresh_presets_view_if_possible(page) -> None:
-    if not page._ui_initialized:
+    if page.is_deferred_ui_build_pending():
         page._ui_dirty = True
         return
     if page._cached_presets_metadata:

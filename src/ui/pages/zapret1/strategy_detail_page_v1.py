@@ -216,7 +216,7 @@ class Zapret1StrategyDetailPage(BasePage):
         self._success_timer.setSingleShot(True)
         self._success_timer.timeout.connect(self._hide_success)
 
-        self._build_ui()
+        self.enable_deferred_ui_build()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)

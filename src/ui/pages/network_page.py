@@ -27,7 +27,7 @@ except ImportError:
     _HAS_FLUENT_LABELS = False
 
 from .base_page import BasePage
-from .dpi_settings_page import Win11ToggleRow
+from ui.widgets.win11_controls import Win11ToggleRow
 from ui.compat_widgets import SettingsCard, ActionButton
 from ui.compat_widgets import ResetActionButton
 from ui.theme import get_theme_tokens
@@ -365,7 +365,7 @@ class NetworkPage(BasePage):
         
         self.dns_cards = {}
         self.adapter_cards = []
-        self._page_initialized = False
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)
@@ -385,14 +385,8 @@ class NetworkPage(BasePage):
         except Exception:
             pass
 
-    def showEvent(self, event):  # noqa: N802 (Qt override)
-        super().showEvent(event)
-        if event.spontaneous():
-            return
-        if not self._page_initialized:
-            self._page_initialized = True
-            self._build_ui()
-            self._start_loading()
+    def _after_ui_built(self) -> None:
+        self._start_loading()
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)

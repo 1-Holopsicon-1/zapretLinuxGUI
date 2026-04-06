@@ -75,7 +75,9 @@ class DNSCheckPage(BasePage):
         qconfig.themeChanged.connect(lambda _: self._apply_theme())
         qconfig.themeColorChanged.connect(lambda _: self._apply_theme())
 
-        self._build_ui()
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+
+    def _after_ui_built(self) -> None:
         self._apply_theme()
     
     def _build_ui(self):

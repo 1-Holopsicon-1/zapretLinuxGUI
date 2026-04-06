@@ -51,7 +51,7 @@ class SupportPage(BasePage):
             qconfig.themeChanged.connect(lambda _: self._apply_theme())
             qconfig.themeColorChanged.connect(lambda _: self._apply_theme())
 
-        self._build_ui()
+        self.enable_deferred_ui_build()
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)

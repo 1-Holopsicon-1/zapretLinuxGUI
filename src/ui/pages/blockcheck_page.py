@@ -254,26 +254,14 @@ class BlockcheckPage(BasePage):
         self._runtime_warnings_seen: set[str] = set()
         self._prepare_support_btn = None
         self._support_status_label = None
-        self._ui_built = False
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
-    def _ensure_ui_built(self) -> None:
-        if self._ui_built:
-            return
-
-        self._build_ui()
+    def _after_ui_built(self) -> None:
         self._connect_theme()
-        self._ui_built = True
-
         try:
             self.set_ui_language(self._ui_language)
         except Exception:
             pass
-
-    def showEvent(self, a0):  # noqa: N802 (Qt naming)
-        super().showEvent(a0)
-        if a0 is None or a0.spontaneous():
-            return
-        self._ensure_ui_built()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -698,8 +686,7 @@ class BlockcheckPage(BasePage):
 
     def switch_to_tab(self, key: str) -> None:
         """External API: switch to one of BlockCheck tabs."""
-        if not self._ui_built:
-            self._ensure_ui_built()
+        self.ensure_deferred_ui_built()
         normalized = self._normalize_tab_key(key)
         self._switch_tab(self.TAB_ORDER.index(normalized))
 
@@ -1640,7 +1627,7 @@ class BlockcheckPage(BasePage):
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
 
-        if not self._ui_built:
+        if self.is_deferred_ui_build_pending():
             return
 
         try:

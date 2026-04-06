@@ -304,13 +304,13 @@ class HomePage(BasePage):
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._startup_showevent_profile_logged = False
-        _t_build = _time.perf_counter()
-        self._build_ui()
-        _log_startup_home_metric("__init__.build_ui", (_time.perf_counter() - _t_build) * 1000)
-        _t_connect = _time.perf_counter()
-        self._connect_card_signals()
-        _log_startup_home_metric("__init__.connect_card_signals", (_time.perf_counter() - _t_connect) * 1000)
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
         _log_startup_home_metric("__init__.total", (_time.perf_counter() - _t_init) * 1000)
+
+    def _after_ui_built(self) -> None:
+        _t_build = _time.perf_counter()
+        self._connect_card_signals()
+        _log_startup_home_metric("__init__.connect_card_signals", (_time.perf_counter() - _t_build) * 1000)
 
     def showEvent(self, event):  # type: ignore[override]
         """При показе страницы обновляем статус автозапуска"""

@@ -39,7 +39,7 @@ except ImportError:
 
 try:
     # Simple Win11 toggle without text (QCheckBox-based).
-    from ui.pages.dpi_settings_page import Win11ToggleSwitch as Win11ToggleSwitchNoText
+    from ui.widgets.win11_controls import Win11ToggleSwitch as Win11ToggleSwitchNoText
 except Exception:
     Win11ToggleSwitchNoText = QCheckBox  # type: ignore[misc,assignment]
 
@@ -253,9 +253,9 @@ class HostsPage(BasePage):
         qconfig.themeChanged.connect(lambda _: self._apply_theme())
         qconfig.themeColorChanged.connect(lambda _: self._apply_theme())
 
-        self._build_ui()
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
-        # Apply tokens to remaining custom inline-styled widgets.
+    def _after_ui_built(self) -> None:
         self._apply_theme()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:

@@ -173,7 +173,9 @@ class StrategyScanPage(BasePage):
         self._prepare_support_btn = None
         self._support_status_label = None
 
-        self._build_ui()
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+
+    def _after_ui_built(self) -> None:
         self._connect_theme()
 
         if self._embedded:

@@ -74,7 +74,7 @@ class AboutPage(BasePage):
         qconfig.themeChanged.connect(lambda _: self._apply_theme())
         qconfig.themeColorChanged.connect(lambda _: self._apply_theme())
 
-        self._build_ui()
+        self.enable_deferred_ui_build()
 
     def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
         if self._ui_state_store is store:
