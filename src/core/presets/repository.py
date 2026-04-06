@@ -11,7 +11,8 @@ from typing import Iterable
 import zipfile
 
 from core.paths import AppPaths
-from .template_support import template_canonical_name as _template_support_canonical_name
+from .v1_builtin_templates import is_builtin_preset_file_name_v1
+from .z2_builtin_templates import is_builtin_preset_file_name_v2
 
 from .models import PresetManifest
 
@@ -234,7 +235,12 @@ class PresetRepository:
             template_origin = self._extract_template_origin(header_text)
             created_at = current.created_at if current is not None else _now_iso()
             updated_at = current.updated_at if current is not None else created_at
-            kind = current.kind if current is not None else self._infer_kind(engine, preset_path.name, template_origin)
+            kind = self._infer_kind(
+                engine,
+                preset_path.name,
+                template_origin,
+                current.kind if current is not None else None,
+            )
             manifests.append(
                 PresetManifest(
                     file_name=preset_path.name,
@@ -265,16 +271,22 @@ class PresetRepository:
         value = str(match.group(1) or "").strip()
         return value or None
 
-    @staticmethod
-    def _template_canonical_name(engine: str, template_origin: str) -> str | None:
-        return _template_support_canonical_name(engine, template_origin)
-
     @classmethod
-    def _infer_kind(cls, engine: str, file_name: str, template_origin: str | None) -> str:
-        origin = str(template_origin or "").strip()
-        canonical = cls._template_canonical_name(engine, origin) if origin else None
-        if canonical and Path(str(file_name or "").strip()).stem.casefold() == canonical.casefold():
-            return "builtin"
+    def _infer_kind(
+        cls,
+        engine: str,
+        file_name: str,
+        template_origin: str | None,
+        current_kind: str | None = None,
+    ) -> str:
+        normalized_current_kind = str(current_kind or "").strip().lower()
+        if normalized_current_kind == "imported":
+            return "imported"
+        engine_key = str(engine or "").strip().lower()
+        if engine_key == "winws2":
+            return "builtin" if is_builtin_preset_file_name_v2(file_name) else "user"
+        if engine_key == "winws1":
+            return "builtin" if is_builtin_preset_file_name_v1(file_name) else "user"
         return "user"
 
     def _save_index(self, engine: str, manifests: Iterable[PresetManifest]) -> None:

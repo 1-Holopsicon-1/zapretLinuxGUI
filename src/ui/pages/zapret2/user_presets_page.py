@@ -2745,7 +2745,6 @@ class Zapret2UserPresetsPage(BasePage):
                     return
 
             deleted = False
-            template_origin = ""
             if self._is_orchestra_backend():
                 manager = self._get_orchestra_manager()
                 if manager.delete_preset_by_file_name(name):
@@ -2756,25 +2755,12 @@ class Zapret2UserPresetsPage(BasePage):
                     deleted = True
             else:
                 facade = self._get_direct_facade()
-                try:
-                    manifest = facade.get_manifest_by_file_name(name)
-                    template_origin = str(getattr(manifest, "template_origin", "") or "").strip()
-                except Exception:
-                    template_origin = ""
                 facade.delete_by_file_name(name)
                 self._get_preset_store().notify_presets_changed()
                 deleted = True
 
             if deleted:
                 log(f"Удалён пресет '{display_name}'", "INFO")
-                # Mark as deleted so it can be restored later (if it has a matching template)
-                try:
-                    mark_preset_deleted = self._import_orchestra_attr("preset_defaults", "mark_preset_deleted")
-                    # Orchestra keeps its own legacy preset_defaults module for now.
-                    if template_origin:
-                        mark_preset_deleted(template_origin)
-                except Exception:
-                    pass
             else:
                 InfoBar.warning(
                     title=self._tr("common.error.title", "Ошибка"),

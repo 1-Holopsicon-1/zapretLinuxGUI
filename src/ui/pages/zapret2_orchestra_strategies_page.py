@@ -187,9 +187,10 @@ class Zapret2OrchestraStrategiesPage(BasePage):
     # View build
     # ------------------------------------------------------------------
 
-    def _rebuild_current_view(self) -> None:
-        self._categories = self._load_categories()
-        self.category_selections = self._load_current_selections()
+    def _rebuild_current_view(self, *, reload_data: bool = True) -> None:
+        if reload_data or not self._categories:
+            self._categories = self._load_categories()
+            self.category_selections = self._load_current_selections()
 
         if self._view_mode == "detail" and self._selected_category_key not in self._categories:
             self._view_mode = "list"
@@ -284,6 +285,14 @@ class Zapret2OrchestraStrategiesPage(BasePage):
         row.setSpacing(10)
 
         self._status_indicator = StatusIndicator()
+        self._status_indicator.set_status(
+            tr_catalog(
+                "page.z2_orchestra_strategies.status.ready",
+                language=self._ui_language,
+                default="Готово к выбору",
+            ),
+            "neutral",
+        )
         row.addWidget(self._status_indicator)
 
         row.addWidget(
@@ -537,7 +546,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
         self._sort_mode = "recommended"
         self._search_text = ""
         self._view_mode = "detail"
-        self._rebuild_current_view()
+        self._rebuild_current_view(reload_data=False)
 
     def _on_selections_changed(self, selections: dict) -> None:
         self.category_selections = dict(selections or {})
@@ -583,7 +592,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
     def _back_to_list(self) -> None:
         self._view_mode = "list"
         self._selected_category_key = ""
-        self._rebuild_current_view()
+        self._rebuild_current_view(reload_data=False)
 
     # ------------------------------------------------------------------
     # Detail handlers
@@ -746,7 +755,7 @@ class Zapret2OrchestraStrategiesPage(BasePage):
             log(f"Ошибка применения стратегии: {e}", "ERROR")
             if _HAS_FLUENT and InfoBar is not None:
                 InfoBar.error(title="Ошибка", content=str(e), parent=self.window())
-            self.show_success()
+            self.show_error(str(e))
 
     def _restart_dpi_with_current_selections(self) -> None:
         try:
@@ -892,11 +901,37 @@ class Zapret2OrchestraStrategiesPage(BasePage):
 
     def show_loading(self) -> None:
         if self._status_indicator is not None:
-            self._status_indicator.show_loading()
+            self._status_indicator.set_status(
+                tr_catalog(
+                    "page.z2_orchestra_strategies.status.applying",
+                    language=self._ui_language,
+                    default="Применение стратегии...",
+                ),
+                "running",
+            )
 
     def show_success(self) -> None:
         if self._status_indicator is not None:
-            self._status_indicator.show_success()
+            self._status_indicator.set_status(
+                tr_catalog(
+                    "page.z2_orchestra_strategies.status.applied",
+                    language=self._ui_language,
+                    default="Стратегия применена",
+                ),
+                "success",
+            )
+
+    def show_error(self, details: str = "") -> None:
+        if self._status_indicator is not None:
+            text = tr_catalog(
+                "page.z2_orchestra_strategies.status.error",
+                language=self._ui_language,
+                default="Не удалось применить стратегию",
+            )
+            details = str(details or "").strip()
+            if details:
+                text = f"{text}: {details}"
+            self._status_indicator.set_status(text, "stopped")
 
     def _start_process_monitoring(self) -> None:
         self._process_check_attempts = 0

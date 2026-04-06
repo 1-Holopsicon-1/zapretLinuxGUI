@@ -237,8 +237,9 @@ class InitializationManager:
             if store is None:
                 return
 
-            if launch_method:
-                store.set_launch_method(launch_method)
+            app_runtime_state = getattr(self.app, "app_runtime_state", None)
+            if app_runtime_state is not None and launch_method:
+                app_runtime_state.set_launch_method(launch_method)
             store.set_current_strategy_summary(strategy_summary)
         except Exception as e:
             log(f"Ошибка применения стартового summary стратегии: {e}", "DEBUG")
@@ -307,19 +308,14 @@ class InitializationManager:
             self.app.set_status(f"Ошибка DPI: {e}")
 
     def _safe_ui_update(self, running: bool):
-        """Безопасное обновление UI через UI Manager"""
-        if hasattr(self.app, 'ui_manager'):
-            try:
-                self.app.ui_manager.update_ui_state(running)
-            except Exception as e:
-                log(f"Ошибка при обновлении UI: {e}", "❌ ERROR")
-        else:
-            # Fallback, если UI Manager еще не готов
-            if hasattr(self.app, 'update_ui'):
-                try:
-                    self.app.update_ui(running)
-                except Exception as e:
-                    log(f"Ошибка при обновлении UI (fallback): {e}", "❌ ERROR")
+        """Безопасно синхронизирует подтверждённый статус DPI в общем store."""
+        app_runtime_state = getattr(self.app, "app_runtime_state", None)
+        if app_runtime_state is None:
+            return
+        try:
+            app_runtime_state.set_dpi_running(bool(running))
+        except Exception as e:
+            log(f"Ошибка при синхронизации runtime state: {e}", "❌ ERROR")
 
     def _handle_startup_dns_status(self, message: str) -> None:
         """Фильтрует служебные DNS-статусы, чтобы они не выглядели как главный статус приложения."""
@@ -633,9 +629,12 @@ class InitializationManager:
             from autostart.registry_check import is_autostart_enabled
             autostart_exists = is_autostart_enabled()
 
-            if hasattr(self.app, 'ui_manager'):
-                self.app.ui_manager.update_autostart_ui(autostart_exists)
-                self.app.ui_manager.update_ui_state(running=False)
+            app_runtime_state = getattr(self.app, "app_runtime_state", None)
+            if app_runtime_state is not None:
+                app_runtime_state.apply_runtime_state(
+                    autostart_enabled=bool(autostart_exists),
+                    dpi_running=False,
+                )
 
             self.init_tasks_completed.add('managers')
             self._on_managers_init_done()
@@ -845,8 +844,9 @@ class InitializationManager:
             t0 = _t.perf_counter()
             from autostart.registry_check import verify_autostart_status
             real_status = verify_autostart_status()
-            if hasattr(self.app, 'ui_manager'):
-                self.app.ui_manager.update_autostart_ui(real_status)
+            app_runtime_state = getattr(self.app, "app_runtime_state", None)
+            if app_runtime_state is not None:
+                app_runtime_state.set_autostart(bool(real_status))
             log(f"Статус автозапуска синхронизирован: {real_status}", "INFO")
             self._log_startup_step("AutostartSync", f"{(_t.perf_counter() - t0)*1000:.0f}ms")
         except Exception as e:
@@ -975,10 +975,6 @@ class InitializationManager:
             self.app.dpi_controller.start_dpi_async(
                 selected_mode=selected_mode, launch_method="direct_zapret2"
             )
-
-            # 5. Обновляем UI
-            if hasattr(self.app, "ui_manager"):
-                self.app.ui_manager.update_ui_state(running=True)
 
         except Exception as e:
             log(f"Ошибка автозапуска direct_zapret2: {e}", "ERROR")

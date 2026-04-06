@@ -470,10 +470,14 @@ class AutostartPage(BasePage):
         strategy_name: str | None = None,
         autostart_type: str | None = None,
     ) -> None:
+        app_runtime_state = getattr(self.window(), "app_runtime_state", None)
         if self._ui_state_store is not None:
             if strategy_name:
                 self._ui_state_store.set_current_strategy_summary(strategy_name)
-            self._ui_state_store.set_autostart(enabled, autostart_type)
+            if app_runtime_state is not None:
+                app_runtime_state.set_autostart(enabled, autostart_type)
+            else:
+                self._ui_state_store.set_autostart(enabled, autostart_type)
             return
         self.update_status(enabled, strategy_name, autostart_type)
 

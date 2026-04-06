@@ -532,7 +532,7 @@ class StatusIndicator(QWidget):
         layout.addStretch()
 
     def set_status(self, text: str, status: str = "neutral"):
-        """Sets status. status: 'running', 'stopped', 'warning', 'neutral'"""
+        """Sets status. status: 'running', 'success', 'stopped', 'warning', 'neutral'"""
         self.text.setText(text)
         self._current_status = status
 
@@ -552,6 +552,7 @@ class StatusIndicator(QWidget):
             palette = get_semantic_palette()
             return {
                 "running": palette.success,
+                "success": palette.success,
                 "stopped": palette.error,
                 "warning": palette.warning,
                 "neutral": themeColor().name() if HAS_FLUENT else "#5fcffe",
@@ -559,6 +560,7 @@ class StatusIndicator(QWidget):
         except Exception:
             return {
                 "running": "#52c477",
+                "success": "#52c477",
                 "stopped": "#e05454",
                 "warning": "#e0a854",
                 "neutral": "#5fcffe",

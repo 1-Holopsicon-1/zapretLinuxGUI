@@ -7,6 +7,8 @@ import re
 
 from log import log
 from core.presets.models import PresetManifest
+from core.presets.v1_builtin_templates import is_builtin_preset_file_name_v1
+from core.presets.z2_builtin_templates import is_builtin_preset_file_name_v2
 
 
 class DirectFlowError(RuntimeError):
@@ -245,6 +247,14 @@ class DirectFlowCoordinator:
         template_origin = self._read_template_origin_from_source(path)
         timestamp = self._file_time_to_iso(path)
         kind = "builtin" if self._is_builtin_preset(engine, path, template_origin) else "user"
+        try:
+            from core.services import get_preset_repository
+
+            current = get_preset_repository().get_manifest(engine, file_name)
+            if current is not None and str(current.kind or "").strip().lower() == "imported":
+                kind = "imported"
+        except Exception:
+            pass
         return PresetManifest(
             file_name=file_name,
             name=display_name,
@@ -256,13 +266,9 @@ class DirectFlowCoordinator:
 
     @staticmethod
     def _is_builtin_preset(engine: str, path: Path, template_origin: str | None) -> bool:
-        origin = str(template_origin or "").strip()
-        if not origin:
-            return False
-        try:
-            from core.presets.template_support import template_canonical_name
-
-            canonical = template_canonical_name(engine, origin)
-        except Exception:
-            canonical = None
-        return bool(canonical and path.stem.casefold() == str(canonical).casefold())
+        engine_key = str(engine or "").strip().lower()
+        if engine_key == "winws2":
+            return is_builtin_preset_file_name_v2(path.name)
+        if engine_key == "winws1":
+            return is_builtin_preset_file_name_v1(path.name)
+        return False

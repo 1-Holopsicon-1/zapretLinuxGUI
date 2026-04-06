@@ -25,15 +25,20 @@ def get_roaming_appdata_dir() -> str:
     return os.environ.get("APPDATA", "")
 
 
-def get_zapret_userdata_dir() -> str:
-    """Returns a stable per-user data dir for Zapret.
+def get_zapret_channel_dir_name() -> str:
+    """Returns the per-channel userdata leaf directory name."""
+    return "dev" if str(CHANNEL or "").strip().lower() == "test" else "stable"
 
-    Primary target (Windows): %APPDATA%\\zapret
+
+def get_zapret_userdata_dir() -> str:
+    """Returns the canonical per-channel user-data root for Zapret.
+
+    Primary target (Windows): %APPDATA%\\zapret\\stable or %APPDATA%\\zapret\\dev
     Fallback (non-Windows/dev): MAIN_DIRECTORY
     """
     base = get_roaming_appdata_dir()
     if base:
-        return os.path.join(base, "zapret")
+        return os.path.join(base, "zapret", get_zapret_channel_dir_name())
     return MAIN_DIRECTORY
 
 
@@ -227,8 +232,7 @@ REG_LATEST_STRATEGY = "LastStrategy2"
 # ═══════════════════════════════════════════════════════════════════
 # APPDATA — файловое хранилище настроек
 # ═══════════════════════════════════════════════════════════════════
-_appdata_channel = "dev" if CHANNEL == "test" else "stable"
-APPDATA_DIR = os.path.join(os.environ.get("APPDATA", ""), "zapret", _appdata_channel)
+APPDATA_DIR = get_zapret_userdata_dir()
 
 # ═══════════════════════════════════════════════════════════════════
 # ПУТИ РЕЕСТРА (все в одном месте)

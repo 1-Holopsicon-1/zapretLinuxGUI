@@ -68,19 +68,22 @@ def update_current_strategy_display(window, strategy_name: str) -> None:
     except Exception:
         pass
 
+    app_runtime_state = getattr(window, "app_runtime_state", None)
     store = getattr(window, "ui_state_store", None)
+    if app_runtime_state is not None and launch_method is not None:
+        app_runtime_state.set_launch_method(launch_method)
     if store is not None:
-        if launch_method is not None:
-            store.set_launch_method(launch_method)
         store.set_current_strategy_summary(strategy_name)
 
 
 def update_autostart_display(window, enabled: bool, strategy_name: str = None) -> None:
+    app_runtime_state = getattr(window, "app_runtime_state", None)
     store = getattr(window, "ui_state_store", None)
+    if app_runtime_state is not None:
+        app_runtime_state.set_autostart(bool(enabled))
     if store is not None:
         if strategy_name:
             store.set_current_strategy_summary(strategy_name)
-        store.set_autostart(enabled)
 
 
 def update_subscription_display(window, is_premium: bool, days: int = None) -> None:

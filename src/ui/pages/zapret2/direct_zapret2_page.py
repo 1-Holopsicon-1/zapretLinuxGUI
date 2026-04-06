@@ -377,6 +377,7 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def _build_list_structure_signature(self, payload) -> tuple:
         """Собирает сигнатуру структуры списка для решения: rebuild нужен или нет."""
+        selected_preset_file_name = str(getattr(payload, "selected_preset_file_name", "") or "").strip().lower()
         target_items = payload.target_items or {}
         signature_rows = []
         for view in tuple(payload.target_views or ()):
@@ -400,7 +401,7 @@ class Zapret2StrategiesPageNew(BasePage):
                     bool(getattr(meta, "requires_all_ports", False)),
                 )
             )
-        return tuple(signature_rows)
+        return (selected_preset_file_name, tuple(signature_rows))
 
     def _update_strategy_set_snapshot(self) -> None:
         try:
@@ -583,7 +584,7 @@ class Zapret2StrategiesPageNew(BasePage):
             # нажатия «Обновить». Здесь мы явно пересобираем страницу, если данные
             # уже появились или на экране сейчас показан empty state.
             if requires_rebuild:
-                if target_items or self._empty_state_label is not None:
+                if self._targets_list is None or target_items or self._empty_state_label is not None:
                     self._reload_strategies()
                 return
 

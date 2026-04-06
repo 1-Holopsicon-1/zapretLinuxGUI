@@ -2459,23 +2459,9 @@ class Zapret1UserPresetsPage(BasePage):
                     return
 
             facade = self._get_direct_facade()
-            template_origin = ""
-            try:
-                manifest = facade.get_manifest_by_file_name(name)
-                template_origin = str(getattr(manifest, "template_origin", "") or "").strip()
-            except Exception:
-                template_origin = ""
             facade.delete_by_file_name(name)
             self._get_preset_store().notify_presets_changed()
             log(f"Удалён пресет '{display_name}'", "INFO")
-            # Mark as deleted so it can be restored later (if it has a matching template)
-            try:
-                from core.presets.template_support import mark_deleted_template
-
-                if template_origin:
-                    mark_deleted_template("direct_zapret1", template_origin)
-            except Exception:
-                pass
 
         except Exception as e:
             log(f"Ошибка удаления пресета: {e}", "ERROR")

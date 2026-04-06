@@ -7,10 +7,9 @@
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy
 from PyQt6.QtCore import pyqtSignal, Qt, QEvent
 from PyQt6.QtGui import QCursor
-import qtawesome as qta
 from typing import Optional
 
-from ui.theme import get_theme_tokens
+from ui.theme import get_theme_tokens, get_cached_qta_pixmap
 from ui.compat_widgets import set_tooltip
 
 try:
@@ -103,7 +102,6 @@ class StrategyRadioItem(CardWidget):
                 self._icon_label.setFixedSize(18, 18)
                 self._icon_label.setStyleSheet("background: transparent;")
                 layout.addWidget(self._icon_label)
-                self._apply_icon_color()
             except Exception:
                 pass
 
@@ -201,7 +199,12 @@ class StrategyRadioItem(CardWidget):
                 "#808080" if tokens.is_light else "#BFC5CF"
             )
             self._icon_label.setPixmap(
-                qta.icon(self._icon_name, color=color).pixmap(18, 18)
+                get_cached_qta_pixmap(
+                    self._icon_name,
+                    color=color,
+                    size=18,
+                    theme_name=tokens.theme_name,
+                )
             )
         except Exception:
             pass

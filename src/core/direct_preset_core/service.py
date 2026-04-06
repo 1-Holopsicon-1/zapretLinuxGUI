@@ -34,11 +34,13 @@ class _ResolvedTargetState:
 
 @dataclass(frozen=True)
 class BasicUiPayload:
-    target_views: tuple
-    target_items: dict[str, Any]
-    strategy_selections: dict[str, str]
-    strategy_names_by_target: dict[str, dict[str, str]]
-    filter_modes: dict[str, str]
+    target_views: tuple = ()
+    target_items: dict[str, Any] | None = None
+    strategy_selections: dict[str, str] | None = None
+    strategy_names_by_target: dict[str, dict[str, str]] | None = None
+    filter_modes: dict[str, str] | None = None
+    selected_preset_file_name: str = ""
+    selected_preset_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -691,6 +693,7 @@ class DirectPresetService:
                 action_lines,
                 compare_mode=compare_mode,
                 match_lines=match_lines,
+                candidates=candidates,
             )
             if not normalized:
                 continue
@@ -729,6 +732,7 @@ class DirectPresetService:
                 normalized_args = self._normalized_strategy_identity(
                     entry.args.splitlines(),
                     compare_mode=compare_mode,
+                    candidates=candidates,
                 )
                 if not normalized_args:
                     continue
@@ -753,21 +757,26 @@ class DirectPresetService:
         *,
         compare_mode: str,
         match_lines: list[str] | tuple[str, ...] | None = None,
+        candidates: tuple[str, ...] | list[str] | None = None,
     ) -> str:
         mode = str(compare_mode or "helpers_stripped").strip().lower()
         lines = [str(line).strip() for line in action_lines if str(line).strip()]
+        keep_payload_in_identity = self._basic_identity_keeps_payload(candidates)
         if mode == "keep_send_syndata":
             payload_lines = [
                 str(line).strip()
                 for line in (match_lines or ())
                 if str(line).strip().lower().startswith("--payload=")
             ]
-            lines = payload_lines + lines
+            if keep_payload_in_identity:
+                lines = payload_lines + lines
         if mode == "keep_send_syndata":
             normalized_lines: list[str] = []
             for line in lines:
                 lowered = line.strip().lower()
                 if lowered.startswith("--out-range="):
+                    continue
+                if not keep_payload_in_identity and lowered.startswith("--payload="):
                     continue
                 if lowered == "--payload=all":
                     continue
@@ -792,6 +801,15 @@ class DirectPresetService:
                     normalized_lines.append(cleaned)
             lines = normalized_lines
         return self._normalize_args(lines)
+
+    @staticmethod
+    def _basic_identity_keeps_payload(candidates: tuple[str, ...] | list[str] | None) -> bool:
+        names = {
+            str(name or "").strip().lower()
+            for name in (candidates or ())
+            if str(name or "").strip()
+        }
+        return "http80" not in names
 
     @staticmethod
     def _detect_filter_mode(profile) -> str:

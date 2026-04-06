@@ -82,7 +82,7 @@ def _get_main_directory() -> str:
 def get_active_preset_state_path() -> Path:
     """Returns path to the active preset state INI file.
 
-    Primary target (Windows): %APPDATA%\\zapret\\orchestra_zapret2\\active_preset.ini
+    Primary target (Windows): %APPDATA%\\zapret\\<channel>\\orchestra_zapret2\\active_preset.ini
     Fallback (non-Windows/dev): <userdata>/orchestra_zapret2/active_preset.ini
     """
     try:
@@ -93,10 +93,6 @@ def get_active_preset_state_path() -> Path:
             return Path(base) / _ACTIVE_PRESET_INI_NAME
     except Exception:
         pass
-
-    appdata = (os.environ.get("APPDATA") or "").strip()
-    if appdata:
-        return Path(appdata) / "zapret" / "orchestra_zapret2" / _ACTIVE_PRESET_INI_NAME
 
     return Path(_get_app_core_path()) / _ACTIVE_PRESET_INI_NAME
 

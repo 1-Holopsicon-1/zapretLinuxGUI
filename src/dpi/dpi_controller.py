@@ -609,6 +609,11 @@ class DPIController:
         # Prevents stale QTimer checks from previous start attempts.
         self._dpi_start_verify_generation = 0
 
+    def _set_runtime_dpi_running(self, running: bool) -> None:
+        app_runtime_state = getattr(self.app, "app_runtime_state", None)
+        if app_runtime_state is not None:
+            app_runtime_state.set_dpi_running(bool(running))
+
     def _process_pending_direct_preset_switch(self) -> None:
         target_generation = int(self._direct_preset_switch_requested_generation or 0)
         if target_generation <= int(self._direct_preset_switch_completed_generation or 0):
@@ -1009,8 +1014,7 @@ class DPIController:
                         log(f"Ошибка подготовки direct запуска: {e}", "❌ ERROR")
                         self.app.set_status(f"❌ {e}")
                         self._show_launch_error_top(str(e))
-                        if hasattr(self.app, 'ui_manager'):
-                            self.app.ui_manager.update_ui_state(running=False)
+                        self._set_runtime_dpi_running(False)
                         return
 
                     preset_path = Path(str(selected_mode["preset_path"]))
@@ -1020,8 +1024,7 @@ class DPIController:
                     log(f"Preset файл не найден: {preset_path}", "❌ ERROR")
                     self.app.set_status("❌ Preset файл не найден. Создайте пресет в настройках")
                     self._show_launch_error_top("Preset файл не найден. Создайте пресет в настройках")
-                    if hasattr(self.app, 'ui_manager'):
-                        self.app.ui_manager.update_ui_state(running=False)
+                    self._set_runtime_dpi_running(False)
                     return
 
                 # Проверяем что файл не пустой
@@ -1065,15 +1068,13 @@ class DPIController:
                         log("Preset файл не содержит активных фильтров", "WARNING")
                         self.app.set_status("⚠️ Выберите хотя бы одну категорию для запуска")
                         self._show_launch_error_top("Выберите хотя бы одну категорию для запуска")
-                        if hasattr(self.app, 'ui_manager'):
-                            self.app.ui_manager.update_ui_state(running=False)
+                        self._set_runtime_dpi_running(False)
                         return
                 except Exception as e:
                     log(f"Ошибка чтения preset файла: {e}", "❌ ERROR")
                     self.app.set_status(f"❌ Ошибка чтения preset: {e}")
                     self._show_launch_error_top(f"Ошибка чтения preset: {e}")
-                    if hasattr(self.app, 'ui_manager'):
-                        self.app.ui_manager.update_ui_state(running=False)
+                    self._set_runtime_dpi_running(False)
                     return
 
                 if launch_method == "direct_zapret2_orchestra":
@@ -1101,8 +1102,7 @@ class DPIController:
             log(prelaunch_error, "❌ ERROR")
             self.app.set_status(f"❌ {prelaunch_error}")
             self._show_launch_error_top(prelaunch_error)
-            if hasattr(self.app, 'ui_manager'):
-                self.app.ui_manager.update_ui_state(running=False)
+            self._set_runtime_dpi_running(False)
             return
 
         self._pending_launch_warnings = [
@@ -1292,14 +1292,7 @@ class DPIController:
                 log(f"Ошибка асинхронного запуска DPI: {error_message}", "❌ ERROR")
                 self.app.set_status(f"❌ Ошибка запуска: {error_message}")
                 self._show_launch_error_top(error_message)
-                
-                # ✅ ИСПОЛЬЗУЕМ UI MANAGER вместо app.update_ui
-                if hasattr(self.app, 'ui_manager'):
-                    self.app.ui_manager.update_ui_state(running=False)
-                
-                # ✅ ИСПОЛЬЗУЕМ PROCESS MONITOR MANAGER
-                if hasattr(self.app, 'process_monitor_manager'):
-                    self.app.process_monitor_manager.on_process_status_changed(False)
+                self._set_runtime_dpi_running(False)
 
                 if self._restart_request_generation > self._restart_completed_generation:
                     QTimer.singleShot(0, self._process_pending_restart_request)
@@ -1360,10 +1353,7 @@ class DPIController:
         if running:
             log("DPI запущен асинхронно", "INFO")
             self.app.set_status("✅ DPI успешно запущен")
-
-            # Один вызов ui_manager — process_monitor_manager подхватит через свой поток
-            if hasattr(self.app, 'ui_manager'):
-                self.app.ui_manager.update_ui_state(running=True)
+            self._set_runtime_dpi_running(True)
 
             # Устанавливаем флаг намеренного запуска
             self.app.intentional_start = True
@@ -1392,9 +1382,7 @@ class DPIController:
             self._show_launch_error_top("Процесс не запустился. Проверьте логи")
 
             self._pending_launch_warnings = []
-
-            if hasattr(self.app, 'ui_manager'):
-                self.app.ui_manager.update_ui_state(running=False)
+            self._set_runtime_dpi_running(False)
 
         if self._restart_request_generation > self._restart_completed_generation:
             QTimer.singleShot(0, self._process_pending_restart_request)
@@ -1422,14 +1410,7 @@ class DPIController:
                         self.app.set_status(f"✅ {error_message}")
                     else:
                         self.app.set_status("✅ DPI успешно остановлен")
-                    
-                    # ✅ ИСПОЛЬЗУЕМ UI MANAGER вместо app.update_ui
-                    if hasattr(self.app, 'ui_manager'):
-                        self.app.ui_manager.update_ui_state(running=False)
-                    
-                    # ✅ ИСПОЛЬЗУЕМ PROCESS MONITOR MANAGER
-                    if hasattr(self.app, 'process_monitor_manager'):
-                        self.app.process_monitor_manager.on_process_status_changed(False)
+                    self._set_runtime_dpi_running(False)
 
                     if restart_generation_after_stop > self._restart_completed_generation:
                         self._restart_pending_stop_generation = 0
@@ -1443,11 +1424,7 @@ class DPIController:
                     # Процесс всё ещё работает
                     log("DPI всё ещё работает после попытки остановки", "⚠ WARNING")
                     self.app.set_status("⚠ Процесс всё ещё работает")
-                    
-                    if hasattr(self.app, 'ui_manager'):
-                        self.app.ui_manager.update_ui_state(running=True)
-                    if hasattr(self.app, 'process_monitor_manager'):
-                        self.app.process_monitor_manager.on_process_status_changed(True)
+                    self._set_runtime_dpi_running(True)
 
                     self._restart_pending_stop_generation = 0
                 
@@ -1457,14 +1434,7 @@ class DPIController:
                 
                 # Проверяем реальный статус процесса
                 is_running = self.app.dpi_starter.check_process_running_wmi(silent=True)
-                
-                # ✅ ИСПОЛЬЗУЕМ UI MANAGER вместо app.update_ui
-                if hasattr(self.app, 'ui_manager'):
-                    self.app.ui_manager.update_ui_state(running=is_running)
-                
-                # ✅ ИСПОЛЬЗУЕМ PROCESS MONITOR MANAGER
-                if hasattr(self.app, 'process_monitor_manager'):
-                    self.app.process_monitor_manager.on_process_status_changed(is_running)
+                self._set_runtime_dpi_running(is_running)
 
                 self._restart_pending_stop_generation = 0
                 

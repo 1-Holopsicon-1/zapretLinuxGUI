@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 import re
@@ -464,12 +464,20 @@ class DirectPresetFacadeBackend:
                 strategy_selections={},
                 strategy_names_by_target={},
                 filter_modes={},
+                selected_preset_file_name="",
+                selected_preset_name="",
             )
         _t_service = _time.perf_counter()
         payload = self._service().build_basic_ui_payload(
             preset,
             startup_scope=startup_scope,
             strategy_set=self._current_direct_strategy_set(),
+        )
+        selected_manifest = self.get_selected_manifest()
+        payload = replace(
+            payload,
+            selected_preset_file_name=str(getattr(selected_manifest, "file_name", "") or ""),
+            selected_preset_name=str(getattr(selected_manifest, "name", "") or ""),
         )
         if cache_key is not None:
             _BASIC_UI_PAYLOAD_CACHE[cache_key] = payload

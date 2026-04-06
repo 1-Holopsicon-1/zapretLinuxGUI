@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import shutil
 from typing import Optional
 
 from core.paths import AppPaths
@@ -33,10 +32,13 @@ def ensure_user_catalogs(paths: AppPaths) -> Path:
     for src in package_root.rglob("*.txt"):
         relative = src.relative_to(package_root)
         dst = user_root / relative
+        src_text = src.read_text(encoding="utf-8", errors="replace")
         if dst.exists():
-            continue
+            dst_text = dst.read_text(encoding="utf-8", errors="replace")
+            if dst_text == src_text:
+                continue
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
+        dst.write_text(src_text, encoding="utf-8")
     sanitize_strategy_catalog_dir(user_root / "winws1")
     sanitize_strategy_catalog_dir(user_root / "winws2")
     return user_root

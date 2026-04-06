@@ -176,49 +176,49 @@ class _DirectPresetSummaryLoadWorker(QThread):
         self._request_id = int(request_id)
 
     def run(self) -> None:
-        payload: dict = {
-            "active_preset_name": "",
-            "active_lists": [],
-        }
-        try:
-            from core.services import get_direct_flow_coordinator
-            from strategy_menu.launch_method_store import get_strategy_launch_method
+        self.loaded.emit(self._request_id, _load_direct_zapret2_preset_summary_payload())
 
-            method = str(get_strategy_launch_method() or "").strip().lower()
-            if method == "direct_zapret2":
-                preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
-                payload["active_preset_name"] = str(getattr(preset, "name", "") or "").strip()
 
-                from core.presets.direct_facade import DirectPresetFacade
+def _load_direct_zapret2_preset_summary_payload() -> dict:
+    payload: dict = {
+        "active_preset_name": "",
+        "active_lists": [],
+    }
+    try:
+        from core.services import get_direct_flow_coordinator
+        from core.presets.direct_facade import DirectPresetFacade
 
-                facade = DirectPresetFacade.from_launch_method(method)
-                source_text = facade.read_selected_source_text()
-                active_lists: list[str] = []
-                seen_lists: set[str] = set()
-                for raw in str(source_text or "").splitlines():
-                    stripped = raw.strip()
-                    if not stripped or stripped.startswith("#"):
-                        continue
-                    for value in _HOSTLIST_DISPLAY_RE.findall(stripped):
-                        list_path = value.strip().strip('"').strip("'")
-                        if not list_path:
-                            continue
+        preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
+        payload["active_preset_name"] = str(getattr(preset, "name", "") or "").strip()
 
-                        normalized = list_path.replace("\\", "/")
-                        list_name = normalized.rsplit("/", 1)[-1]
-                        if not list_name:
-                            continue
+        facade = DirectPresetFacade.from_launch_method("direct_zapret2")
+        source_text = facade.read_selected_source_text()
+        active_lists: list[str] = []
+        seen_lists: set[str] = set()
+        for raw in str(source_text or "").splitlines():
+            stripped = raw.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            for value in _HOSTLIST_DISPLAY_RE.findall(stripped):
+                list_path = value.strip().strip('"').strip("'")
+                if not list_path:
+                    continue
 
-                        dedupe_key = list_name.lower()
-                        if dedupe_key in seen_lists:
-                            continue
-                        seen_lists.add(dedupe_key)
-                        active_lists.append(list_name)
-                payload["active_lists"] = active_lists
-        except Exception:
-            pass
+                normalized = list_path.replace("\\", "/")
+                list_name = normalized.rsplit("/", 1)[-1]
+                if not list_name:
+                    continue
 
-        self.loaded.emit(self._request_id, payload)
+                dedupe_key = list_name.lower()
+                if dedupe_key in seen_lists:
+                    continue
+                seen_lists.add(dedupe_key)
+                active_lists.append(list_name)
+        payload["active_lists"] = active_lists
+    except Exception:
+        pass
+
+    return payload
 
 
 class BigActionButton(PrimaryActionButton):
@@ -299,6 +299,7 @@ class Zapret2DirectControlPage(BasePage):
         _log_startup_z2_control_metric("showEvent.sync_program_settings", (_time.perf_counter() - _t_sync) * 1000)
 
         _t_adv = _time.perf_counter()
+        self._refresh_selected_preset_name_fast()
         self._schedule_advanced_settings_reload()
         self._schedule_preset_summary_reload()
         _log_startup_z2_control_metric("showEvent.load_advanced_settings", (_time.perf_counter() - _t_adv) * 1000)
@@ -754,6 +755,25 @@ class Zapret2DirectControlPage(BasePage):
                 set_checked(bool(state.get("debug_log_enabled", False)), block_signals=True)
         except Exception:
             pass
+
+    def _refresh_selected_preset_name_fast(self) -> None:
+        try:
+            from core.services import get_direct_flow_coordinator
+
+            preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
+            active_name = str(getattr(preset, "name", "") or "").strip()
+        except Exception:
+            active_name = ""
+
+        if active_name:
+            self.preset_name_label.setText(active_name)
+            set_tooltip(self.preset_name_label, active_name)
+            return
+
+        self.preset_name_label.setText(
+            tr_catalog("page.z2_control.preset.not_selected", language=self._ui_language, default="Не выбран")
+        )
+        set_tooltip(self.preset_name_label, "")
 
     def _schedule_advanced_settings_reload(self, *, force: bool = False) -> None:
         if not force and not self._advanced_settings_dirty:
@@ -1234,6 +1254,7 @@ class Zapret2DirectControlPage(BasePage):
         if "preset_revision" in changed_fields or "launch_method" in changed_fields or not changed_fields:
             self._advanced_settings_dirty = True
             self._preset_summary_dirty = True
+            self._refresh_selected_preset_name_fast()
             if self.isVisible():
                 self._schedule_advanced_settings_reload(force=True)
                 self._schedule_preset_summary_reload(force=True)
@@ -1262,6 +1283,7 @@ class Zapret2DirectControlPage(BasePage):
 
     def update_strategy(self, name: str):
         self._update_stop_winws_button_text()
+        self._refresh_selected_preset_name_fast()
         self._schedule_preset_summary_reload()
 
     def set_ui_language(self, language: str) -> None:

@@ -195,14 +195,10 @@ def ensure_builtin_presets_exist() -> bool:
 
         # Dev convenience: seed templates from the repo (if present)
         try:
-            from config import MAIN_DIRECTORY
-
             src_candidates = [
-                # Canonical repo source for orchestra preset templates.
-                Path(MAIN_DIRECTORY) / "preset_orchestra_zapret2" / "builtin_presets",
+                Path(__file__).resolve().parent / "builtin_presets",
                 # Backward-compat for older dev layouts.
-                Path(MAIN_DIRECTORY) / "orchestra_zapret2" / "presets_orchestra_zapret2_template",
-                Path(MAIN_DIRECTORY) / "preset_orchestra_zapret2" / "presets_orchestra_zapret2_template",
+                Path(__file__).resolve().parent / "presets_orchestra_zapret2_template",
             ]
 
             src_dir = next((p for p in src_candidates if p.exists() and p.is_dir()), None)

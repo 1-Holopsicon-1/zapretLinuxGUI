@@ -71,6 +71,7 @@ class ControlPage(BasePage):
         self._program_settings_synced = False
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._last_known_dpi_running = False
         
         self._build_ui()
         self._update_stop_winws_button_text()
@@ -693,6 +694,16 @@ class ControlPage(BasePage):
         self.update_status(state.dpi_running)
         self.update_strategy(state.current_strategy_summary or "")
 
+    def _get_current_dpi_running_state(self) -> bool:
+        """Возвращает последний подтверждённый статус DPI из общего store."""
+        store = self._ui_state_store
+        if store is not None:
+            try:
+                return bool(store.snapshot().dpi_running)
+            except Exception:
+                pass
+        return bool(getattr(self, "_last_known_dpi_running", False))
+
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
 
@@ -727,11 +738,12 @@ class ControlPage(BasePage):
             tr_catalog("page.control.setting.reset.desc", language=self._ui_language, default="Очистить кэш проверок запуска (без удаления пресетов/настроек)")
         )
         self._update_stop_winws_button_text()
-        self.update_status(bool(self.stop_winws_btn.isVisible()))
+        self.update_status(self._get_current_dpi_running_state())
         self.update_strategy(self.strategy_label.text())
         
     def update_status(self, is_running: bool):
         """Обновляет отображение статуса"""
+        self._last_known_dpi_running = bool(is_running)
         if is_running:
             self.status_title.setText(
                 tr_catalog("page.control.status.running", language=self._ui_language, default="Zapret работает")

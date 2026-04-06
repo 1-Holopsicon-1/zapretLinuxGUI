@@ -9,7 +9,6 @@ class ProcessMonitorManager(QObject):
         super().__init__()
         self.app = app_instance
         self.process_monitor = None
-        self._is_running = False
         self._process_details: dict[str, list[int]] = {}
 
     def initialize_process_monitor(self):
@@ -24,44 +23,29 @@ class ProcessMonitorManager(QObject):
         self.app.process_monitor = self.process_monitor  # Сохраняем ссылку в app
         
         # Подключаем сигнал изменения статуса
-        self.process_monitor.processStatusChanged.connect(self.on_process_status_changed)
+        self.process_monitor.processStatusChanged.connect(self._on_process_status_changed)
         if hasattr(self.process_monitor, "processDetailsChanged"):
-            self.process_monitor.processDetailsChanged.connect(self.on_process_details_changed)
+            self.process_monitor.processDetailsChanged.connect(self._on_process_details_changed)
         self.process_monitor.start()
         
         log("Process Monitor инициализирован", "INFO")
 
-    def on_process_details_changed(self, details: dict):
+    def _on_process_details_changed(self, details: dict):
         """Получает детали процессов (PID) от мониторинга и кэширует для UI"""
         try:
             self._process_details = details or {}
             self.app.process_details = self._process_details
         except Exception as e:
-            log(f"Ошибка в on_process_details_changed: {e}", level="❌ ERROR")
+            log(f"Ошибка в _on_process_details_changed: {e}", level="❌ ERROR")
 
-    def on_process_status_changed(self, is_running):
+    def _on_process_status_changed(self, is_running):
         """Обрабатывает сигнал изменения статуса процесса"""
         try:
-            # Проверяем состояние автозапуска
-            from autostart.registry_check import is_autostart_enabled
-            autostart_active = is_autostart_enabled() if hasattr(self.app, 'service_manager') else False
-            
-            # Сохраняем текущее состояние
-            if not hasattr(self.app, '_prev_autostart'):
-                self.app._prev_autostart = False
-            if not hasattr(self.app, '_prev_running'):
-                self.app._prev_running = False
-                
-            self.app._prev_autostart = autostart_active
-            self.app._prev_running = is_running
-            self._is_running = is_running
-            
-            # ✅ Обновляем UI через UI Manager
-            if hasattr(self.app, 'ui_manager'):
-                self.app.ui_manager._update_all_pages(is_running, autostart_active)
-            
+            app_runtime_state = getattr(self.app, "app_runtime_state", None)
+            if app_runtime_state is not None:
+                app_runtime_state.set_dpi_running(bool(is_running))
         except Exception as e:
-            log(f"Ошибка в on_process_status_changed: {e}", level="❌ ERROR")
+            log(f"Ошибка в _on_process_status_changed: {e}", level="❌ ERROR")
 
     def stop_monitoring(self):
         """Останавливает мониторинг процесса"""

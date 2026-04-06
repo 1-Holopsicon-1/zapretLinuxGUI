@@ -5,6 +5,9 @@ import shutil
 
 from log import log
 from .strategy_catalog_sanitizer import sanitize_strategy_catalog_dir
+from .package_assets import package_dir
+from .v1_builtin_templates import sync_repo_builtins_to_runtime_templates_v1
+from .z2_builtin_templates import sync_repo_builtins_to_runtime_templates_v2
 from .z2_template_runtime import ensure_templates_copied_to_presets, invalidate_templates_cache
 from .v1_template_runtime import ensure_v1_templates_copied_to_presets, update_changed_v1_templates_in_presets
 
@@ -21,7 +24,6 @@ def prepare_direct_support_files(launch_method: str) -> None:
 
 
 def _prepare_direct_zapret2_support_files() -> None:
-    from config import MAIN_DIRECTORY
     from core.services import get_app_paths
 
     app_paths = get_app_paths()
@@ -36,39 +38,25 @@ def _prepare_direct_zapret2_support_files() -> None:
     advanced_dir.mkdir(parents=True, exist_ok=True)
     presets_dir.mkdir(parents=True, exist_ok=True)
 
-    _seed_missing_text_files(Path(MAIN_DIRECTORY) / "preset_zapret2" / "builtin_presets", templates_dir)
+    sync_repo_builtins_to_runtime_templates_v2()
     try:
         invalidate_templates_cache()
     except Exception:
         pass
     ensure_templates_copied_to_presets()
 
-    _seed_missing_strategy_files(Path(MAIN_DIRECTORY) / "preset_zapret2" / "basic_strategies", basic_dir)
-    _seed_missing_strategy_files(Path(MAIN_DIRECTORY) / "preset_zapret2" / "advanced_strategies", advanced_dir)
+    z2_package_dir = package_dir("preset_zapret2")
+    _seed_missing_strategy_files(z2_package_dir / "basic_strategies", basic_dir)
+    _seed_missing_strategy_files(z2_package_dir / "advanced_strategies", advanced_dir)
     sanitize_strategy_catalog_dir(basic_dir)
     sanitize_strategy_catalog_dir(advanced_dir)
 
 
 def _prepare_direct_zapret1_support_files() -> None:
     _ensure_v1_strategies_exist()
+    sync_repo_builtins_to_runtime_templates_v1()
     update_changed_v1_templates_in_presets()
     ensure_v1_templates_copied_to_presets()
-
-
-def _seed_missing_text_files(src_dir: Path, dst_dir: Path) -> None:
-    if not src_dir.exists() or not src_dir.is_dir():
-        return
-    for path in sorted(src_dir.glob("*.txt"), key=lambda item: item.name.lower()):
-        if path.name.startswith("_"):
-            continue
-        dst = dst_dir / path.name
-        if dst.exists():
-            continue
-        try:
-            dst.write_text(path.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
-            log(f"Seeded support file: {dst}", "DEBUG")
-        except Exception as exc:
-            log(f"Failed to seed support file {path.name}: {exc}", "DEBUG")
 
 
 def _seed_missing_strategy_files(src_dir: Path, dst_dir: Path) -> None:
@@ -88,7 +76,7 @@ def _seed_missing_strategy_files(src_dir: Path, dst_dir: Path) -> None:
 
 
 def _ensure_v1_strategies_exist() -> bool:
-    from config import MAIN_DIRECTORY, get_zapret_userdata_dir
+    from config import get_zapret_userdata_dir
 
     filenames = (
         "tcp_zapret1.txt",
@@ -110,7 +98,7 @@ def _ensure_v1_strategies_exist() -> bool:
     if not missing:
         return True
 
-    src_dir = Path(MAIN_DIRECTORY) / "preset_zapret1" / "basic_strategies"
+    src_dir = package_dir("preset_zapret1") / "basic_strategies"
     if not src_dir.exists() or not src_dir.is_dir():
         return False
 

@@ -61,6 +61,7 @@ class Zapret1DirectControlPage(BasePage):
         self.parent_app = parent
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._last_known_dpi_running = False
         self._build_ui()
 
     def _start_dpi(self) -> None:
@@ -414,7 +415,18 @@ class Zapret1DirectControlPage(BasePage):
         self.update_status(state.dpi_running)
         self.update_strategy(state.current_strategy_summary or "")
 
+    def _get_current_dpi_running_state(self) -> bool:
+        """Берёт текущий статус запуска из общего store, а не из видимости кнопок."""
+        store = self._ui_state_store
+        if store is not None:
+            try:
+                return bool(store.snapshot().dpi_running)
+            except Exception:
+                pass
+        return bool(getattr(self, "_last_known_dpi_running", False))
+
     def update_status(self, is_running: bool):
+        self._last_known_dpi_running = bool(is_running)
         if is_running:
             self.status_title.setText(
                 tr_catalog("page.z1_control.status.running", language=self._ui_language, default="Zapret 1 работает")
@@ -479,4 +491,4 @@ class Zapret1DirectControlPage(BasePage):
         )
 
         self._refresh_preset_name()
-        self.update_status(bool(self.stop_winws_btn.isVisible()))
+        self.update_status(self._get_current_dpi_running_state())

@@ -506,3 +506,13 @@ blobs = quic6
 --payload=all
 --lua-desync=fake:blob=quic6:repeats=2:ip_autottl=-1,3-20:ip6_autottl=-1,3-20:payload=all
 --lua-desync=udplen:increment=8:pattern=0x0F0F0E0F
+
+# --- builtin stock basic coverage (generated) ---
+[stock_preset_x_v3_game_filter_01]
+name = fake quic_google x10
+author = builtin
+label = stock
+description = Автодобавлено для распознавания встроенного пресета Preset X v3 (game filter).txt (amazon_udp) в basic-режиме.
+--lua-desync=fake:blob=quic_google:ip_autottl=-2,3-20:ip6_autottl=-2,3-20:payload=all:repeats=10
+
+# --- end builtin stock basic coverage ---

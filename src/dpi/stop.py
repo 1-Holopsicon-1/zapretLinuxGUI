@@ -11,6 +11,12 @@ if TYPE_CHECKING:
     from main import LupiDPIApp
 
 
+def _set_runtime_dpi_running(app: "LupiDPIApp", running: bool) -> None:
+    app_runtime_state = getattr(app, "app_runtime_state", None)
+    if app_runtime_state is not None:
+        app_runtime_state.set_dpi_running(bool(running))
+
+
 def stop_dpi(app: "LupiDPIApp"):
     """Останавливает процесс winws*.exe через Win API"""
     try:
@@ -40,8 +46,7 @@ def stop_dpi_direct(app: "LupiDPIApp"):
         if not app.dpi_starter.check_process_running_wmi(silent=True):
             log("Процесс winws не запущен", level="INFO")
             app.set_status("Zapret уже остановлен")
-            if hasattr(app, 'ui_manager'):
-                app.ui_manager.update_ui_state(running=False)
+            _set_runtime_dpi_running(app, False)
             return True
 
         app.set_status("Останавливаю Zapret...")
@@ -75,16 +80,12 @@ def stop_dpi_direct(app: "LupiDPIApp"):
         if app.dpi_starter.check_process_running_wmi(silent=True):
             log("Процесс winws всё ещё работает", level="⚠ WARNING")
             app.set_status("Не удалось полностью остановить Zapret")
-            if hasattr(app, 'process_monitor_manager'):
-                app.process_monitor_manager.on_process_status_changed(True)
+            _set_runtime_dpi_running(app, True)
             return False
         else:
             log("Zapret успешно остановлен", level="✅ SUCCESS")
-            if hasattr(app, 'ui_manager'):
-                app.ui_manager.update_ui_state(running=False)
+            _set_runtime_dpi_running(app, False)
             app.set_status("Zapret успешно остановлен")
-            if hasattr(app, 'process_monitor_manager'):
-                app.process_monitor_manager.on_process_status_changed(False)
             return True
 
     except Exception as e:
@@ -101,8 +102,7 @@ def stop_dpi_universal(app: "LupiDPIApp"):
         if not app.dpi_starter.check_process_running_wmi(silent=True):
             log("Процесс winws не запущен", level="INFO")
             app.set_status("Zapret уже остановлен")
-            if hasattr(app, 'ui_manager'):
-                app.ui_manager.update_ui_state(running=False)
+            _set_runtime_dpi_running(app, False)
             return True
 
         app.set_status("Останавливаю Zapret...")
@@ -124,16 +124,12 @@ def stop_dpi_universal(app: "LupiDPIApp"):
         if app.dpi_starter.check_process_running_wmi(silent=True):
             log("Процесс winws всё ещё работает", level="⚠ WARNING")
             app.set_status("Не удалось полностью остановить Zapret")
-            if hasattr(app, 'process_monitor_manager'):
-                app.process_monitor_manager.on_process_status_changed(True)
+            _set_runtime_dpi_running(app, True)
             return False
         else:
             log("Zapret успешно остановлен", level="✅ SUCCESS")
-            if hasattr(app, 'ui_manager'):
-                app.ui_manager.update_ui_state(running=False)
+            _set_runtime_dpi_running(app, False)
             app.set_status("Zapret успешно остановлен")
-            if hasattr(app, 'process_monitor_manager'):
-                app.process_monitor_manager.on_process_status_changed(False)
             return True
 
     except Exception as e:

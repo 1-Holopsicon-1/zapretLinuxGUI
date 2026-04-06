@@ -3,103 +3,16 @@
 from log import log
 
 class UIManager:
-    """⚡ Упрощенный менеджер для управления UI компонентами"""
+    """Менеджер UI-вещей, не связанных с runtime-состоянием запуска."""
     
     def __init__(self, app_instance):
         self.app = app_instance
-        # Debounce: коалесцирует несколько _update_all_pages вызовов за короткий период
-        self._pending_update: tuple[bool, bool] | None = None
-        self._update_timer = None
-    
-    def _get_strategy_name(self) -> str:
-        """Получает текущее имя стратегии"""
-        store = getattr(self.app, 'ui_state_store', None)
-        if store is None:
-            return None
-        try:
-            strategy_name = store.snapshot().current_strategy_summary
-        except Exception:
-            return None
-        return str(strategy_name) if strategy_name else None
 
     def update_theme_gallery(self, available_themes: list = None) -> None:
         """Обновляет галерею тем на странице оформления"""
         if hasattr(self.app, 'theme_handler') and self.app.theme_handler:
             self.app.theme_handler.update_available_themes()
             log("Галерея тем обновлена", "DEBUG")
-
-
-    def update_autostart_ui(self, service_running: bool) -> None:
-        """Обновляет интерфейс при включении/выключении автозапуска"""
-        try:
-            # Используем быструю проверку через реестр если нужно
-            if service_running is None:
-                from autostart.registry_check import is_autostart_enabled
-                service_running = is_autostart_enabled()
-            
-            # Определяем статус процесса
-            process_running = service_running
-            if not service_running and hasattr(self.app, 'dpi_starter'):
-                process_running = self.app.dpi_starter.check_process_running_wmi(silent=True)
-            
-            # Обновляем все страницы
-            self._update_all_pages(process_running, service_running)
-            
-            log(f"Автозапуск UI обновлен: {'включен' if service_running else 'выключен'}", "DEBUG")
-        except Exception as e:
-            log(f"Ошибка в update_autostart_ui: {e}", "ERROR")
-
-    def update_ui_state(self, running: bool) -> None:
-        """Обновляет состояние UI в зависимости от статуса запуска DPI"""
-        try:
-            # Проверяем статус автозапуска
-            autostart_active = False
-            if hasattr(self.app, 'service_manager'):
-                autostart_active = self.app.service_manager.check_autostart_exists()
-            
-            # Обновляем все страницы
-            self._update_all_pages(running, autostart_active)
-        except Exception as e:
-            log(f"Ошибка в update_ui_state: {e}", "ERROR")
-    
-    def _update_all_pages(self, is_running: bool, autostart_active: bool) -> None:
-        """⚡ Обновляет все страницы одним методом (с debounce 50ms для коалесценции)"""
-        self._pending_update = (is_running, autostart_active)
-        if self._update_timer is None:
-            from PyQt6.QtCore import QTimer
-            self._update_timer = QTimer()
-            self._update_timer.setSingleShot(True)
-            self._update_timer.timeout.connect(self._flush_update_all_pages)
-        if not self._update_timer.isActive():
-            self._update_timer.start(50)
-
-    def _flush_update_all_pages(self) -> None:
-        """Фактическое обновление страниц (вызывается по debounce таймеру)."""
-        pending = self._pending_update
-        self._pending_update = None
-        if pending is None:
-            return
-        is_running, autostart_active = pending
-        try:
-            strategy_name = self._get_strategy_name()
-            launch_method = ""
-            try:
-                from strategy_menu import get_strategy_launch_method
-
-                launch_method = (get_strategy_launch_method() or "").strip().lower()
-            except Exception:
-                launch_method = ""
-
-            store = getattr(self.app, 'ui_state_store', None)
-            if store is not None:
-                store.set_launch_method(launch_method)
-                store.set_dpi_running(is_running)
-                store.set_autostart(autostart_active)
-                if strategy_name:
-                    store.set_current_strategy_summary(strategy_name)
-            
-        except Exception as e:
-            log(f"Ошибка в _update_all_pages: {e}", "DEBUG")
 
     def update_title_with_subscription_status(self, is_premium: bool, current_theme: str, 
                                             days_remaining: int, source: str = "api") -> None:

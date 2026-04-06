@@ -80,6 +80,7 @@ class Zapret1StrategiesPage(BasePage):
         self._ui_state_unsubscribe = None
         self._basic_payload_cache = None
         self._preset_refresh_pending = False
+        self._selected_preset_file_name = ""
 
         self._setup_breadcrumb()
 
@@ -144,13 +145,46 @@ class Zapret1StrategiesPage(BasePage):
             if self._preset_refresh_pending:
                 self._preset_refresh_pending = False
                 self._basic_payload_cache = None
-                QTimer.singleShot(0, self._refresh_subtitles)
+                QTimer.singleShot(0, self._refresh_from_preset_switch)
 
     def _schedule_build(self) -> None:
         if self._build_scheduled:
             return
         self._build_scheduled = True
         QTimer.singleShot(0, self._build_content)
+
+    @staticmethod
+    def _payload_selected_preset_file_name(payload) -> str:
+        return str(getattr(payload, "selected_preset_file_name", "") or "").strip().lower()
+
+    def _should_rebuild_for_payload(self, payload) -> bool:
+        target_items = payload.target_items or {}
+        if self._targets_list is None or self._empty_state_label is not None:
+            return True
+        if self._payload_selected_preset_file_name(payload) != self._selected_preset_file_name:
+            return True
+        return tuple(target_items.keys()) != tuple((self._targets or {}).keys())
+
+    def _refresh_from_preset_switch(self) -> None:
+        if not self.isVisible():
+            self._preset_refresh_pending = True
+            self._basic_payload_cache = None
+            return
+
+        payload = self._get_basic_payload(refresh=True)
+        if self._should_rebuild_for_payload(payload):
+            self._built = False
+            self._basic_payload_cache = None
+            self._targets_list = None
+            self._targets = {}
+            self._empty_state_label = None
+            self._selected_preset_file_name = ""
+            self._schedule_build()
+            return
+
+        self._targets = payload.target_items or {}
+        self._selected_preset_file_name = self._payload_selected_preset_file_name(payload)
+        self._refresh_subtitles()
 
     def _build_content(self) -> None:
         _t_total = _time.perf_counter()
@@ -176,6 +210,7 @@ class Zapret1StrategiesPage(BasePage):
         _t_payload = _time.perf_counter()
         payload = self._get_basic_payload(refresh=True, startup_scope="ZAPRET1_DIRECT")
         self._targets = payload.target_items or {}
+        self._selected_preset_file_name = self._payload_selected_preset_file_name(payload)
         target_views = list(payload.target_views or ())
         strategy_names_by_target = payload.strategy_names_by_target or {}
         _log_startup_z1_direct_metric("_build_content.payload", (_time.perf_counter() - _t_payload) * 1000)
@@ -342,6 +377,7 @@ class Zapret1StrategiesPage(BasePage):
             self._built = False
             self._basic_payload_cache = None
             self._targets_list = None
+            self._selected_preset_file_name = ""
             self._schedule_build()
         finally:
             if hasattr(self, "_reload_btn"):
@@ -395,6 +431,7 @@ class Zapret1StrategiesPage(BasePage):
         self._built = False
         self._basic_payload_cache = None
         self._targets_list = None
+        self._selected_preset_file_name = ""
         if self.isVisible():
             self._schedule_build()
 
@@ -427,7 +464,7 @@ class Zapret1StrategiesPage(BasePage):
                 self._preset_refresh_pending = True
                 self._basic_payload_cache = None
                 return
-            self.reload_for_mode_change()
+            self._refresh_from_preset_switch()
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)

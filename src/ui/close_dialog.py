@@ -129,20 +129,10 @@ def ask_close_action(parent=None):
 
 
 def _is_dpi_running(parent=None) -> bool:
-    is_dpi_running = True
+    app_runtime_state = getattr(parent, "app_runtime_state", None)
+    if app_runtime_state is None:
+        return False
     try:
-        dpi_controller = getattr(parent, "dpi_controller", None)
-        if dpi_controller and hasattr(dpi_controller, "is_running"):
-            is_dpi_running = bool(dpi_controller.is_running())
+        return bool(app_runtime_state.is_dpi_running())
     except Exception:
-        pass
-
-    if is_dpi_running and parent is not None:
-        try:
-            dpi_starter = getattr(parent, "dpi_starter", None)
-            if dpi_starter and hasattr(dpi_starter, "check_process_running_wmi"):
-                is_dpi_running = bool(dpi_starter.check_process_running_wmi(silent=True))
-        except Exception:
-            pass
-
-    return is_dpi_running
+        return False

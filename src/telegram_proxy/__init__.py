@@ -13,6 +13,7 @@ Public API:
 
 import asyncio
 import logging
+import traceback
 import threading
 from dataclasses import dataclass
 from typing import Optional, Callable
@@ -23,6 +24,65 @@ log = logging.getLogger("tg_proxy")
 
 # Default port
 DEFAULT_PORT = 1353
+
+
+def _is_ignorable_transport_reset_error(exc: BaseException | None) -> bool:
+    if not isinstance(exc, ConnectionResetError):
+        return False
+    winerror = getattr(exc, "winerror", None)
+    errno = getattr(exc, "errno", None)
+    return winerror == 10054 or errno == 10054
+
+
+def _is_ignorable_asyncio_loop_exception(context: dict) -> bool:
+    message = str(context.get("message") or "").strip().lower()
+    exception = context.get("exception")
+    if "connection lost" not in message:
+        return False
+    protocol = context.get("protocol")
+    transport = context.get("transport")
+    if protocol is None and transport is None:
+        return False
+    return _is_ignorable_transport_reset_error(exception)
+
+
+def _install_loop_exception_handler(
+    loop: asyncio.AbstractEventLoop,
+    *,
+    on_log: Optional[Callable[[str], None]] = None,
+) -> None:
+    def _emit_proxy_loop_context(prefix: str, context: dict) -> None:
+        if on_log is None:
+            return
+        try:
+            message = str(context.get("message") or "").strip() or "asyncio loop exception"
+            exception = context.get("exception")
+            if exception is not None:
+                details = "".join(
+                    traceback.format_exception(
+                        type(exception),
+                        exception,
+                        exception.__traceback__,
+                    )
+                ).strip()
+                on_log(f"{prefix}: {message}\n{details}")
+                return
+            on_log(f"{prefix}: {message}")
+        except Exception:
+            pass
+
+    def _handler(current_loop: asyncio.AbstractEventLoop, context: dict) -> None:
+        if _is_ignorable_asyncio_loop_exception(context):
+            if on_log is not None:
+                try:
+                    on_log("Proxy transport reset by remote host (WinError 10054); suppressed as network noise")
+                except Exception:
+                    pass
+            return
+        _emit_proxy_loop_context("Proxy loop exception", context)
+        current_loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
 
 
 class ProxyController:
@@ -150,6 +210,7 @@ class ProxyController:
             self._started.set()
             return
         asyncio.set_event_loop(loop)
+        _install_loop_exception_handler(loop, on_log=self._on_log)
         try:
             proxy = self._proxy
             if proxy is not None:

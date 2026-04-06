@@ -279,6 +279,7 @@ from ui.holiday_effects import HolidayEffectsManager
 from ui.window_geometry_controller import WindowGeometryController
 from ui.window_notification_controller import WindowNotificationController
 from ui.main_window_state import MainWindowStateStore
+from managers.app_runtime_state import AppRuntimeState
 
 
 from startup.admin_check import is_admin
@@ -620,20 +621,10 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
             store.set_status_message(text, status_type)
 
 
-    def update_ui(self, running: bool) -> None:
-        """Обновляет состояние кнопок в зависимости от статуса запуска"""
-        if hasattr(self, 'ui_manager'):
-            self.ui_manager.update_ui_state(running)
-
     def delayed_dpi_start(self) -> None:
         """Выполняет отложенный запуск DPI с проверкой наличия автозапуска"""
         if hasattr(self, 'dpi_manager'):
             self.dpi_manager.delayed_dpi_start()
-
-    def update_autostart_ui(self, service_running: bool) -> None:
-        """Обновляет интерфейс при включении/выключении автозапуска"""
-        if hasattr(self, 'ui_manager'):
-            self.ui_manager.update_autostart_ui(service_running)
 
     def on_strategy_selected_from_dialog(self, strategy_id: str, strategy_name: str) -> None:
         """Обрабатывает выбор стратегии из диалога."""
@@ -878,7 +869,8 @@ class LupiDPIApp(ZapretFluentWindow, MainWindowUI, ThemeSubscriptionManager):
 
         self.ui_state_store = MainWindowStateStore()
         try:
-            self.ui_state_store.set_launch_method(self._get_launch_method())
+            self.app_runtime_state = AppRuntimeState(self)
+            self.app_runtime_state.set_launch_method(self._get_launch_method())
         except Exception:
             pass
 

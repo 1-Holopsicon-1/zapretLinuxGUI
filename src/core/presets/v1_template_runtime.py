@@ -180,6 +180,11 @@ def update_changed_v1_templates_in_presets() -> int:
                 pass
 
             dest.write_text(_normalize_template_header_v1(template_content, name), encoding="utf-8")
+            log(
+                f"Built-in V1 preset updated from template version {existing_version or 'none'} "
+                f"to {template_version or 'none'}: {dest}",
+                "DEBUG",
+            )
             updated += 1
         except Exception as exc:
             log(f"Failed to update V1 preset '{name}' from template: {exc}", "DEBUG")
@@ -213,6 +218,12 @@ def overwrite_v1_templates_to_presets() -> tuple[int, int, list[str]]:
 
 def ensure_default_preset_exists_v1() -> bool:
     try:
+        try:
+            from .v1_builtin_templates import sync_repo_builtins_to_runtime_templates_v1
+
+            sync_repo_builtins_to_runtime_templates_v1()
+        except Exception:
+            pass
         ensure_v1_templates_copied_to_presets()
         presets_dir = _presets_dir_v1()
         if (presets_dir / "Default.txt").exists():
@@ -254,13 +265,7 @@ def _presets_dir_v1() -> Path:
             return path
     except Exception:
         pass
-
-    appdata = (os.environ.get("APPDATA") or "").strip()
-    if appdata:
-        path = Path(appdata) / "zapret" / "presets_v1"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-    raise RuntimeError("APPDATA is required for presets_v1 directory")
+    raise RuntimeError("Canonical userdata root is required for presets_v1 directory")
 
 
 def _templates_dir_v1() -> Path:
@@ -269,10 +274,7 @@ def _templates_dir_v1() -> Path:
 
         return Path(get_zapret_presets_v1_template_dir())
     except Exception:
-        appdata = (os.environ.get("APPDATA") or "").strip()
-        if appdata:
-            return Path(appdata) / "zapret" / "presets_v1_template"
-        raise RuntimeError("APPDATA is required for presets_v1_template directory")
+        raise RuntimeError("Canonical userdata root is required for presets_v1_template directory")
 
 
 def _deleted_presets_ini_path() -> Path:
@@ -283,9 +285,13 @@ def _load_template_paths() -> dict[str, Path]:
     templates: dict[str, Path] = {}
     tpl_dir = _templates_dir_v1()
     try:
+        from .v1_builtin_templates import list_builtin_catalog_names_v1
+
+        builtin_names = {str(name or "").strip().casefold() for name in list_builtin_catalog_names_v1()}
+
         if tpl_dir.is_dir():
             for path in tpl_dir.glob("*.txt"):
-                if path.is_file() and not path.name.startswith("_"):
+                if path.is_file() and not path.name.startswith("_") and path.stem.casefold() in builtin_names:
                     templates[path.stem] = path
     except Exception as exc:
         log(f"Error reading V1 templates dir: {exc}", "DEBUG")

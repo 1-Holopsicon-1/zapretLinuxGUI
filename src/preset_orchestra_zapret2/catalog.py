@@ -178,9 +178,14 @@ def load_categories() -> Dict[str, Dict]:
 
     # User categories are stored outside the install folder (updates may overwrite it).
     def _user_categories_file() -> Path:
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            return Path(appdata) / "zapret" / "user_categories.txt"
+        try:
+            from config import get_zapret_userdata_dir
+
+            base = (get_zapret_userdata_dir() or "").strip()
+            if base:
+                return Path(base) / "user_categories.txt"
+        except Exception:
+            pass
         return Path.home() / ".config" / "zapret" / "user_categories.txt"
 
     user = _load_one(_user_categories_file())

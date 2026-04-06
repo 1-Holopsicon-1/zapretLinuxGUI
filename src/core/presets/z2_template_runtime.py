@@ -10,6 +10,7 @@ from safe_construct import safe_construct
 
 from core.direct_preset_core.common.source_preset_models import SendSettings, SyndataSettings
 from core.direct_preset_core.engines import winws2_parser, winws2_rules
+from log import log
 
 
 _TEMPLATES_CACHE: Optional[dict[str, str]] = None
@@ -138,6 +139,7 @@ def clear_all_deleted_presets() -> bool:
 def ensure_templates_copied_to_presets() -> bool:
     try:
         from config import get_zapret_presets_v2_dir
+        from .z2_builtin_templates import list_builtin_catalog_names_v2
 
         templates = _load_template_contents()
         if not templates:
@@ -147,8 +149,11 @@ def ensure_templates_copied_to_presets() -> bool:
         presets_dir.mkdir(parents=True, exist_ok=True)
         backups_dir = presets_dir / "_builtin_version_backups"
         deleted_lower = {name.lower() for name in get_deleted_preset_names()}
+        builtin_names = {str(name or "").strip().casefold() for name in list_builtin_catalog_names_v2()}
 
         for name, content in templates.items():
+            if str(name or "").strip().casefold() not in builtin_names:
+                continue
             dest = presets_dir / f"{name}.txt"
             template_version = _extract_builtin_version(content)
             was_deleted = name.lower() in deleted_lower
@@ -184,6 +189,12 @@ def ensure_templates_copied_to_presets() -> bool:
                     dest.write_text(content, encoding="utf-8")
                 except Exception:
                     continue
+                if updated:
+                    log(
+                        f"Built-in preset updated from template version {existing_version or 'none'} "
+                        f"to {template_version or 'none'}: {dest}",
+                        "DEBUG",
+                    )
 
             if was_deleted:
                 try:
@@ -198,6 +209,7 @@ def ensure_templates_copied_to_presets() -> bool:
 def overwrite_templates_to_presets() -> tuple[int, int, list[str]]:
     try:
         from config import get_zapret_presets_v2_dir
+        from .z2_builtin_templates import list_builtin_catalog_names_v2
     except Exception:
         return (0, 0, [])
 
@@ -210,10 +222,13 @@ def overwrite_templates_to_presets() -> tuple[int, int, list[str]]:
     templates = _load_template_contents()
     if not templates:
         return (0, 0, [])
+    builtin_names = {str(name or "").strip().casefold() for name in list_builtin_catalog_names_v2()}
 
     copied = 0
     failed: list[str] = []
     for name in sorted(templates.keys(), key=lambda value: value.lower()):
+        if str(name or "").strip().casefold() not in builtin_names:
+            continue
         dest = presets_dir / f"{name}.txt"
         try:
             dest.write_text(templates[name], encoding="utf-8")
@@ -412,10 +427,15 @@ def _extract_syndata_overrides(action_lines: list[str], protocol: str) -> dict:
 
 
 def _load_template_contents() -> dict[str, str]:
+    from .z2_builtin_templates import list_builtin_catalog_names_v2
+
     contents: dict[str, str] = {}
+    builtin_names = {str(name or "").strip().casefold() for name in list_builtin_catalog_names_v2()}
     for path in _template_paths():
         name = (path.stem or "").strip()
         if not name:
+            continue
+        if name.casefold() not in builtin_names:
             continue
         try:
             content = path.read_text(encoding="utf-8", errors="replace")

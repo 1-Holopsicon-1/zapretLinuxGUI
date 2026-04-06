@@ -23,7 +23,7 @@ class DPIManager(QObject):
         from config import get_dpi_autostart
         if not get_dpi_autostart():
             log("Автозапуск DPI отключён", "INFO")
-            self._update_ui(running=False)
+            self._set_runtime_dpi_running(False)
             return
 
         # 2. Определяем режим запуска (Direct или BAT)
@@ -42,10 +42,10 @@ class DPIManager(QObject):
         else:
             log(f"Неизвестный метод автозапуска: {launch_method}", "WARNING")
     
-    def _update_ui(self, running: bool):
-        """Обновляет UI состояние"""
-        if hasattr(self.app, 'ui_manager'):
-            self.app.ui_manager.update_ui_state(running=running)
+    def _set_runtime_dpi_running(self, running: bool) -> None:
+        app_runtime_state = getattr(self.app, "app_runtime_state", None)
+        if app_runtime_state is not None:
+            app_runtime_state.set_dpi_running(bool(running))
 
     def _start_direct_mode(self):
         """⚡ Запускает direct_zapret2_orchestra через preset файл"""
@@ -59,19 +59,19 @@ class DPIManager(QObject):
         launch_method = get_strategy_launch_method()
         if launch_method != "direct_zapret2_orchestra":
             log(f"_start_direct_mode вызван для неподдерживаемого режима: {launch_method}", "WARNING")
-            self._update_ui(running=False)
+            self._set_runtime_dpi_running(False)
             return
 
         if not ensure_default_preset_exists():
             log("Автозапуск direct_zapret2_orchestra пропущен: не удалось создать preset-zapret2-orchestra.txt", "WARNING")
-            self._update_ui(running=False)
+            self._set_runtime_dpi_running(False)
             return
 
         preset_path = get_active_preset_path()
         if not preset_path.exists():
             log("Автозапуск direct_zapret2_orchestra пропущен: preset-zapret2-orchestra.txt не найден", "INFO")
             self.app.set_status("⚠️ Выберите стратегию в разделе Оркестратор Z2")
-            self._update_ui(running=False)
+            self._set_runtime_dpi_running(False)
             return
 
         preset_name = get_active_preset_name() or "Default"
@@ -85,7 +85,6 @@ class DPIManager(QObject):
         if hasattr(self.app, "update_current_strategy_display"):
             self.app.update_current_strategy_display(f"Пресет оркестра: {preset_name}")
         self.app.dpi_controller.start_dpi_async(selected_mode=strategy_data, launch_method=launch_method)
-        self._update_ui(running=True)
 
     def _start_direct_zapret1_mode(self):
         """⚡ Запускает режим Zapret1 через выбранный source-пресет"""
@@ -97,14 +96,13 @@ class DPIManager(QObject):
         except Exception as e:
             log(f"Автозапуск Zapret1 пропущен: {e}", "WARNING")
             self.app.set_status("⚠️ Не удалось подготовить пресет для запуска")
-            self._update_ui(running=False)
+            self._set_runtime_dpi_running(False)
             return
 
         log(f"Автозапуск Zapret1 из выбранного source-пресета: {profile.launch_config_path}", "INFO")
         if hasattr(self.app, "update_current_strategy_display"):
             self.app.update_current_strategy_display(profile.display_name)
         self.app.dpi_controller.start_dpi_async(selected_mode=strategy_data, launch_method="direct_zapret1")
-        self._update_ui(running=True)
 
     def _start_orchestra_mode(self):
         """⚡ Запускает режим Оркестра (автообучение)"""
@@ -126,19 +124,19 @@ class DPIManager(QObject):
             if not self.app.orchestra_runner.prepare():
                 log("Ошибка подготовки оркестратора", "ERROR")
                 self.app.set_status("❌ Ошибка подготовки оркестратора")
-                self._update_ui(running=False)
+                self._set_runtime_dpi_running(False)
                 return
 
             if not self.app.orchestra_runner.start():
                 log("Ошибка запуска оркестратора", "ERROR")
                 self.app.set_status("❌ Ошибка запуска оркестратора")
-                self._update_ui(running=False)
+                self._set_runtime_dpi_running(False)
                 return
 
             # Обновляем UI
             if hasattr(self.app, "update_current_strategy_display"):
                 self.app.update_current_strategy_display("Оркестр")
-            self._update_ui(running=True)
+            self._set_runtime_dpi_running(True)
 
             # Запускаем мониторинг на странице оркестра
             if hasattr(self.app, 'orchestra_page'):
@@ -147,7 +145,7 @@ class DPIManager(QObject):
         except Exception as e:
             log(f"Ошибка запуска Orchestra: {e}", "ERROR")
             self.app.set_status(f"❌ Ошибка: {e}")
-            self._update_ui(running=False)
+            self._set_runtime_dpi_running(False)
 
     def _on_discord_fail_restart(self):
         """Callback для перезапуска Discord при FAIL"""

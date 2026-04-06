@@ -366,7 +366,10 @@ class HomePage(BasePage):
     
     def _on_autostart_checked(self, enabled: bool):
         """Обработчик результата проверки автозапуска"""
-        if self._ui_state_store is not None:
+        app_runtime_state = getattr(self.window(), "app_runtime_state", None)
+        if app_runtime_state is not None:
+            app_runtime_state.set_autostart(bool(enabled))
+        elif self._ui_state_store is not None:
             self._ui_state_store.set_autostart(enabled)
         else:
             self.update_autostart_status(enabled)

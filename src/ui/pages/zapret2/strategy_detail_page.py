@@ -1914,22 +1914,14 @@ class StrategyDetailPage(BasePage):
         self._update_strategies_summary()
 
     def _is_dpi_running_now(self) -> bool:
-        """Best-effort check: is any winws process currently running."""
+        """Смотрит на канонический runtime-state вместо локальных догадок."""
+        app_runtime_state = getattr(self.parent_app, "app_runtime_state", None)
+        if app_runtime_state is None:
+            return False
         try:
-            controller = getattr(self.parent_app, "dpi_controller", None)
-            if controller is not None and hasattr(controller, "is_running"):
-                return bool(controller.is_running())
+            return bool(app_runtime_state.is_dpi_running())
         except Exception:
-            pass
-
-        try:
-            starter = getattr(self.parent_app, "dpi_starter", None)
-            if starter is not None and hasattr(starter, "check_process_running_wmi"):
-                return bool(starter.check_process_running_wmi(silent=True))
-        except Exception:
-            pass
-
-        return False
+            return False
 
     def _load_strategies(self):
         """Загружает стратегии для текущего target'а."""
