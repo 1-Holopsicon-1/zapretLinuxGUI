@@ -92,16 +92,18 @@ class TelegramProxyPage(BasePage):
             parent,
         )
         self.parent_app = parent
+        self._log_timer = None
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+        # Auto-start now lives in startup initialization, so it works
+        # even if this page is never opened.
+
+    def _after_ui_built(self) -> None:
         self._setup_ui()
         self._connect_signals()
-        # Load settings AFTER range is set (see _setup_ui)
-        QTimer.singleShot(0, self._load_settings)
-        # Log refresh timer — drains ring buffer every 500ms
+        self._load_settings()
         self._log_timer = QTimer(self)
         self._log_timer.timeout.connect(self._flush_log_buffer)
         self._log_timer.start(_LOG_REFRESH_MS)
-        # Auto-start now lives in startup initialization, so it works
-        # even if this page is never opened.
 
     def _setup_ui(self):
         # ── Tabs (SegmentedWidget) ──
@@ -2033,6 +2035,7 @@ class TelegramProxyPage(BasePage):
 
     def cleanup(self):
         """Called on app exit."""
-        self._log_timer.stop()
+        if self._log_timer is not None:
+            self._log_timer.stop()
         mgr = _get_proxy_manager()
         mgr.cleanup()

@@ -156,7 +156,6 @@ class BasePage(_FluentScrollArea):
         self._deferred_ui_build_enabled = False
         self._deferred_ui_build_done = True
         self._deferred_ui_after_build = None
-        self._pending_ui_state_store = None
 
         # Ensure objectName is set (required by FluentWindow.addSubInterface)
         if not self.objectName():
@@ -241,9 +240,6 @@ class BasePage(_FluentScrollArea):
     def is_deferred_ui_build_pending(self) -> bool:
         return bool(self._deferred_ui_build_enabled) and not bool(self._deferred_ui_build_done)
 
-    def queue_ui_state_store_binding(self, store) -> None:
-        self._pending_ui_state_store = store
-
     def ensure_deferred_ui_built(self) -> bool:
         if not self.is_deferred_ui_build_pending():
             return False
@@ -260,8 +256,109 @@ class BasePage(_FluentScrollArea):
         if callable(after_build):
             after_build()
 
+        self._postprocess_deferred_ui_build()
+
         self.ui_built.emit()
         return True
+
+    def _postprocess_deferred_ui_build(self) -> None:
+        """Доводит тему/шрифты/локализацию после поздней сборки UI.
+
+        При deferred-build часть страниц создаёт виджеты уже после того, как
+        приложение успело применить тему, шрифты и язык интерфейса. Без явной
+        дополировки некоторые страницы могут остаться с сырыми стилями или
+        недообновлёнными подписями.
+        """
+        try:
+            self.ensurePolished()
+        except Exception:
+            pass
+
+        try:
+            content = getattr(self, "content", None)
+            if content is not None:
+                content.ensurePolished()
+        except Exception:
+            pass
+
+        try:
+            for child in self.findChildren(QWidget):
+                try:
+                    child.ensurePolished()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            self._retranslate_base_texts()
+        except Exception:
+            pass
+
+        set_ui_language = getattr(self, "set_ui_language", None)
+        if callable(set_ui_language):
+            try:
+                set_ui_language(self._ui_language)
+            except Exception:
+                pass
+
+        for method_name in ("_apply_theme", "_apply_theme_styles", "_apply_page_theme"):
+            method = getattr(self, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                try:
+                    method(force=True)
+                except TypeError:
+                    method()
+            except Exception:
+                pass
+
+        try:
+            style = self.style()
+            if style is not None:
+                style.unpolish(self)
+                style.polish(self)
+        except Exception:
+            pass
+
+        try:
+            content = getattr(self, "content", None)
+            if content is not None:
+                style = content.style()
+                if style is not None:
+                    style.unpolish(content)
+                    style.polish(content)
+        except Exception:
+            pass
+
+        try:
+            for child in self.findChildren(QWidget):
+                try:
+                    style = child.style()
+                    if style is not None:
+                        style.unpolish(child)
+                        style.polish(child)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            self.updateGeometry()
+            self.update()
+            content = getattr(self, "content", None)
+            if content is not None:
+                content.updateGeometry()
+                content.update()
+            for child in self.findChildren(QWidget):
+                try:
+                    child.updateGeometry()
+                    child.update()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _resolve_ui_language(self) -> str:
         try:

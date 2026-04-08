@@ -74,6 +74,24 @@ class DpiSettingsPage(BasePage):
             pass
 
         try:
+            if self._zapret1_header is not None:
+                self._zapret1_header.setStyleSheet("color: #ff9800;")
+        except Exception:
+            pass
+
+        try:
+            if self._orchestra_label is not None:
+                self._orchestra_label.setStyleSheet("color: #9c27b0;")
+        except Exception:
+            pass
+
+        try:
+            if self._advanced_desc_label is not None:
+                self._advanced_desc_label.setStyleSheet("color: #ff9800;")
+        except Exception:
+            pass
+
+        try:
             if hasattr(self, "separator2") and self.separator2 is not None:
                 self.separator2.setStyleSheet(f"background-color: {theme_tokens.divider_strong}; margin: 8px 0;")
         except Exception:
@@ -194,7 +212,6 @@ class DpiSettingsPage(BasePage):
         )
         self._zapret1_header = zapret1_header
         zapret1_header.setContentsMargins(0, 12, 0, 4)
-        zapret1_header.setStyleSheet("color: #ff9800;")
         method_layout.addWidget(zapret1_header)
 
         # Zapret 1 Direct (прямой запуск winws.exe с JSON стратегиями)
@@ -243,7 +260,6 @@ class DpiSettingsPage(BasePage):
             self._tr("page.dpi_settings.section.orchestra_settings", "Настройки оркестратора")
         )
         self._orchestra_label = orchestra_label
-        orchestra_label.setStyleSheet("color: #9c27b0;")
         orchestra_settings_layout.addWidget(orchestra_label)
 
         self.strict_detection_toggle = Win11ToggleRow(
@@ -329,7 +345,6 @@ class DpiSettingsPage(BasePage):
         )
         self._advanced_desc_label = advanced_desc
         advanced_desc.setContentsMargins(0, 0, 0, 8)
-        advanced_desc.setStyleSheet("color: #ff9800;")
         advanced_layout.addWidget(advanced_desc)
         
         # WSSize

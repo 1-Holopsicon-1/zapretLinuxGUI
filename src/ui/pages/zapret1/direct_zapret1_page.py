@@ -66,7 +66,6 @@ class Zapret1StrategiesPage(BasePage):
         self.parent_app = parent
 
         self._built = False
-        self._build_scheduled = False
         self._breadcrumb = None
         self._back_btn = None
         self._targets_list: PresetTargetsList | None = None
@@ -83,6 +82,7 @@ class Zapret1StrategiesPage(BasePage):
         self._selected_preset_file_name = ""
 
         self._setup_breadcrumb()
+        self.enable_deferred_ui_build(after_build=self._build_content)
 
     # ------------------------------------------------------------------
     # Breadcrumb
@@ -139,19 +139,10 @@ class Zapret1StrategiesPage(BasePage):
         super().showEvent(event)
         if self._breadcrumb is not None:
             self._rebuild_breadcrumb()
-        if not self._built:
-            self._schedule_build()
-        else:
-            if self._preset_refresh_pending:
-                self._preset_refresh_pending = False
-                self._basic_payload_cache = None
-                QTimer.singleShot(0, self._refresh_from_preset_switch)
-
-    def _schedule_build(self) -> None:
-        if self._build_scheduled:
-            return
-        self._build_scheduled = True
-        QTimer.singleShot(0, self._build_content)
+        if self._built and self._preset_refresh_pending:
+            self._preset_refresh_pending = False
+            self._basic_payload_cache = None
+            QTimer.singleShot(0, self._refresh_from_preset_switch)
 
     @staticmethod
     def _payload_selected_preset_file_name(payload) -> str:
@@ -179,7 +170,7 @@ class Zapret1StrategiesPage(BasePage):
             self._targets = {}
             self._empty_state_label = None
             self._selected_preset_file_name = ""
-            self._schedule_build()
+            QTimer.singleShot(0, self._build_content)
             return
 
         self._targets = payload.target_items or {}
@@ -188,7 +179,6 @@ class Zapret1StrategiesPage(BasePage):
 
     def _build_content(self) -> None:
         _t_total = _time.perf_counter()
-        self._build_scheduled = False
         try:
             self._do_build()
         except Exception as e:
@@ -380,7 +370,7 @@ class Zapret1StrategiesPage(BasePage):
             self._basic_payload_cache = None
             self._targets_list = None
             self._selected_preset_file_name = ""
-            self._schedule_build()
+            QTimer.singleShot(0, self._build_content)
         finally:
             if hasattr(self, "_reload_btn"):
                 self._reload_btn.set_loading(False)
@@ -435,7 +425,7 @@ class Zapret1StrategiesPage(BasePage):
         self._targets_list = None
         self._selected_preset_file_name = ""
         if self.isVisible():
-            self._schedule_build()
+            QTimer.singleShot(0, self._build_content)
 
     def update_current_strategy(self, name: str) -> None:
         # Direct Z1 target list page does not show a separate current-strategy label,

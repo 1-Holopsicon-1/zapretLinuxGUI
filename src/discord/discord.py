@@ -1,10 +1,17 @@
-import os
-import subprocess
-import time
-import threading
 import glob
+import ntpath
+import os
+import threading
+import time
+
 import psutil
-from utils import run_hidden # Импортируем нашу обертку для subprocess
+
+from utils import run_hidden  # Импортируем нашу обертку для subprocess
+
+
+def _path_basename(path):
+    """Возвращает имя файла и для Windows-, и для POSIX-пути."""
+    return ntpath.basename(str(path or ""))
 
 class DiscordManager:
     """Класс для управления процессом Discord"""
@@ -25,7 +32,7 @@ class DiscordManager:
             os.path.expandvars(r"C:\Program Files\Discord\Discord.exe"),
             os.path.expandvars(r"C:\Program Files (x86)\Discord\Discord.exe"),
         ]
-        self.discord_process_names = ["Discord.exe", "Update.exe"]
+        self.discord_process_names = {"discord.exe", "update.exe"}
         self.restart_thread = None
     
     def set_status(self, text):
@@ -35,6 +42,110 @@ class DiscordManager:
         else:
             print(text)
     
+    def _safe_process_exe(self, proc):
+        """Возвращает путь к exe процесса, если его удалось получить."""
+        try:
+            info = getattr(proc, "info", {}) or {}
+            exe_path = info.get("exe")
+            if exe_path:
+                return str(exe_path)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return None
+
+        try:
+            exe_path = proc.exe()
+            if exe_path:
+                return str(exe_path)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            return None
+
+        return None
+
+    def _safe_process_cmdline(self, proc):
+        """Возвращает командную строку процесса как список строк."""
+        try:
+            info = getattr(proc, "info", {}) or {}
+            cmdline = info.get("cmdline")
+            if cmdline is not None:
+                return [str(part) for part in cmdline]
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            return []
+
+        try:
+            return [str(part) for part in proc.cmdline()]
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            return []
+
+    def _resolve_discord_path_from_update_exe(self, update_exe_path):
+        """
+        Для Squirrel-установок Discord восстанавливает путь к Discord.exe
+        через соседние app-* каталоги рядом с Update.exe.
+        """
+        if not update_exe_path:
+            return None
+
+        install_root = os.path.dirname(update_exe_path)
+        candidates = glob.glob(os.path.join(install_root, "app-*", "Discord.exe"))
+        if candidates:
+            candidates.sort(reverse=True)
+            return candidates[0]
+        return None
+
+    def _is_discord_process(self, proc):
+        """Определяет, относится ли процесс к Discord."""
+        try:
+            info = getattr(proc, "info", {}) or {}
+            process_name = _path_basename(info.get("name")).lower()
+            if process_name in self.discord_process_names:
+                return True
+
+            exe_path = self._safe_process_exe(proc)
+            exe_name = _path_basename(exe_path).lower() if exe_path else ""
+            if exe_name in self.discord_process_names:
+                return True
+
+            for part in self._safe_process_cmdline(proc):
+                if _path_basename(part).lower() == "discord.exe":
+                    return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+            return False
+
+        return False
+
+    def _iter_discord_processes(self):
+        """Итерирует только по тем процессам, которые действительно похожи на Discord."""
+        for proc in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
+            try:
+                if self._is_discord_process(proc):
+                    yield proc
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+                pass
+
+    def get_running_discord_path(self):
+        """
+        Возвращает реальный путь к запущенному Discord, если процесс уже жив.
+        Это основной источник истины для перезапуска.
+        """
+        update_exe_candidates = []
+
+        for proc in self._iter_discord_processes():
+            exe_path = self._safe_process_exe(proc)
+            if not exe_path:
+                continue
+
+            exe_name = _path_basename(exe_path).lower()
+            if exe_name == "discord.exe" and os.path.exists(exe_path):
+                return exe_path
+            if exe_name == "update.exe":
+                update_exe_candidates.append(exe_path)
+
+        for update_exe_path in update_exe_candidates:
+            discord_exe_path = self._resolve_discord_path_from_update_exe(update_exe_path)
+            if discord_exe_path and os.path.exists(discord_exe_path):
+                return discord_exe_path
+
+        return None
+
     def find_discord_path(self):
         """
         Находит путь к исполняемому файлу Discord.
@@ -42,6 +153,10 @@ class DiscordManager:
         Returns:
             str: Путь к Discord.exe или None, если не найден
         """
+        running_path = self.get_running_discord_path()
+        if running_path:
+            return running_path
+
         # Проверяем все возможные пути
         for path_pattern in self.discord_exes:
             if "*" in path_pattern:
@@ -62,29 +177,23 @@ class DiscordManager:
         Returns:
             bool: True если Discord запущен, False если не запущен
         """
-        for proc in psutil.process_iter(['pid', 'name']):
-            try:
-                if proc.info['name'] in self.discord_process_names:
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
-        return False
+        return any(True for _ in self._iter_discord_processes())
     
     def _restart_discord_thread(self):
         from log import log
         """Фоновый поток для перезапуска Discord"""
         try:
-            # Проверяем, запущен ли Discord
-            was_running = self.is_discord_running()
+            discord_path = self.find_discord_path()
+            discord_processes = list(self._iter_discord_processes())
+            was_running = bool(discord_processes)
             
             if was_running:
                 self.set_status("Discord запущен. Перезапускаем...")
                 
                 # Закрываем все процессы Discord
-                for proc in psutil.process_iter(['pid', 'name']):
+                for proc in discord_processes:
                     try:
-                        if proc.info['name'] in self.discord_process_names:
-                            proc.terminate()
+                        proc.terminate()
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         pass
                 
@@ -92,10 +201,9 @@ class DiscordManager:
                 time.sleep(1)
                 
                 # Убеждаемся, что Discord точно закрыт
-                for proc in psutil.process_iter(['pid', 'name']):
+                for proc in self._iter_discord_processes():
                     try:
-                        if proc.info['name'] in self.discord_process_names:
-                            proc.kill()
+                        proc.kill()
                     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                         pass
                 
@@ -103,7 +211,6 @@ class DiscordManager:
                 time.sleep(0.5)
                 
                 # Запускаем Discord снова
-                discord_path = self.find_discord_path()
                 if discord_path:
                     run_hidden(discord_path)
                     log(f"Discord перезапущен: {discord_path}", level="INFO")

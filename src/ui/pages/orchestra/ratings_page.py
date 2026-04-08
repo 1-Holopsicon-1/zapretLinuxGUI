@@ -53,8 +53,10 @@ class OrchestraRatingsPage(BasePage):
         qconfig.themeChanged.connect(lambda _: self._apply_theme())
         qconfig.themeColorChanged.connect(lambda _: self._apply_theme())
 
-        self._setup_ui()
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
+    def _after_ui_built(self) -> None:
+        self._setup_ui()
         self._apply_theme()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
@@ -326,6 +328,8 @@ class OrchestraRatingsPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        if self.is_deferred_ui_build_pending():
+            return
 
         if self._filter_card is not None and hasattr(self._filter_card, "_title_label"):
             self._filter_card._title_label.setText(

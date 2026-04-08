@@ -229,7 +229,13 @@ class LogsPage(BasePage):
 
         # qtawesome animations (e.g. qta.Spin) are not QAbstractAnimation; track state ourselves.
         self._refresh_spin_active = False
-        self.enable_deferred_ui_build()
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+
+    def _after_ui_built(self) -> None:
+        try:
+            self._apply_theme(force=True)
+        except Exception:
+            pass
 
     def changeEvent(self, event):
         if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange):

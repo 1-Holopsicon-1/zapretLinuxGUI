@@ -92,11 +92,12 @@ class ConnectionTestPage(BasePage):
         self.container_layout.setSpacing(14)
         self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
+        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+
+    def _after_ui_built(self) -> None:
         self._build_header()
         self._build_controls()
         self._build_log_viewer()
-
-        # Добавляем контейнер на страницу
         self.add_widget(self.container)
         self.add_spacing(8)
 
@@ -362,6 +363,8 @@ class ConnectionTestPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
+        if self.is_deferred_ui_build_pending():
+            return
 
         self.hero_title.setText(tr_catalog("page.connection.hero.title", language=self._ui_language, default="Диагностика сетевых соединений"))
         self.hero_subtitle.setText(

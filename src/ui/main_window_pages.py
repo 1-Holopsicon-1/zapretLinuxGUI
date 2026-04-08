@@ -359,9 +359,6 @@ def bind_page_ui_state(window, page: QWidget | None) -> None:
     if callable(is_deferred_pending):
         try:
             if is_deferred_pending():
-                queue_binding = getattr(page, "queue_ui_state_store_binding", None)
-                if callable(queue_binding):
-                    queue_binding(store)
                 return
         except Exception:
             pass

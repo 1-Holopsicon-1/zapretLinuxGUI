@@ -103,7 +103,6 @@ class Zapret2StrategiesPageNew(BasePage):
         self.target_selections = {}
         self._targets_list = None
         self._built = False
-        self._build_scheduled = False
         self._strategy_set_snapshot = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
@@ -140,6 +139,7 @@ class Zapret2StrategiesPageNew(BasePage):
         self.current_strategy_label = BodyLabel(
             tr_catalog("page.z2_direct.current.not_selected", language=self._ui_language, default="Не выбрана")
         )
+        self.enable_deferred_ui_build(after_build=self._build_content)
 
     def _rebuild_breadcrumb(self) -> None:
         """Restore full breadcrumb path (BreadcrumbBar deletes items on back-click)."""
@@ -185,17 +185,12 @@ class Zapret2StrategiesPageNew(BasePage):
             except Exception:
                 pass
 
-        if self._built:
-            if self._preset_refresh_pending:
-                self._preset_refresh_pending = False
-                try:
-                    self.refresh_from_preset_switch()
-                except Exception:
-                    pass
-
-        if not self._built and not self._build_scheduled:
-            self._build_scheduled = True
-            QTimer.singleShot(0, self._build_content)
+        if self._built and self._preset_refresh_pending:
+            self._preset_refresh_pending = False
+            try:
+                self.refresh_from_preset_switch()
+            except Exception:
+                pass
 
     def eventFilter(self, obj, event):
         try:
@@ -226,7 +221,6 @@ class Zapret2StrategiesPageNew(BasePage):
         """Строит содержимое страницы"""
         _t_total = _time.perf_counter()
         try:
-            self._build_scheduled = False
             if self._built:
                 return
             self._render_probe_build_started_at = _t_total
@@ -371,7 +365,6 @@ class Zapret2StrategiesPageNew(BasePage):
             QTimer.singleShot(0, self._log_render_probe_idle)
 
         except Exception as e:
-            self._build_scheduled = False
             log(f"Ошибка построения Zapret2StrategiesPageNew: {e}", "ERROR")
             import traceback
             log(traceback.format_exc(), "DEBUG")
@@ -536,7 +529,6 @@ class Zapret2StrategiesPageNew(BasePage):
 
             # Перестраиваем UI
             self._built = False
-            self._build_scheduled = False
             self._basic_payload_cache = payload
             self._list_structure_signature = None
 

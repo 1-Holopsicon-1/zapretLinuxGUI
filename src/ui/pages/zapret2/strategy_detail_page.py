@@ -676,13 +676,12 @@ class StrategyDetailPage(BasePage):
         self._syndata_save_timer = QTimer(self)
         self._syndata_save_timer.setSingleShot(True)
         self._syndata_save_timer.timeout.connect(self._flush_syndata_settings_save)
+        self.enable_deferred_ui_build(after_build=self._after_content_built)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         return _tr_text(self._ui_language, key, default, **kwargs)
 
-    def _ensure_content_built(self) -> None:
-        if self._content_built:
-            return
+    def _after_content_built(self) -> None:
         self._build_content()
         self._content_built = True
 
@@ -1690,7 +1689,7 @@ class StrategyDetailPage(BasePage):
     def show_target(self, target_key: str):
         """Открывает detail page для target из текущего source preset."""
         _t_total = _time.perf_counter()
-        self._ensure_content_built()
+        self.ensure_deferred_ui_built()
 
         prev_key = str(self._target_key or "").strip()
         try:
