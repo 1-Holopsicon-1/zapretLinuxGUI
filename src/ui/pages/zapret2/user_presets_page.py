@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import time
 import re
-import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -49,7 +48,15 @@ from ui.pages.preset_actions_menu import show_preset_actions_menu
 from ui.pages.preset_rating_menu import show_preset_rating_menu
 from ui.pages import user_presets_runtime as shared_runtime
 from ui.pages.user_presets_toolbar import UserPresetsToolbarLayout
-from ui.compat_widgets import ActionButton, SettingsCard, LineEdit, set_tooltip
+from .user_presets_page_controller import Zapret2UserPresetsPageController
+from ui.compat_widgets import (
+    ActionButton,
+    PrimaryActionButton,
+    SettingsCard,
+    LineEdit,
+    set_tooltip,
+    style_semantic_caption_label,
+)
 from ui.main_window_state import MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 
@@ -86,8 +93,6 @@ except ImportError:
 from ui.theme import get_theme_tokens
 from ui.theme_semantic import get_semantic_palette
 from log import log
-from core.presets.library_hierarchy import PresetHierarchyStore
-from core.presets.list_metadata import read_preset_list_metadata
 
 
 _icon_cache: dict[str, object] = {}
@@ -1112,11 +1117,7 @@ class _CreatePresetDialog(MessageBoxBase):
             pass
 
         self.warningLabel = CaptionLabel("", self.widget)
-        try:
-            from PyQt6.QtGui import QColor
-            self.warningLabel.setTextColor("#cf1010", QColor(255, 28, 32))
-        except Exception:
-            self.warningLabel.setStyleSheet("color: #cf1010;")
+        style_semantic_caption_label(self.warningLabel, tone="error")
         self.warningLabel.hide()
 
         self.viewLayout.addWidget(self.titleLabel)
@@ -1192,11 +1193,7 @@ class _RenamePresetDialog(MessageBoxBase):
         self.nameEdit.setClearButtonEnabled(True)
 
         self.warningLabel = CaptionLabel("", self.widget)
-        try:
-            from PyQt6.QtGui import QColor
-            self.warningLabel.setTextColor("#cf1010", QColor(255, 28, 32))
-        except Exception:
-            self.warningLabel.setStyleSheet("color: #cf1010;")
+        style_semantic_caption_label(self.warningLabel, tone="error")
         self.warningLabel.hide()
 
         self.viewLayout.addWidget(self.titleLabel)
@@ -1343,6 +1340,7 @@ class BaseZapret2UserPresetsPage(BasePage):
 
         self._ui_state_store: Optional[MainWindowStateStore] = None
         self._ui_state_unsubscribe = None
+        self._controller = Zapret2UserPresetsPageController()
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
@@ -1388,130 +1386,25 @@ class BaseZapret2UserPresetsPage(BasePage):
         return get_preset_store()
 
     def _list_preset_entries_light(self) -> list[dict[str, object]]:
-        try:
-            facade = self._get_direct_facade()
-            return [
-                {
-                    "file_name": item.file_name,
-                    "display_name": item.name,
-                    "kind": item.kind,
-                    "is_builtin": str(item.kind or "").strip().lower() == "builtin",
-                }
-                for item in facade.list_manifests()
-            ]
-        except Exception as e:
-            log(f"Z2UserPresetsPage: не удалось загрузить lightweight список пресетов: {e}", "ERROR")
-
-        return []
+        return self._controller.list_preset_entries_light()
 
     def _get_active_preset_name_light(self) -> str:
-        try:
-            from core.services import get_direct_flow_coordinator
-
-            preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
-            return str(preset.name if preset is not None else "").strip()
-        except Exception:
-            return ""
+        return self._controller.get_active_preset_name_light()
 
     def _get_selected_source_preset_file_name_light(self) -> str:
-        try:
-            from core.services import get_selection_service
-
-            return str(get_selection_service().get_selected_file_name("winws2") or "").strip()
-        except Exception:
-            return ""
+        return self._controller.get_selected_source_preset_file_name_light()
 
     def _load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
-        metadata: dict[str, dict[str, object]] = {}
-        presets_dir = self._get_presets_dir_light()
-
-        for entry in self._list_preset_entries_light():
-            file_name = str(entry.get("file_name") or "").strip()
-            display_name = str(entry.get("display_name") or file_name).strip()
-            kind = str(entry.get("kind") or "").strip() or "user"
-            is_builtin = bool(entry.get("is_builtin", False))
-            if not file_name:
-                continue
-            try:
-                path = presets_dir / file_name
-                metadata[file_name] = {
-                    **read_preset_list_metadata(path),
-                    "display_name": display_name,
-                    "kind": kind,
-                    "is_builtin": is_builtin,
-                }
-            except Exception:
-                metadata[file_name] = {
-                    "description": "",
-                    "modified_display": "",
-                    "icon_color": "",
-                    "display_name": display_name,
-                    "kind": kind,
-                    "is_builtin": is_builtin,
-                }
-
-        return metadata
+        return self._controller.load_preset_list_metadata_light()
 
     def _get_presets_dir_light(self):
-        from core.services import get_app_paths
-
-        return get_app_paths().engine_paths("winws2").ensure_directories().presets_dir
+        return self._controller.get_presets_dir_light()
 
     def _read_single_preset_list_metadata_light(self, file_name_or_name: str) -> tuple[str, dict[str, object]] | None:
-        candidate = str(file_name_or_name or "").strip()
-        if not candidate:
-            return None
-
-        candidate_file_name = candidate if candidate.lower().endswith(".txt") else f"{candidate}.txt"
-        matched_entry = None
-        for entry in self._list_preset_entries_light():
-            entry_file_name = str(entry.get("file_name") or "").strip()
-            entry_display_name = str(entry.get("display_name") or entry_file_name).strip()
-            if entry_file_name == candidate_file_name or entry_display_name == candidate:
-                matched_entry = entry
-                candidate_file_name = entry_file_name or candidate_file_name
-                break
-
-        if matched_entry is None:
-            return None
-
-        display_name = str(matched_entry.get("display_name") or candidate_file_name).strip()
-        kind = str(matched_entry.get("kind") or "").strip() or "user"
-        is_builtin = bool(matched_entry.get("is_builtin", False))
-        path = self._get_presets_dir_light() / candidate_file_name
-
-        try:
-            metadata = {
-                **read_preset_list_metadata(path),
-                "display_name": display_name,
-                "kind": kind,
-                "is_builtin": is_builtin,
-            }
-        except Exception:
-            metadata = {
-                "description": "",
-                "modified_display": "",
-                "icon_color": "",
-                "display_name": display_name,
-                "kind": kind,
-                "is_builtin": is_builtin,
-            }
-
-        return candidate_file_name, metadata
+        return self._controller.read_single_preset_list_metadata_light(file_name_or_name)
 
     def _resolve_display_name(self, reference: str) -> str:
-        candidate = str(reference or "").strip()
-        if not candidate:
-            return ""
-        facade = self._get_direct_facade()
-        if facade is not None and candidate.lower().endswith(".txt"):
-            try:
-                manifest = facade.get_manifest_by_file_name(candidate)
-                if manifest is not None:
-                    return manifest.name
-            except Exception:
-                pass
-        return candidate
+        return self._controller.resolve_display_name(reference)
 
     def _on_store_changed(self):
         shared_runtime.on_store_changed(self)
@@ -1599,34 +1492,16 @@ class BaseZapret2UserPresetsPage(BasePage):
                 return
 
     def _get_direct_facade(self):
-        from core.presets.direct_facade import DirectPresetFacade
-
-        return DirectPresetFacade.from_launch_method("direct_zapret2")
+        return self._controller._get_direct_facade()
 
     def _is_builtin_preset_file(self, name: str) -> bool:
-        candidate = str(name or "").strip()
-        if not candidate or not candidate.lower().endswith(".txt"):
-            return False
-
-        cached_meta = self._cached_presets_metadata.get(candidate)
-        if isinstance(cached_meta, dict):
-            return bool(cached_meta.get("is_builtin", False))
-
-        facade = self._get_direct_facade()
-        if facade is not None:
-            try:
-                manifest = facade.get_manifest_by_file_name(candidate)
-                if manifest is not None:
-                    return str(manifest.kind or "").strip().lower() == "builtin"
-            except Exception:
-                pass
-        return False
+        return self._controller.is_builtin_preset_file_with_cache(name, self._cached_presets_metadata)
 
     def _hierarchy_scope_key(self) -> str:
         return "preset_zapret2"
 
     def _get_hierarchy_store(self) -> PresetHierarchyStore:
-        return PresetHierarchyStore(self._hierarchy_scope_key())
+        return self._controller.get_hierarchy_store()
 
     def on_page_activated(self, first_show: bool) -> None:
         _ = first_show
@@ -1775,10 +1650,9 @@ class BaseZapret2UserPresetsPage(BasePage):
         configs_title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         configs_title.setMinimumWidth(0)
         configs_layout.addWidget(configs_title, 1)
-        get_configs_btn = ActionButton(
+        get_configs_btn = PrimaryActionButton(
             self._tr("page.z2_user_presets.configs.button", "Получить конфиги"),
             "fa5s.external-link-alt",
-            accent=True,
         )
         self._get_configs_btn = get_configs_btn
         get_configs_btn.setFixedHeight(36)
@@ -1999,10 +1873,10 @@ class BaseZapret2UserPresetsPage(BasePage):
         from_current = getattr(dlg, "_source", "current") == "current"
 
         try:
-            facade = self._get_direct_facade()
-            facade.create(name, from_current=from_current)
-            shared_runtime.mark_presets_structure_changed(self)
-            log(f"Создан пресет '{name}'", "INFO")
+            result = self._controller.create_preset(name=name, from_current=from_current)
+            if result.structure_changed:
+                shared_runtime.mark_presets_structure_changed(self)
+            log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка создания пресета: {e}", "ERROR")
             InfoBar.error(
@@ -2029,14 +1903,10 @@ class BaseZapret2UserPresetsPage(BasePage):
             return
 
         try:
-            facade = self._get_direct_facade()
-            updated = facade.rename_by_file_name(current_name, new_name)
-            shared_runtime.mark_presets_structure_changed(self)
-            if facade.is_selected_file_name(updated.file_name):
-                from core.presets.direct_runtime_events import notify_direct_preset_switched
-
-                notify_direct_preset_switched("direct_zapret2", updated.file_name)
-            log(f"Пресет '{display_name}' переименован в '{new_name}'", "INFO")
+            result = self._controller.rename_preset(current_name=current_name, new_name=new_name)
+            if result.structure_changed:
+                shared_runtime.mark_presets_structure_changed(self)
+            log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка переименования пресета: {e}", "ERROR")
             InfoBar.error(
@@ -2047,30 +1917,6 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _on_create_clicked(self):
         self._show_inline_action_create()
-
-    def _show_import_result_infobar(self, requested_name: str, actual_display_name: str, actual_file_name: str) -> None:
-        requested = str(requested_name or "").strip()
-        expected_file_name = f"{requested}.txt" if requested else ""
-        file_name_changed = bool(
-            actual_file_name and expected_file_name and actual_file_name.casefold() != expected_file_name.casefold()
-        )
-        content = (
-            "Пресет импортирован.\n"
-            f"Отображаемое имя: {actual_display_name}\n"
-            f"Имя файла: {actual_file_name}"
-        )
-        if file_name_changed:
-            InfoBar.warning(
-                title="Импортирован с новым именем файла",
-                content=content,
-                parent=self.window(),
-            )
-            return
-        InfoBar.success(
-            title="Пресет импортирован",
-            content=content,
-            parent=self.window(),
-        )
 
     def _on_import_clicked(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -2084,15 +1930,14 @@ class BaseZapret2UserPresetsPage(BasePage):
             return
 
         try:
-            name = Path(file_path).stem
-            name = str(name or "").strip() or "Imported"
-            facade = self._get_direct_facade()
-            imported = facade.import_from_file(Path(file_path), name)
-            actual_name = imported.name
-            actual_file_name = imported.file_name
-            shared_runtime.mark_presets_structure_changed(self)
-            log(f"Импортирован пресет '{actual_name}'", "INFO")
-            self._show_import_result_infobar(name, actual_name, actual_file_name)
+            result = self._controller.import_preset_from_file(file_path=file_path)
+            if result.structure_changed:
+                shared_runtime.mark_presets_structure_changed(self)
+            log(result.log_message, result.log_level)
+            if result.infobar_level == "warning":
+                InfoBar.warning(title=result.infobar_title, content=result.infobar_content, parent=self.window())
+            else:
+                InfoBar.success(title=result.infobar_title, content=result.infobar_content, parent=self.window())
 
         except Exception as e:
             log(f"Ошибка импорта пресета: {e}", "ERROR")
@@ -2109,24 +1954,11 @@ class BaseZapret2UserPresetsPage(BasePage):
 
         self._bulk_reset_running = True
         try:
-            facade = self._get_direct_facade()
-            success_count, total, failed = facade.reset_all_to_templates()
-            shared_runtime.mark_presets_structure_changed(self)
-            selected_file_name = facade.get_selected_file_name()
-            if selected_file_name:
-                from core.presets.direct_runtime_events import notify_direct_preset_switched
-
-                notify_direct_preset_switched("direct_zapret2", selected_file_name)
-            if failed:
-                log(
-                    f"Восстановление заводских пресетов завершено частично: "
-                    f"успешно={success_count}/{total}, ошибки={len(failed)}",
-                    "WARNING",
-                )
-            else:
-                log(f"Восстановлены заводские пресеты: {success_count}/{total}", "INFO")
-
-            self._show_reset_all_result(success_count, total)
+            result = self._controller.reset_all_presets()
+            if result.structure_changed:
+                shared_runtime.mark_presets_structure_changed(self)
+            log(result.log_message, result.log_level)
+            self._show_reset_all_result(result.success_count, result.total_count)
 
         except Exception as e:
             log(f"Ошибка массового восстановления пресетов: {e}", "ERROR")
@@ -2177,84 +2009,17 @@ class BaseZapret2UserPresetsPage(BasePage):
         try:
             view_state = self._capture_presets_view_state() if hasattr(self, "presets_list") else {}
             active_file_name = self._get_selected_source_preset_file_name_light()
-            hierarchy = self._get_hierarchy_store()
-            builtin_by_file = {
-                file_name: bool(meta.get("is_builtin", False))
-                for file_name, meta in all_presets.items()
-            }
-
-            query = ""
-            try:
-                if self._preset_search_input is not None:
-                    query = (self._preset_search_input.text() or "").strip().lower()
-            except Exception:
-                query = ""
-
-            rows: list[dict[str, object]] = []
-            visible_entries = []
-            for file_name, meta in all_presets.items():
-                display_name = str(meta.get("display_name") or file_name)
-                if query and query not in display_name.lower():
-                    continue
-                visible_entries.append(
-                    {
-                        "file_name": file_name,
-                        "display_name": display_name,
-                        "is_builtin": builtin_by_file.get(file_name, False),
-                    }
-                )
-
-            ordered_names = hierarchy.list_presets_flat(
-                visible_entries,
-                is_builtin_resolver=lambda file_name: builtin_by_file.get(str(file_name or ""), False),
+            plan = self._controller.build_preset_rows_plan(
+                all_presets=all_presets,
+                query=self._current_search_query(),
+                active_file_name=active_file_name,
+                language=self._ui_language,
             )
-
-            for file_name in ordered_names:
-                preset = all_presets.get(file_name)
-                if not preset:
-                    continue
-                display_name = str(preset.get("display_name") or file_name)
-                is_builtin = builtin_by_file.get(file_name, False)
-                meta = hierarchy.get_preset_meta(file_name, display_name=display_name)
-                rows.append(
-                    {
-                        "kind": "preset",
-                        "name": display_name,
-                        "file_name": file_name,
-                        "description": str(preset.get("description") or ""),
-                        "date": str(preset.get("modified_display") or ""),
-                        "is_active": bool(file_name and file_name == active_file_name),
-                        "is_builtin": is_builtin,
-                        "icon_color": _normalize_preset_icon_color(str(preset.get("icon_color") or "")),
-                        "depth": 0,
-                        "is_pinned": bool(meta.get("pinned", False)),
-                        "rating": int(meta.get("rating", 0) or 0),
-                    }
-                )
-
-            if not rows:
-                if query:
-                    rows.append(
-                        {
-                            "kind": "empty",
-                            "text": self._tr("page.z2_user_presets.empty.not_found", "Ничего не найдено."),
-                        }
-                    )
-                else:
-                    rows.append(
-                        {
-                            "kind": "empty",
-                            "text": self._tr(
-                                "page.z2_user_presets.empty.none",
-                                "Нет пресетов. Создайте новый или импортируйте из файла.",
-                            ),
-                        }
-                    )
 
             if self._presets_delegate:
                 self._presets_delegate.reset_interaction_state()
             if self._presets_model:
-                self._presets_model.set_rows(rows)
+                self._presets_model.set_rows(plan.rows)
             self._ensure_preset_list_current_index()
             if view_state:
                 self._restore_presets_view_state(view_state)
@@ -2266,7 +2031,10 @@ class BaseZapret2UserPresetsPage(BasePage):
             self._schedule_layout_resync()
             if started_at is not None:
                 elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-                log(f"Z2UserPresetsPage: lightweight list reload {elapsed_ms}ms ({len(all_presets)} presets)", "DEBUG")
+                log(
+                    f"Z2UserPresetsPage: lightweight list reload {elapsed_ms}ms ({plan.total_presets} presets)",
+                    "DEBUG",
+                )
 
         except Exception as e:
             log(f"Ошибка загрузки пресетов: {e}", "ERROR")
@@ -2299,7 +2067,7 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _on_toggle_pin_preset(self, name: str):
         try:
             display_name = self._resolve_display_name(name)
-            pinned = self._get_hierarchy_store().toggle_preset_pin(name, display_name=display_name)
+            pinned = self._controller.toggle_preset_pin(name, display_name)
             log(f"Пресет '{display_name}' {'закреплён' if pinned else 'откреплён'}", "INFO")
             self._refresh_presets_view_from_cache()
         except Exception as e:
@@ -2310,12 +2078,10 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _move_preset_by_step(self, name: str, direction: int):
         try:
-            hierarchy = self._get_hierarchy_store()
-            moved = hierarchy.move_preset_by_step_flat(
-                self._list_preset_entries_light(),
+            moved = self._controller.move_preset_by_step(
                 name,
                 direction,
-                is_builtin_resolver=self._is_builtin_preset_file,
+                cached_metadata=self._cached_presets_metadata,
             )
             if moved:
                 self._refresh_presets_view_from_cache()
@@ -2324,26 +2090,13 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _on_item_dropped(self, source_kind: str, source_id: str, target_kind: str, target_id: str):
         try:
-            hierarchy = self._get_hierarchy_store()
-            all_names = self._list_preset_entries_light()
-
-            if source_kind != "preset":
-                return
-
-            moved = False
-            if target_kind == "preset" and target_id:
-                moved = hierarchy.move_preset_before_flat(
-                    all_names,
-                    source_id,
-                    target_id,
-                    is_builtin_resolver=self._is_builtin_preset_file,
-                )
-            else:
-                moved = hierarchy.move_preset_to_end_flat(
-                    all_names,
-                    source_id,
-                    is_builtin_resolver=self._is_builtin_preset_file,
-                )
+            moved = self._controller.move_preset_on_drop(
+                source_kind=source_kind,
+                source_id=source_id,
+                target_kind=target_kind,
+                target_id=target_id,
+                cached_metadata=self._cached_presets_metadata,
+            )
             if moved:
                 log(f"Элемент '{source_id}' перенесён перетаскиванием", "INFO")
                 self._refresh_presets_view_from_cache()
@@ -2351,32 +2104,17 @@ class BaseZapret2UserPresetsPage(BasePage):
             log(f"Ошибка перетаскивания элемента: {e}", "ERROR")
 
     def _on_activate_preset(self, name: str):
-        try:
-            from core.presets.direct_runtime_events import activate_direct_preset_file
+        display_name = self._resolve_display_name(name)
+        result = self._controller.activate_preset(file_name=name, display_name=display_name)
+        log(result.log_message, result.log_level)
+        if result.ok and result.activated_file_name:
+            self._apply_active_preset_marker_for_target(result.activated_file_name)
+            return
 
-            activate_direct_preset_file("direct_zapret2", name)
-            activated = True
-
-            if activated:
-                display_name = self._resolve_display_name(name)
-                log(f"Активирован пресет '{display_name}'", "INFO")
-                self._apply_active_preset_marker_for_target(name)
-            else:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr(
-                        "page.z2_user_presets.error.activate_failed",
-                        "Не удалось активировать пресет '{name}'",
-                        name=name,
-                    ),
-                    parent=self.window(),
-                )
-
-        except Exception as e:
-            log(f"Ошибка активации пресета: {e}", "ERROR")
+        if result.infobar_level == "error":
             InfoBar.error(
-                title=self._tr("common.error.title", "Ошибка"),
-                content=self._tr("page.z2_user_presets.error.generic", "Ошибка: {error}", error=e),
+                title=result.infobar_title or self._tr("common.error.title", "Ошибка"),
+                content=result.infobar_content,
                 parent=self.window(),
             )
 
@@ -2441,12 +2179,10 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _on_duplicate_preset(self, name: str):
         try:
             display_name = self._resolve_display_name(name)
-            new_name = f"{display_name} (копия)"
-
-            facade = self._get_direct_facade()
-            facade.duplicate_by_file_name(name, new_name)
-            shared_runtime.mark_presets_structure_changed(self)
-            log(f"Пресет '{display_name}' дублирован как '{new_name}'", "INFO")
+            result = self._controller.duplicate_preset(file_name=name, display_name=display_name)
+            if result.structure_changed:
+                shared_runtime.mark_presets_structure_changed(self)
+            log(result.log_message, result.log_level)
 
         except Exception as e:
             log(f"Ошибка дублирования пресета: {e}", "ERROR")
@@ -2480,18 +2216,8 @@ class BaseZapret2UserPresetsPage(BasePage):
                 if not box.exec():
                     return
 
-            facade = self._get_direct_facade()
-            facade.reset_to_template_by_file_name(name)
-            from core.presets.direct_runtime_events import (
-                notify_direct_preset_saved,
-                notify_direct_preset_switched,
-            )
-
-            notify_direct_preset_saved("direct_zapret2", name)
-            if facade.is_selected_file_name(name):
-                notify_direct_preset_switched("direct_zapret2", name)
-
-            log(f"Сброшен пресет '{display_name}' к шаблону", "INFO")
+            result = self._controller.reset_preset_to_template(file_name=name, display_name=display_name)
+            log(result.log_message, result.log_level)
 
         except Exception as e:
             log(f"Ошибка сброса пресета: {e}", "ERROR")
@@ -2504,15 +2230,14 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _on_delete_preset(self, name: str):
         try:
             display_name = self._resolve_display_name(name)
-            if self._is_builtin_preset_file(name):
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr(
-                        "page.z2_user_presets.error.delete_builtin_blocked",
-                        "Встроенные пресеты удалять нельзя. Можно удалить только пользовательские пресеты.",
-                    ),
-                    parent=self.window(),
-                )
+            if self._controller.is_builtin_preset_file(name):
+                result = self._controller.delete_preset(file_name=name, display_name=display_name)
+                if result.infobar_level == "warning":
+                    InfoBar.warning(
+                        title=self._tr("common.error.title", "Ошибка"),
+                        content=result.infobar_content,
+                        parent=self.window(),
+                    )
                 return
 
             if MessageBox:
@@ -2536,20 +2261,10 @@ class BaseZapret2UserPresetsPage(BasePage):
                 if not box.exec():
                     return
 
-            deleted = False
-            facade = self._get_direct_facade()
-            facade.delete_by_file_name(name)
-            shared_runtime.mark_presets_structure_changed(self)
-            deleted = True
-
-            if deleted:
-                log(f"Удалён пресет '{display_name}'", "INFO")
-            else:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.z2_user_presets.error.delete_failed", "Не удалось удалить пресет"),
-                    parent=self.window(),
-                )
+            result = self._controller.delete_preset(file_name=name, display_name=display_name)
+            if result.structure_changed:
+                shared_runtime.mark_presets_structure_changed(self)
+            log(result.log_message, result.log_level)
 
         except Exception as e:
             log(f"Ошибка удаления пресета: {e}", "ERROR")
@@ -2590,18 +2305,10 @@ class BaseZapret2UserPresetsPage(BasePage):
             return
 
         try:
-            facade = self._get_direct_facade()
-            facade.export_plain_text_by_file_name(name, Path(file_path))
-            log(f"Экспортирован пресет '{display_name}' в {file_path}", "INFO")
-            InfoBar.success(
-                title=self._tr("page.z2_user_presets.infobar.success", "Успех"),
-                content=self._tr(
-                    "page.z2_user_presets.info.exported",
-                    "Пресет экспортирован: {path}",
-                    path=file_path,
-                ),
-                parent=self.window(),
-            )
+            result = self._controller.export_preset(file_name=name, file_path=file_path, display_name=display_name)
+            log(result.log_message, result.log_level)
+            if result.infobar_level == "success":
+                InfoBar.success(title=result.infobar_title, content=result.infobar_content, parent=self.window())
 
         except Exception as e:
             log(f"Ошибка экспорта пресета: {e}", "ERROR")
@@ -2614,15 +2321,10 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _on_restore_deleted(self):
         """Restore all previously deleted presets that have matching templates."""
         try:
-            facade = self._get_direct_facade()
-            facade.restore_deleted()
-            shared_runtime.mark_presets_structure_changed(self)
-            selected_file_name = facade.get_selected_file_name()
-            if selected_file_name:
-                from core.presets.direct_runtime_events import notify_direct_preset_switched
-
-                notify_direct_preset_switched("direct_zapret2", selected_file_name)
-            log("Восстановлены удалённые пресеты", "INFO")
+            result = self._controller.restore_deleted_presets()
+            if result.structure_changed:
+                shared_runtime.mark_presets_structure_changed(self)
+            log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка восстановления удалённых пресетов: {e}", "ERROR")
             InfoBar.error(
@@ -2650,28 +2352,22 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _open_presets_info(self):
         """Открывает страницу с информацией о пресетах."""
-        try:
-            from config.urls import PRESET_INFO_URL
-
-            webbrowser.open(PRESET_INFO_URL)
-            log(f"Открыта страница о пресетах: {PRESET_INFO_URL}", "INFO")
-        except Exception as e:
-            log(f"Не удалось открыть страницу о пресетах: {e}", "ERROR")
+        result = self._controller.open_presets_info()
+        log(result.log_message, result.log_level)
+        if (not result.ok) and result.infobar_level == "warning":
+            InfoBar.warning(
+                title=result.infobar_title or self._tr("common.error.title", "Ошибка"),
+                content=result.infobar_content,
+                parent=self.window(),
+            )
 
     def _open_new_configs_post(self):
-        try:
-            from core.direct_flow import DirectFlowCoordinator
-
-            webbrowser.open(DirectFlowCoordinator.PRESETS_DOWNLOAD_URL)
-        except Exception as e:
-            log(f"Ошибка открытия страницы пресетов: {e}", "ERROR")
+        result = self._controller.open_new_configs_post()
+        log(result.log_message, result.log_level)
+        if (not result.ok) and result.infobar_level == "warning":
             InfoBar.warning(
-                title=self._tr("common.error.title", "Ошибка"),
-                content=self._tr(
-                    "page.z2_user_presets.error.open_telegram",
-                    "Не удалось открыть страницу пресетов: {error}",
-                    error=e,
-                ),
+                title=result.infobar_title or self._tr("common.error.title", "Ошибка"),
+                content=result.infobar_content,
                 parent=self.window(),
             )
 

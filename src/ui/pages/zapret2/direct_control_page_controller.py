@@ -15,6 +15,7 @@ from ui.control_page_controller import (
     ControlStopButtonPlan,
     ControlToggleActionStartPlan,
 )
+from ui.text_catalog import tr as tr_catalog
 
 
 class AdvancedSettingsLoadWorker(QThread):
@@ -92,6 +93,76 @@ def load_direct_zapret2_preset_summary_payload() -> dict:
 _HOSTLIST_DISPLAY_RE = re.compile(r"--(?:hostlist|hostlist-exclude)=([^\s]+)")
 
 
+class DirectAdvancedSettingsApplyPlan:
+    def __init__(self, *, discord_restart: bool, wssize_enabled: bool, debug_log_enabled: bool):
+        self.discord_restart = bool(discord_restart)
+        self.wssize_enabled = bool(wssize_enabled)
+        self.debug_log_enabled = bool(debug_log_enabled)
+
+
+class DirectPresetSummaryPlan:
+    def __init__(self, *, preset_name_text: str, preset_name_tooltip: str, strategy_text: str, strategy_tooltip: str):
+        self.preset_name_text = preset_name_text
+        self.preset_name_tooltip = preset_name_tooltip
+        self.strategy_text = strategy_text
+        self.strategy_tooltip = strategy_tooltip
+
+
+class DirectModeLabelPlan:
+    def __init__(self, *, mode: str, label_text: str):
+        self.mode = mode
+        self.label_text = label_text
+
+
+class DirectModeChangePlan:
+    def __init__(self, *, should_apply: bool, refresh_strategy_after: bool, refresh_mode_label_after: bool):
+        self.should_apply = bool(should_apply)
+        self.refresh_strategy_after = bool(refresh_strategy_after)
+        self.refresh_mode_label_after = bool(refresh_mode_label_after)
+
+
+class DirectOptimisticStartupPlan:
+    def __init__(self, *, should_mark_running: bool, preset_name_text: str, preset_name_tooltip: str):
+        self.should_mark_running = bool(should_mark_running)
+        self.preset_name_text = preset_name_text
+        self.preset_name_tooltip = preset_name_tooltip
+
+
+class DirectDeferredShowPlan:
+    def __init__(self, *, should_continue: bool, schedule_advanced: bool, schedule_summary: bool, refresh_mode_label: bool):
+        self.should_continue = bool(should_continue)
+        self.schedule_advanced = bool(schedule_advanced)
+        self.schedule_summary = bool(schedule_summary)
+        self.refresh_mode_label = bool(refresh_mode_label)
+
+
+class DirectUiStateChangePlan:
+    def __init__(
+        self,
+        *,
+        refresh_mode_label: bool,
+        mark_advanced_dirty: bool,
+        mark_preset_summary_dirty: bool,
+        reload_advanced_now: bool,
+        reload_summary_now: bool,
+        update_status_state: str | bool,
+        update_status_error: str,
+        strategy_summary: str,
+        loading: bool,
+        loading_text: str,
+    ):
+        self.refresh_mode_label = bool(refresh_mode_label)
+        self.mark_advanced_dirty = bool(mark_advanced_dirty)
+        self.mark_preset_summary_dirty = bool(mark_preset_summary_dirty)
+        self.reload_advanced_now = bool(reload_advanced_now)
+        self.reload_summary_now = bool(reload_summary_now)
+        self.update_status_state = update_status_state
+        self.update_status_error = update_status_error
+        self.strategy_summary = strategy_summary
+        self.loading = bool(loading)
+        self.loading_text = loading_text
+
+
 class Zapret2DirectControlPageController(ControlPageController):
     @staticmethod
     def create_advanced_settings_worker(request_id: int, parent=None) -> AdvancedSettingsLoadWorker:
@@ -100,6 +171,210 @@ class Zapret2DirectControlPageController(ControlPageController):
     @staticmethod
     def create_preset_summary_worker(request_id: int, parent=None) -> DirectPresetSummaryLoadWorker:
         return DirectPresetSummaryLoadWorker(request_id, parent)
+
+    @staticmethod
+    def build_optimistic_startup_plan() -> DirectOptimisticStartupPlan:
+        try:
+            from strategy_menu import get_strategy_launch_method
+
+            method = str(get_strategy_launch_method() or "").strip().lower()
+        except Exception:
+            method = ""
+
+        try:
+            from core.services import get_selection_service
+
+            file_name = str(get_selection_service().get_selected_file_name("winws2") or "").strip()
+        except Exception:
+            file_name = ""
+
+        if file_name:
+            display_name = os.path.splitext(os.path.basename(file_name))[0].strip() or file_name
+            return DirectOptimisticStartupPlan(
+                should_mark_running=(method == "direct_zapret2"),
+                preset_name_text=display_name,
+                preset_name_tooltip=display_name,
+            )
+
+        return DirectOptimisticStartupPlan(
+            should_mark_running=(method == "direct_zapret2"),
+            preset_name_text="",
+            preset_name_tooltip="",
+        )
+
+    @staticmethod
+    def build_deferred_show_plan(*, page_visible: bool) -> DirectDeferredShowPlan:
+        return DirectDeferredShowPlan(
+            should_continue=bool(page_visible),
+            schedule_advanced=bool(page_visible),
+            schedule_summary=bool(page_visible),
+            refresh_mode_label=bool(page_visible),
+        )
+
+    @staticmethod
+    def build_ui_state_change_plan(*, state, changed_fields: frozenset[str], page_visible: bool) -> DirectUiStateChangePlan:
+        changed = set(changed_fields or ())
+        refresh_mode_label = "mode_revision" in changed
+        presets_changed = "active_preset_revision" in changed or not changed
+
+        return DirectUiStateChangePlan(
+            refresh_mode_label=refresh_mode_label,
+            mark_advanced_dirty=presets_changed,
+            mark_preset_summary_dirty=presets_changed,
+            reload_advanced_now=bool(presets_changed and page_visible),
+            reload_summary_now=bool(presets_changed and page_visible),
+            update_status_state=state.dpi_phase or ("running" if state.dpi_running else "stopped"),
+            update_status_error=state.dpi_last_error,
+            strategy_summary=state.current_strategy_summary or "",
+            loading=bool(state.dpi_busy),
+            loading_text=str(state.dpi_busy_text or ""),
+        )
+
+    @staticmethod
+    def build_strategy_update_plan(*, name: str) -> dict:
+        return {
+            "refresh_stop_button": True,
+            "schedule_preset_summary_reload": True,
+            "strategy_name": str(name or ""),
+        }
+
+    @staticmethod
+    def build_advanced_settings_apply_plan(state: dict | None) -> DirectAdvancedSettingsApplyPlan:
+        state = state if isinstance(state, dict) else {}
+        return DirectAdvancedSettingsApplyPlan(
+            discord_restart=bool(state.get("discord_restart", True)),
+            wssize_enabled=bool(state.get("wssize_enabled", False)),
+            debug_log_enabled=bool(state.get("debug_log_enabled", False)),
+        )
+
+    @staticmethod
+    def build_preset_summary_plan(payload: dict | None, *, language: str) -> DirectPresetSummaryPlan:
+        payload = payload if isinstance(payload, dict) else {}
+        active_preset_name = str(payload.get("active_preset_name") or "").strip()
+        active_lists = list(payload.get("active_lists") or [])
+
+        if active_preset_name:
+            preset_name_text = active_preset_name
+            preset_name_tooltip = active_preset_name
+        else:
+            preset_name_text = tr_catalog(
+                "page.z2_control.preset.not_selected",
+                language=language,
+                default="Не выбран",
+            )
+            preset_name_tooltip = ""
+
+        if active_lists:
+            strategy_text = " • ".join(active_lists)
+            strategy_tooltip = "\n".join(active_lists)
+        else:
+            strategy_text = tr_catalog(
+                "page.z2_control.preset.no_active_lists",
+                language=language,
+                default="Нет активных листов",
+            )
+            strategy_tooltip = ""
+
+        return DirectPresetSummaryPlan(
+            preset_name_text=preset_name_text,
+            preset_name_tooltip=preset_name_tooltip,
+            strategy_text=strategy_text,
+            strategy_tooltip=strategy_tooltip,
+        )
+
+    @staticmethod
+    def get_direct_launch_mode_setting() -> str:
+        try:
+            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
+
+            mode = (get_direct_zapret2_ui_mode() or "").strip().lower()
+            if mode in ("basic", "advanced"):
+                return mode
+        except Exception:
+            pass
+        return "advanced"
+
+    def build_direct_mode_label_plan(self, *, language: str) -> DirectModeLabelPlan:
+        mode = self.get_direct_launch_mode_setting()
+        key = "page.z2_control.mode.basic" if mode == "basic" else "page.z2_control.mode.advanced"
+        default = "Basic" if mode == "basic" else "Advanced"
+        return DirectModeLabelPlan(
+            mode=mode,
+            label_text=tr_catalog(key, language=language, default=default),
+        )
+
+    @staticmethod
+    def build_direct_mode_change_plan(*, wanted_mode: str, current_mode: str) -> DirectModeChangePlan:
+        wanted = str(wanted_mode or "").strip().lower()
+        current = str(current_mode or "").strip().lower()
+        if wanted not in ("basic", "advanced") or wanted == current:
+            return DirectModeChangePlan(
+                should_apply=False,
+                refresh_strategy_after=False,
+                refresh_mode_label_after=True,
+            )
+        return DirectModeChangePlan(
+            should_apply=True,
+            refresh_strategy_after=True,
+            refresh_mode_label_after=True,
+        )
+
+    @staticmethod
+    def apply_direct_mode_change(*, wanted_mode: str, parent_app) -> None:
+        wanted = str(wanted_mode or "").strip().lower()
+        if wanted not in ("basic", "advanced"):
+            return
+
+        try:
+            from strategy_menu.ui_prefs_store import set_direct_zapret2_ui_mode
+
+            set_direct_zapret2_ui_mode(wanted)
+        except Exception:
+            pass
+
+        try:
+            from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
+            from core.presets.direct_facade import DirectPresetFacade
+
+            facade = DirectPresetFacade.from_launch_method(
+                "direct_zapret2",
+                on_dpi_reload_needed=lambda: request_direct_runtime_content_apply(
+                    parent_app,
+                    launch_method="direct_zapret2",
+                    reason="direct_launch_mode_changed",
+                ),
+            )
+            selections = facade.get_strategy_selections() or {}
+            facade.set_strategy_selections(selections, save_and_sync=True)
+        except Exception:
+            pass
+
+    @staticmethod
+    def save_discord_restart_setting(enabled: bool) -> None:
+        try:
+            from discord.discord_restart import set_discord_restart_setting
+
+            set_discord_restart_setting(bool(enabled))
+        except Exception:
+            pass
+
+    @staticmethod
+    def save_wssize_enabled(enabled: bool) -> None:
+        try:
+            from core.presets.direct_facade import DirectPresetFacade
+
+            DirectPresetFacade.from_launch_method("direct_zapret2").set_wssize_enabled(bool(enabled))
+        except Exception:
+            pass
+
+    @staticmethod
+    def save_debug_log_enabled(enabled: bool) -> None:
+        try:
+            from core.presets.direct_facade import DirectPresetFacade
+
+            DirectPresetFacade.from_launch_method("direct_zapret2").set_debug_log_enabled(bool(enabled))
+        except Exception:
+            pass
 
     @staticmethod
     def load_program_settings() -> ControlProgramSettingsPlan:

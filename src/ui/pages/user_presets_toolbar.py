@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget, QVBoxLayout
 
-from ui.compat_widgets import ActionButton
+from ui.compat_widgets import ActionButton, PrimaryActionButton
 
 
 class UserPresetsToolbarLayout:
@@ -50,8 +50,9 @@ class UserPresetsToolbarLayout:
         *,
         accent: bool = False,
         fixed_height: int = 32,
-    ) -> ActionButton:
-        button = ActionButton(text, icon_name, accent=accent, parent=self.container)
+    ) -> QWidget:
+        button_cls = PrimaryActionButton if accent else ActionButton
+        button = button_cls(text, icon_name, parent=self.container)
         button.setFixedHeight(int(fixed_height))
         return button
 

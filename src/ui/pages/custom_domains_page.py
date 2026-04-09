@@ -8,14 +8,13 @@ from PyQt6.QtWidgets import (
 )
 import qtawesome as qta
 try:
-    from qfluentwidgets import LineEdit, InfoBar, MessageBox, SettingCardGroup, PushSettingCard
+    from qfluentwidgets import LineEdit, InfoBar, MessageBox, SettingCardGroup
     _HAS_FLUENT = True
 except ImportError:
     LineEdit = QLineEdit
     InfoBar = None
     MessageBox = None  # type: ignore[assignment]
     SettingCardGroup = None  # type: ignore[assignment]
-    PushSettingCard = None  # type: ignore[assignment]
     _HAS_FLUENT = False
 
 try:
@@ -27,8 +26,14 @@ except ImportError:
 
 from .base_page import BasePage, ScrollBlockingPlainTextEdit
 from core.hostlist_page_controller import HostlistPageController
-from ui.compat_widgets import SettingsCard, ActionButton, set_tooltip
-from ui.compat_widgets import ResetActionButton
+from ui.compat_widgets import (
+    SettingsCard,
+    ActionButton,
+    PrimaryActionButton,
+    QuickActionsBar,
+    insert_widget_into_setting_card_group,
+    set_tooltip,
+)
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
@@ -50,12 +55,10 @@ class CustomDomainsPage(BasePage):
         self._controller = HostlistPageController()
         self._initial_domains_load_requested = False
         self._actions_group = None
+        self._actions_bar = None
         self.open_file_btn = None
         self.reset_btn = None
         self.clear_btn = None
-        self._open_file_card = None
-        self._reset_file_card = None
-        self._clear_all_card = None
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
     def _after_ui_built(self) -> None:
@@ -106,7 +109,7 @@ class CustomDomainsPage(BasePage):
         self.domain_input.returnPressed.connect(self._add_domain)
         add_layout.addWidget(self.domain_input, 1)
 
-        self.add_btn = ActionButton(self._tr("page.custom_domains.button.add", "Добавить"), "fa5s.plus", accent=True)
+        self.add_btn = PrimaryActionButton(self._tr("page.custom_domains.button.add", "Добавить"), "fa5s.plus")
         self.add_btn.setFixedHeight(38)
         self.add_btn.clicked.connect(self._add_domain)
         add_layout.addWidget(self.add_btn)
@@ -115,46 +118,50 @@ class CustomDomainsPage(BasePage):
         self.layout.addWidget(self._add_card)
         
         # Действия
-        self._actions_card = None
         self._actions_group = SettingCardGroup(
             self._tr("page.custom_domains.card.actions", "Действия"),
             self.content,
         )
-        self._open_file_card = PushSettingCard(
+        self._actions_bar = QuickActionsBar(self.content)
+
+        self.open_file_btn = ActionButton(
             self._tr("page.custom_domains.button.open_file", "Открыть файл"),
-            qta.icon("fa5s.external-link-alt", color=tokens.accent_hex),
-            self._tr("page.custom_domains.button.open_file", "Открыть файл"),
+            "fa5s.external-link-alt",
+        )
+        self.open_file_btn.clicked.connect(self._open_file)
+        set_tooltip(
+            self.open_file_btn,
             self._tr("page.custom_domains.tooltip.open_file", "Сохраняет изменения и открывает other.user.txt в проводнике"),
         )
-        self._open_file_card.clicked.connect(self._open_file)
 
-        self._reset_file_card = PushSettingCard(
+        self.reset_btn = ActionButton(
             self._tr("page.custom_domains.button.reset_file", "Сбросить файл"),
-            qta.icon("fa5s.undo", color="#ff9800"),
-            self._tr("page.custom_domains.button.reset_file", "Сбросить файл"),
+            "fa5s.undo",
+        )
+        self.reset_btn.clicked.connect(self._confirm_reset_file)
+        set_tooltip(
+            self.reset_btn,
             self._tr(
                 "page.custom_domains.tooltip.reset_file",
                 "Очищает other.user.txt (мои домены) и пересобирает other.txt из системной базы",
             ),
         )
-        self._reset_file_card.clicked.connect(self._confirm_reset_file)
 
-        self._clear_all_card = PushSettingCard(
+        self.clear_btn = ActionButton(
             self._tr("page.custom_domains.button.clear_all", "Очистить всё"),
-            qta.icon("fa5s.trash-alt", color="#ff9800"),
-            self._tr("page.custom_domains.button.clear_all", "Очистить всё"),
+            "fa5s.trash-alt",
+        )
+        self.clear_btn.clicked.connect(self._confirm_clear_all)
+        set_tooltip(
+            self.clear_btn,
             self._tr(
                 "page.custom_domains.tooltip.clear_all",
                 "Удаляет только пользовательские домены. Базовые домены из шаблона останутся",
             ),
         )
-        self._clear_all_card.clicked.connect(self._confirm_clear_all)
 
-        self._actions_group.addSettingCards([
-            self._open_file_card,
-            self._reset_file_card,
-            self._clear_all_card,
-        ])
+        self._actions_bar.add_buttons([self.open_file_btn, self.reset_btn, self.clear_btn])
+        insert_widget_into_setting_card_group(self._actions_group, 1, self._actions_bar)
         self.layout.addWidget(self._actions_group)
         
         # Текстовый редактор (вместо списка)
@@ -469,9 +476,7 @@ class CustomDomainsPage(BasePage):
                 self._tr("page.custom_domains.tooltip.open_file", "Сохраняет изменения и открывает other.user.txt в проводнике"),
             )
         if self.reset_btn is not None:
-            self.reset_btn._default_text = self._tr("page.custom_domains.button.reset_file", "Сбросить файл")
-            self.reset_btn._confirm_text = self._tr("page.custom_domains.confirm.reset_file", "Подтвердить сброс")
-            self.reset_btn.setText(self.reset_btn._default_text)
+            self.reset_btn.setText(self._tr("page.custom_domains.button.reset_file", "Сбросить файл"))
             set_tooltip(
                 self.reset_btn,
                 self._tr(
@@ -480,9 +485,7 @@ class CustomDomainsPage(BasePage):
                 ),
             )
         if self.clear_btn is not None:
-            self.clear_btn._default_text = self._tr("page.custom_domains.button.clear_all", "Очистить всё")
-            self.clear_btn._confirm_text = self._tr("page.custom_domains.confirm.clear_all", "Подтвердить очистку")
-            self.clear_btn.setText(self.clear_btn._default_text)
+            self.clear_btn.setText(self._tr("page.custom_domains.button.clear_all", "Очистить всё"))
             set_tooltip(
                 self.clear_btn,
                 self._tr(
@@ -490,31 +493,6 @@ class CustomDomainsPage(BasePage):
                     "Удаляет только пользовательские домены. Базовые домены из шаблона останутся",
                 ),
             )
-        if self._open_file_card is not None:
-            self._open_file_card.setTitle(self._tr("page.custom_domains.button.open_file", "Открыть файл"))
-            self._open_file_card.setContent(
-                self._tr("page.custom_domains.tooltip.open_file", "Сохраняет изменения и открывает other.user.txt в проводнике")
-            )
-            self._open_file_card.button.setText(self._tr("page.custom_domains.button.open_file", "Открыть файл"))
-        if self._reset_file_card is not None:
-            self._reset_file_card.setTitle(self._tr("page.custom_domains.button.reset_file", "Сбросить файл"))
-            self._reset_file_card.setContent(
-                self._tr(
-                    "page.custom_domains.tooltip.reset_file",
-                    "Очищает other.user.txt (мои домены) и пересобирает other.txt из системной базы",
-                )
-            )
-            self._reset_file_card.button.setText(self._tr("page.custom_domains.button.reset_file", "Сбросить файл"))
-        if self._clear_all_card is not None:
-            self._clear_all_card.setTitle(self._tr("page.custom_domains.button.clear_all", "Очистить всё"))
-            self._clear_all_card.setContent(
-                self._tr(
-                    "page.custom_domains.tooltip.clear_all",
-                    "Удаляет только пользовательские домены. Базовые домены из шаблона останутся",
-                )
-            )
-            self._clear_all_card.button.setText(self._tr("page.custom_domains.button.clear_all", "Очистить всё"))
-
         self.text_edit.setPlaceholderText(
             self._tr(
                 "page.custom_domains.editor.placeholder",

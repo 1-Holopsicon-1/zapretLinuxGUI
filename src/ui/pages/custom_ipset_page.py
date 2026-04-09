@@ -9,14 +9,13 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 try:
-    from qfluentwidgets import LineEdit, MessageBox, InfoBar, SettingCardGroup, PushSettingCard
+    from qfluentwidgets import LineEdit, MessageBox, InfoBar, SettingCardGroup
     _HAS_FLUENT = True
 except ImportError:
     LineEdit = QLineEdit
     MessageBox = None
     InfoBar = None
     SettingCardGroup = None  # type: ignore[assignment]
-    PushSettingCard = None  # type: ignore[assignment]
     _HAS_FLUENT = False
 
 try:
@@ -28,7 +27,14 @@ except ImportError:
 
 from .base_page import BasePage, ScrollBlockingPlainTextEdit
 from core.hostlist_page_controller import HostlistPageController
-from ui.compat_widgets import SettingsCard, ActionButton
+from ui.compat_widgets import (
+    SettingsCard,
+    ActionButton,
+    PrimaryActionButton,
+    QuickActionsBar,
+    insert_widget_into_setting_card_group,
+    set_tooltip,
+)
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
@@ -52,10 +58,11 @@ class CustomIpSetPage(BasePage):
         self._add_card = None
         self._actions_card = None
         self._actions_group = None
+        self._actions_bar = None
         self._editor_card = None
         self._hint_label = None
-        self._open_action_card = None
-        self._clear_action_card = None
+        self.open_btn = None
+        self.clear_btn = None
         self._status_state = {
             "total": 0,
             "base": 0,
@@ -125,7 +132,7 @@ class CustomIpSetPage(BasePage):
         self.input.returnPressed.connect(self._add_entry)
         add_layout.addWidget(self.input, 1)
 
-        self.add_btn = ActionButton(self._tr("page.custom_ipset.button.add", "Добавить"), "fa5s.plus", accent=True)
+        self.add_btn = PrimaryActionButton(self._tr("page.custom_ipset.button.add", "Добавить"), "fa5s.plus")
         self.add_btn.setFixedHeight(38)
         self.add_btn.clicked.connect(self._add_entry)
         add_layout.addWidget(self.add_btn)
@@ -133,37 +140,41 @@ class CustomIpSetPage(BasePage):
         add_card.add_layout(add_layout)
         self.layout.addWidget(add_card)
 
-        self.open_btn = None
-        self.clear_btn = None
         self._actions_card = None
         actions_group = SettingCardGroup(
             self._tr("page.custom_ipset.section.actions", "Действия"),
             self.content,
         )
         self._actions_group = actions_group
-        self._open_action_card = PushSettingCard(
+        self._actions_bar = QuickActionsBar(self.content)
+        self.open_btn = ActionButton(
             self._tr("page.custom_ipset.button.open_file", "Открыть файл"),
-            qta.icon("fa5s.external-link-alt", color=tokens.accent_hex),
-            self._tr("page.custom_ipset.button.open_file", "Открыть файл"),
+            "fa5s.external-link-alt",
+        )
+        self.open_btn.clicked.connect(self._open_file)
+        set_tooltip(
+            self.open_btn,
             self._tr(
                 "page.custom_ipset.action.open_file.description",
                 "Сохраняет изменения и открывает ipset-all.user.txt в проводнике.",
             ),
         )
-        self._open_action_card.clicked.connect(self._open_file)
-        actions_group.addSettingCard(self._open_action_card)
 
-        self._clear_action_card = PushSettingCard(
+        self.clear_btn = ActionButton(
             self._tr("page.custom_ipset.button.clear_all", "Очистить всё"),
-            qta.icon("fa5s.trash-alt", color="#ff9800"),
-            self._tr("page.custom_ipset.button.clear_all", "Очистить всё"),
+            "fa5s.trash-alt",
+        )
+        self.clear_btn.clicked.connect(self._clear_all)
+        set_tooltip(
+            self.clear_btn,
             self._tr(
                 "page.custom_ipset.action.clear_all.description",
                 "Удаляет все пользовательские записи из ipset-all.user.txt.",
             ),
         )
-        self._clear_action_card.clicked.connect(self._clear_all)
-        actions_group.addSettingCard(self._clear_action_card)
+
+        self._actions_bar.add_buttons([self.open_btn, self.clear_btn])
+        insert_widget_into_setting_card_group(actions_group, 1, self._actions_bar)
         self.layout.addWidget(actions_group)
 
         # Текстовый редактор (вместо списка)
@@ -346,24 +357,24 @@ class CustomIpSetPage(BasePage):
             self.open_btn.setText(self._tr("page.custom_ipset.button.open_file", "Открыть файл"))
         if self.clear_btn is not None:
             self.clear_btn.setText(self._tr("page.custom_ipset.button.clear_all", "Очистить всё"))
-        if self._open_action_card is not None:
-            self._open_action_card.setTitle(self._tr("page.custom_ipset.button.open_file", "Открыть файл"))
-            self._open_action_card.setContent(
+        if self.open_btn is not None:
+            self.open_btn.setText(self._tr("page.custom_ipset.button.open_file", "Открыть файл"))
+            set_tooltip(
+                self.open_btn,
                 self._tr(
                     "page.custom_ipset.action.open_file.description",
                     "Сохраняет изменения и открывает ipset-all.user.txt в проводнике.",
                 )
             )
-            self._open_action_card.button.setText(self._tr("page.custom_ipset.button.open_file", "Открыть файл"))
-        if self._clear_action_card is not None:
-            self._clear_action_card.setTitle(self._tr("page.custom_ipset.button.clear_all", "Очистить всё"))
-            self._clear_action_card.setContent(
+        if self.clear_btn is not None:
+            self.clear_btn.setText(self._tr("page.custom_ipset.button.clear_all", "Очистить всё"))
+            set_tooltip(
+                self.clear_btn,
                 self._tr(
                     "page.custom_ipset.action.clear_all.description",
                     "Удаляет все пользовательские записи из ipset-all.user.txt.",
                 )
             )
-            self._clear_action_card.button.setText(self._tr("page.custom_ipset.button.clear_all", "Очистить всё"))
         self.text_edit.setPlaceholderText(
             self._tr(
                 "page.custom_ipset.editor.placeholder",

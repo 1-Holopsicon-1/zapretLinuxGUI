@@ -10,7 +10,14 @@ import qtawesome as qta
 
 from .base_page import BasePage
 from ui.appearance_page_controller import AppearancePageController
-from ui.compat_widgets import SettingsCard, ActionButton, SettingsRow
+from ui.compat_widgets import (
+    SettingsCard,
+    ActionButton,
+    SettingsRow,
+    build_premium_badge,
+    enable_setting_card_group_auto_height,
+    insert_widget_into_setting_card_group,
+)
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.theme import get_theme_tokens, get_rkn_background_options
 from ui.text_catalog import tr as tr_catalog
@@ -292,10 +299,9 @@ class AppearancePage(BasePage):
         self._bg_radio_amoled.setEnabled(False)
         self._bg_radio_amoled.toggled.connect(lambda checked: self._on_bg_preset_toggled("amoled", checked))
         amoled_row.addWidget(self._bg_radio_amoled)
-        amoled_badge = QLabel(
+        amoled_badge = build_premium_badge(
             tr_catalog("common.badge.premium", language=self._ui_language, default="⭐ Premium")
         )
-        amoled_badge.setStyleSheet("color: #b45309; font-size: 10px; font-weight: bold; background: rgba(255,193,7,0.15); padding: 2px 6px; border-radius: 4px;")
         amoled_row.addWidget(amoled_badge)
         amoled_row.addStretch()
         bg_layout.addLayout(amoled_row)
@@ -309,10 +315,9 @@ class AppearancePage(BasePage):
         self._bg_radio_rkn_chan.setEnabled(False)
         self._bg_radio_rkn_chan.toggled.connect(lambda checked: self._on_bg_preset_toggled("rkn_chan", checked))
         rkn_row.addWidget(self._bg_radio_rkn_chan)
-        rkn_badge = QLabel(
+        rkn_badge = build_premium_badge(
             tr_catalog("common.badge.premium", language=self._ui_language, default="⭐ Premium")
         )
-        rkn_badge.setStyleSheet("color: #b45309; font-size: 10px; font-weight: bold; background: rgba(255,193,7,0.15); padding: 2px 6px; border-radius: 4px;")
         rkn_row.addWidget(rkn_badge)
         rkn_row.addStretch()
         bg_layout.addLayout(rkn_row)
@@ -374,10 +379,9 @@ class AppearancePage(BasePage):
         )
         garland_row.addWidget(garland_label)
 
-        premium_badge = QLabel(
+        premium_badge = build_premium_badge(
             tr_catalog("common.badge.premium", language=self._ui_language, default="⭐ Premium")
         )
-        premium_badge.setStyleSheet("color: #b45309; font-size: 10px; font-weight: bold; background-color: rgba(255, 193, 7, 0.15); padding: 2px 6px; border-radius: 4px;")
         garland_row.addWidget(premium_badge)
 
         garland_row.addStretch()
@@ -425,10 +429,9 @@ class AppearancePage(BasePage):
         )
         snowflakes_row.addWidget(snowflakes_label)
 
-        snowflakes_badge = QLabel(
+        snowflakes_badge = build_premium_badge(
             tr_catalog("common.badge.premium", language=self._ui_language, default="⭐ Premium")
         )
-        snowflakes_badge.setStyleSheet("color: #b45309; font-size: 10px; font-weight: bold; background-color: rgba(255, 193, 7, 0.15); padding: 2px 6px; border-radius: 4px;")
         snowflakes_row.addWidget(snowflakes_badge)
 
         snowflakes_row.addStretch()
@@ -533,17 +536,12 @@ class AppearancePage(BasePage):
                 )
                 accent_card = self._accent_group
                 accent_layout = None
-                accent_config_card = SettingsCard()
-                accent_config_layout = QVBoxLayout()
-                accent_config_layout.setSpacing(12)
             else:
                 self.add_section_title(text_key="page.appearance.section.accent")
                 self._accent_group = None
                 accent_card = SettingsCard()
                 accent_layout = QVBoxLayout()
                 accent_layout.setSpacing(12)
-                accent_config_card = None
-                accent_config_layout = None
 
             accent_desc = CaptionLabel(
                 tr_catalog(
@@ -560,7 +558,7 @@ class AppearancePage(BasePage):
             if accent_layout is not None:
                 accent_layout.addWidget(accent_desc)
             else:
-                accent_config_layout.addWidget(accent_desc)
+                insert_widget_into_setting_card_group(accent_card, 1, accent_desc)
 
             accent_row = SettingsRow(
                 "fa5s.palette",
@@ -582,9 +580,7 @@ class AppearancePage(BasePage):
             if accent_layout is not None:
                 accent_layout.addWidget(accent_row)
             else:
-                accent_config_layout.addWidget(accent_row)
-                accent_config_card.add_layout(accent_config_layout)
-                accent_card.addSettingCard(accent_config_card)
+                accent_card.addSettingCard(accent_row)
 
             self._follow_windows_accent_cb = Win11ToggleRow(
                 "fa5s.windows",
@@ -620,8 +616,8 @@ class AppearancePage(BasePage):
             else:
                 accent_card.addSettingCard(self._tinted_bg_cb)
 
-            self._tinted_intensity_container = SettingsCard() if accent_layout is None else QWidget()
-            intensity_row_layout = QHBoxLayout() if accent_layout is None else QHBoxLayout(self._tinted_intensity_container)
+            self._tinted_intensity_container = QWidget()
+            intensity_row_layout = QHBoxLayout(self._tinted_intensity_container)
             intensity_row_layout.setContentsMargins(8, 0, 8, 0)
             intensity_row_layout.setSpacing(8)
             intensity_label = CaptionLabel(
@@ -643,11 +639,22 @@ class AppearancePage(BasePage):
             if accent_layout is not None:
                 accent_layout.addWidget(self._tinted_intensity_container)
             else:
-                self._tinted_intensity_container.add_layout(intensity_row_layout)
-                accent_card.addSettingCard(self._tinted_intensity_container)
+                self._tinted_intensity_row = SettingsRow(
+                    "fa5s.sliders-h",
+                    tr_catalog(
+                        "page.appearance.accent.tint_intensity.label",
+                        language=self._ui_language,
+                        default="Интенсивность тонировки:",
+                    ),
+                    "",
+                )
+                self._tinted_intensity_row.set_control(self._tinted_intensity_container)
+                accent_card.addSettingCard(self._tinted_intensity_row)
 
             if accent_layout is not None:
                 accent_card.add_layout(accent_layout)
+            else:
+                enable_setting_card_group_auto_height(accent_card)
             self.add_widget(accent_card)
 
             self.add_spacing(16)

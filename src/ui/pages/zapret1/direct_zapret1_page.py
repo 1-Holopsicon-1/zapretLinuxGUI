@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QHBoxLayout
 
 from ui.pages.base_page import BasePage
-from ui.compat_widgets import RefreshButton, SettingsCard
+from ui.compat_widgets import QuickActionsBar, RefreshButton
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 from ui.widgets import PresetTargetsList
@@ -23,8 +23,7 @@ from qfluentwidgets import (
     BreadcrumbBar,
     MessageBox,
     BodyLabel,
-    SettingCardGroup,
-    PushSettingCard,
+    PushButton,
 )
 
 
@@ -69,10 +68,7 @@ class Zapret1StrategiesPage(BasePage):
         self._expand_btn = None
         self._collapse_btn = None
         self._info_btn = None
-        self._toolbar_group = None
-        self._expand_card = None
-        self._collapse_card = None
-        self._info_card = None
+        self._toolbar_actions_bar = None
         self._empty_state_label = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
@@ -225,66 +221,65 @@ class Zapret1StrategiesPage(BasePage):
         _log_startup_z1_direct_metric("_build_content.targets_list", (_time.perf_counter() - _t_targets) * 1000)
 
     def _build_toolbar(self) -> None:
-        self._toolbar_group = SettingCardGroup(
-            tr_catalog("page.z1_direct.toolbar.title", language=self._ui_language, default="Действия"),
-            self.content,
-        )
+        self.add_section_title(text_key="page.z1_direct.toolbar.title")
+        self._toolbar_actions_bar = QuickActionsBar(self.content)
 
         self._reload_btn = RefreshButton()
         self._reload_btn.clicked.connect(self._reload)
-        reload_card = SettingsCard()
-        reload_layout = QHBoxLayout()
-        reload_layout.setContentsMargins(10, 6, 12, 6)
-        reload_layout.addWidget(self._reload_btn)
-        reload_layout.addStretch()
-        reload_card.add_layout(reload_layout)
-        self._toolbar_group.addSettingCard(reload_card)
+        self._reload_btn.setToolTip(
+            tr_catalog(
+                "page.z1_direct.toolbar.reload.description",
+                language=self._ui_language,
+                default="Обновить список категорий, target'ов и выбранных стратегий.",
+            )
+        )
+        self._toolbar_actions_bar.add_button(self._reload_btn)
 
-        self._expand_card = PushSettingCard(
-            tr_catalog("page.z1_direct.toolbar.expand", language=self._ui_language, default="Развернуть"),
-            qta.icon("fa5s.expand-alt", color="#4CAF50"),
-            tr_catalog("page.z1_direct.toolbar.expand", language=self._ui_language, default="Развернуть"),
+        self._expand_btn = PushButton()
+        self._expand_btn.setText(
+            tr_catalog("page.z1_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
+        )
+        self._expand_btn.setIcon(qta.icon("fa5s.expand-alt", color="#4CAF50"))
+        self._expand_btn.setToolTip(
             tr_catalog(
                 "page.z1_direct.toolbar.expand.description",
                 language=self._ui_language,
                 default="Развернуть все категории и target'ы в списке.",
-            ),
-            self.content,
+            )
         )
-        self._expand_card.clicked.connect(self._expand_all)
-        self._expand_btn = self._expand_card.button
-        self._toolbar_group.addSettingCard(self._expand_card)
+        self._expand_btn.clicked.connect(self._expand_all)
+        self._toolbar_actions_bar.add_button(self._expand_btn)
 
-        self._collapse_card = PushSettingCard(
-            tr_catalog("page.z1_direct.toolbar.collapse", language=self._ui_language, default="Свернуть"),
-            qta.icon("fa5s.compress-alt", color="#ff9800"),
-            tr_catalog("page.z1_direct.toolbar.collapse", language=self._ui_language, default="Свернуть"),
+        self._collapse_btn = PushButton()
+        self._collapse_btn.setText(
+            tr_catalog("page.z1_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
+        )
+        self._collapse_btn.setIcon(qta.icon("fa5s.compress-alt", color="#ff9800"))
+        self._collapse_btn.setToolTip(
             tr_catalog(
                 "page.z1_direct.toolbar.collapse.description",
                 language=self._ui_language,
                 default="Свернуть все категории и target'ы в списке.",
-            ),
-            self.content,
+            )
         )
-        self._collapse_card.clicked.connect(self._collapse_all)
-        self._collapse_btn = self._collapse_card.button
-        self._toolbar_group.addSettingCard(self._collapse_card)
+        self._collapse_btn.clicked.connect(self._collapse_all)
+        self._toolbar_actions_bar.add_button(self._collapse_btn)
 
-        self._info_card = PushSettingCard(
-            tr_catalog("page.z1_direct.toolbar.info", language=self._ui_language, default="Что это?"),
-            qta.icon("fa5s.question-circle", color="#60cdff"),
-            tr_catalog("page.z1_direct.toolbar.info", language=self._ui_language, default="Что это?"),
+        self._info_btn = PushButton()
+        self._info_btn.setText(
+            tr_catalog("page.z1_direct.toolbar.info", language=self._ui_language, default="Что это?")
+        )
+        self._info_btn.setIcon(qta.icon("fa5s.question-circle", color="#60cdff"))
+        self._info_btn.setToolTip(
             tr_catalog(
                 "page.z1_direct.toolbar.info.description",
                 language=self._ui_language,
                 default="Показать краткое объяснение, как устроен прямой запуск Zapret 1.",
-            ),
-            self.content,
+            )
         )
-        self._info_card.clicked.connect(self._show_info)
-        self._info_btn = self._info_card.button
-        self._toolbar_group.addSettingCard(self._info_card)
-        self.add_widget(self._toolbar_group)
+        self._info_btn.clicked.connect(self._show_info)
+        self._toolbar_actions_bar.add_button(self._info_btn)
+        self.add_widget(self._toolbar_actions_bar)
 
     # ------------------------------------------------------------------
     # Data helpers
@@ -473,24 +468,12 @@ class Zapret1StrategiesPage(BasePage):
         super().set_ui_language(language)
 
         self._rebuild_breadcrumb()
-        try:
-            title_label = getattr(getattr(self, "_toolbar_group", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(
-                    tr_catalog("page.z1_direct.toolbar.title", language=self._ui_language, default="Действия")
-                )
-        except Exception:
-            pass
 
         if self._expand_btn is not None:
             self._expand_btn.setText(
                 tr_catalog("page.z1_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
             )
-        if self._expand_card is not None:
-            self._expand_card.setTitle(
-                tr_catalog("page.z1_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
-            )
-            self._expand_card.setContent(
+            self._expand_btn.setToolTip(
                 tr_catalog(
                     "page.z1_direct.toolbar.expand.description",
                     language=self._ui_language,
@@ -501,11 +484,7 @@ class Zapret1StrategiesPage(BasePage):
             self._collapse_btn.setText(
                 tr_catalog("page.z1_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
             )
-        if self._collapse_card is not None:
-            self._collapse_card.setTitle(
-                tr_catalog("page.z1_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
-            )
-            self._collapse_card.setContent(
+            self._collapse_btn.setToolTip(
                 tr_catalog(
                     "page.z1_direct.toolbar.collapse.description",
                     language=self._ui_language,
@@ -516,11 +495,7 @@ class Zapret1StrategiesPage(BasePage):
             self._info_btn.setText(
                 tr_catalog("page.z1_direct.toolbar.info", language=self._ui_language, default="Что это?")
             )
-        if self._info_card is not None:
-            self._info_card.setTitle(
-                tr_catalog("page.z1_direct.toolbar.info", language=self._ui_language, default="Что это?")
-            )
-            self._info_card.setContent(
+            self._info_btn.setToolTip(
                 tr_catalog(
                     "page.z1_direct.toolbar.info.description",
                     language=self._ui_language,

@@ -19,12 +19,12 @@ import qtawesome as qta
 from ui.pages.base_page import BasePage
 from ui.compat_widgets import (
     ActionButton,
+    build_advanced_settings_section,
     PrimaryActionButton,
     PulsingDot,
     ResetActionButton,
     SettingsCard,
     enable_setting_card_group_auto_height,
-    insert_widget_into_setting_card_group,
     set_tooltip,
 )
 from ui.main_window_state import AppUiState, MainWindowStateStore
@@ -173,7 +173,7 @@ class StopButton(ActionButton):
     """Кнопка остановки (нейтральная, PushButton)."""
 
     def __init__(self, text: str, icon_name: str | None = None, accent: bool = False, parent=None):
-        super().__init__(text, icon_name, accent=False, parent=parent)
+        super().__init__(text, icon_name, parent=parent)
 
 
 class Zapret2DirectControlPage(BasePage):
@@ -217,22 +217,18 @@ class Zapret2DirectControlPage(BasePage):
 
     def _after_ui_built(self) -> None:
         try:
-            self._apply_optimistic_startup_view()
+            plan = self._controller.build_optimistic_startup_plan()
+            if plan.should_mark_running:
+                self.update_status("running")
+            if plan.preset_name_text:
+                self.preset_name_label.setText(plan.preset_name_text)
+                set_tooltip(self.preset_name_label, plan.preset_name_tooltip)
         except Exception:
             pass
         self._update_stop_winws_button_text()
 
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
-        _ = force
-        theme_tokens = tokens or get_theme_tokens()
-
-        try:
-            if hasattr(self, "advanced_desc") and self.advanced_desc is not None:
-                self.advanced_desc.setStyleSheet(
-                    f"color: #ff9800; padding-bottom: 8px; font-family: {theme_tokens.font_family_qss};"
-                )
-        except Exception:
-            pass
+        _ = (tokens, force)
 
     def _start_dpi(self) -> None:
         start_dpi(self)
@@ -264,17 +260,21 @@ class Zapret2DirectControlPage(BasePage):
             _log_startup_z2_control_metric("activation.total", (_time.perf_counter() - _t_show) * 1000)
 
     def _run_deferred_show_work(self) -> None:
-        if not self.isVisible():
+        plan = self._controller.build_deferred_show_plan(page_visible=self.isVisible())
+        if not plan.should_continue:
             return
 
         _t_adv = _time.perf_counter()
-        self._schedule_advanced_settings_reload()
-        self._schedule_preset_summary_reload()
+        if plan.schedule_advanced:
+            self._schedule_advanced_settings_reload()
+        if plan.schedule_summary:
+            self._schedule_preset_summary_reload()
         _log_startup_z2_control_metric("showEvent.load_advanced_settings", (_time.perf_counter() - _t_adv) * 1000)
 
         _t_mode = _time.perf_counter()
         try:
-            self._refresh_direct_mode_label()
+            if plan.refresh_mode_label:
+                self._sync_direct_launch_mode_from_settings()
         except Exception:
             pass
         _log_startup_z2_control_metric("showEvent.refresh_mode_label", (_time.perf_counter() - _t_mode) * 1000)
@@ -612,8 +612,6 @@ class Zapret2DirectControlPage(BasePage):
         _t_advanced = _time.perf_counter()
         self.advanced_settings_section_label = None
 
-        self.advanced_desc = CaptionLabel(tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете")) if _HAS_FLUENT_LABELS else QLabel(tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете"))
-
         try:
             from ui.widgets.win11_controls import Win11ToggleRow
         except Exception:
@@ -637,7 +635,6 @@ class Zapret2DirectControlPage(BasePage):
                 "fa5s.ruler-horizontal",
                 "Включить --wssize",
                 "Добавляет параметр размера окна TCP",
-                "#9c27b0",
             )
             if Win11ToggleRow
             else None
@@ -650,7 +647,6 @@ class Zapret2DirectControlPage(BasePage):
                 "mdi.file-document-outline",
                 "Включить лог-файл (--debug)",
                 "Записывает логи winws в папку logs",
-                "#00bcd4",
             )
             if Win11ToggleRow
             else None
@@ -658,76 +654,29 @@ class Zapret2DirectControlPage(BasePage):
         if self.debug_log_toggle:
             self.debug_log_toggle.toggled.connect(self._on_debug_log_toggled)
 
-        if SettingCardGroup is not None and _HAS_FLUENT_LABELS:
-            self.advanced_card = SettingCardGroup(
-                tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"),
-                self.content,
-            )
-            try:
-                insert_widget_into_setting_card_group(self.advanced_card, 2, self.advanced_desc)
-            except Exception:
-                pass
-            for card in (
+        self.blobs_action_card = PushSettingCard(
+            tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть"),
+            qta.icon("fa5s.file-archive", color=get_theme_tokens().accent_hex),
+            tr_catalog("page.z2_control.blobs.title", language=self._ui_language, default="Блобы"),
+            tr_catalog("page.z2_control.blobs.desc", language=self._ui_language, default="Бинарные данные (.bin / hex) для стратегий"),
+        )
+        self.blobs_action_card.clicked.connect(self.navigate_to_blobs.emit)
+        self.blobs_open_btn = self.blobs_action_card.button
+
+        self.advanced_card, self.advanced_notice = build_advanced_settings_section(
+            title=tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"),
+            warning_text=tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете"),
+            parent=self.content,
+            toggle_rows=[
                 self.discord_restart_toggle,
                 self.wssize_toggle,
                 self.debug_log_toggle,
-            ):
-                if card is None:
-                    continue
-                self.advanced_card.addSettingCard(card)
-            enable_setting_card_group_auto_height(self.advanced_card)
-        else:
-            self.advanced_settings_section_label = self.add_section_title(
-                return_widget=True,
-                text_key="page.z2_control.section.advanced_settings",
-            )
-            self.advanced_card = SettingsCard(tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"))
-            advanced_layout = QVBoxLayout()
-            advanced_layout.setContentsMargins(0, 0, 0, 0)
-            advanced_layout.setSpacing(4)
-            advanced_layout.addWidget(self.advanced_desc)
-            for row in (
-                self.discord_restart_toggle,
-                self.wssize_toggle,
-                self.debug_log_toggle,
-            ):
-                if row is not None:
-                    advanced_layout.addWidget(row)
-            self.advanced_card.add_layout(advanced_layout)
+            ],
+            action_rows=[self.blobs_action_card],
+        )
 
         self.add_widget(self.advanced_card)
         _log_startup_z2_control_metric("_build_ui.advanced_settings_block", (_time.perf_counter() - _t_advanced) * 1000)
-
-        # Card C — Блобы (ссылка на страницу)
-        _t_blobs = _time.perf_counter()
-        blobs_card = CardWidget()
-        self.blobs_card = blobs_card
-        blobs_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        blobs_row = QHBoxLayout(blobs_card)
-        blobs_row.setContentsMargins(16, 14, 16, 14)
-        blobs_row.setSpacing(12)
-
-        blobs_icon_lbl = QLabel()
-        blobs_icon_lbl.setPixmap(qta.icon("fa5s.file-archive", color="#9c27b0").pixmap(20, 20))
-        blobs_icon_lbl.setFixedSize(24, 24)
-        blobs_row.addWidget(blobs_icon_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        blobs_col = QVBoxLayout()
-        blobs_col.setSpacing(2)
-        self.blobs_title_label = StrongBodyLabel(tr_catalog("page.z2_control.blobs.title", language=self._ui_language, default="Блобы"))
-        self.blobs_desc_label = CaptionLabel(tr_catalog("page.z2_control.blobs.desc", language=self._ui_language, default="Бинарные данные (.bin / hex) для стратегий"))
-        blobs_col.addWidget(self.blobs_title_label)
-        blobs_col.addWidget(self.blobs_desc_label)
-        blobs_row.addLayout(blobs_col, 1)
-
-        blobs_open_btn = PushButton()
-        blobs_open_btn.setText(tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть"))
-        blobs_open_btn.setIcon(FluentIcon.FOLDER)
-        blobs_open_btn.clicked.connect(self.navigate_to_blobs.emit)
-        self.blobs_open_btn = blobs_open_btn
-        blobs_row.addWidget(blobs_open_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.add_widget(blobs_card)
-        _log_startup_z2_control_metric("_build_ui.blobs_card", (_time.perf_counter() - _t_blobs) * 1000)
         
         # Дополнительные действия
         _t_extra = _time.perf_counter()
@@ -754,12 +703,12 @@ class Zapret2DirectControlPage(BasePage):
         _log_startup_z2_control_metric("_build_ui.extra_actions", (_time.perf_counter() - _t_extra) * 1000)
         _log_startup_z2_control_metric("_build_ui.total", (_time.perf_counter() - _t_total) * 1000)
 
-    def _apply_advanced_settings_state(self, state: dict) -> None:
+    def _apply_advanced_settings_plan(self, plan) -> None:
         try:
             toggle = getattr(self, "discord_restart_toggle", None)
             set_checked = getattr(toggle, "setChecked", None)
             if callable(set_checked):
-                set_checked(bool(state.get("discord_restart", True)), block_signals=True)
+                set_checked(bool(plan.discord_restart), block_signals=True)
         except Exception:
             pass
 
@@ -767,7 +716,7 @@ class Zapret2DirectControlPage(BasePage):
             wssize_toggle = getattr(self, "wssize_toggle", None)
             set_checked = getattr(wssize_toggle, "setChecked", None)
             if callable(set_checked):
-                set_checked(bool(state.get("wssize_enabled", False)), block_signals=True)
+                set_checked(bool(plan.wssize_enabled), block_signals=True)
         except Exception:
             pass
 
@@ -775,54 +724,9 @@ class Zapret2DirectControlPage(BasePage):
             debug_toggle = getattr(self, "debug_log_toggle", None)
             set_checked = getattr(debug_toggle, "setChecked", None)
             if callable(set_checked):
-                set_checked(bool(state.get("debug_log_enabled", False)), block_signals=True)
+                set_checked(bool(plan.debug_log_enabled), block_signals=True)
         except Exception:
             pass
-
-    def _refresh_selected_preset_name_fast(self) -> None:
-        try:
-            from core.services import get_direct_flow_coordinator
-
-            preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
-            active_name = str(getattr(preset, "name", "") or "").strip()
-        except Exception:
-            active_name = ""
-
-        if active_name:
-            self.preset_name_label.setText(active_name)
-            set_tooltip(self.preset_name_label, active_name)
-            return
-
-        self.preset_name_label.setText(
-            tr_catalog("page.z2_control.preset.not_selected", language=self._ui_language, default="Не выбран")
-        )
-        set_tooltip(self.preset_name_label, "")
-
-    def _apply_optimistic_startup_view(self) -> None:
-        """Быстрое стартовое состояние без тяжёлого чтения пресета и monitor-проверок."""
-        try:
-            from strategy_menu import get_strategy_launch_method
-
-            method = str(get_strategy_launch_method() or "").strip().lower()
-        except Exception:
-            method = ""
-
-        if method == "direct_zapret2":
-            self.update_status("running")
-
-        try:
-            from core.services import get_selection_service
-
-            file_name = str(get_selection_service().get_selected_file_name("winws2") or "").strip()
-        except Exception:
-            file_name = ""
-
-        if not file_name:
-            return
-
-        display_name = Path(file_name).stem.strip() or file_name
-        self.preset_name_label.setText(display_name)
-        set_tooltip(self.preset_name_label, display_name)
 
     def _schedule_advanced_settings_reload(self, *, force: bool = False) -> None:
         if not force and not self._advanced_settings_dirty:
@@ -847,7 +751,8 @@ class Zapret2DirectControlPage(BasePage):
         if int(request_id) != int(self._advanced_settings_request_id):
             return
         self._advanced_settings_dirty = False
-        self._apply_advanced_settings_state(state if isinstance(state, dict) else {})
+        plan = self._controller.build_advanced_settings_apply_plan(state if isinstance(state, dict) else {})
+        self._apply_advanced_settings_plan(plan)
 
     def _schedule_preset_summary_reload(self, *, force: bool = False) -> None:
         if not force and not self._preset_summary_dirty:
@@ -872,79 +777,35 @@ class Zapret2DirectControlPage(BasePage):
         if int(request_id) != int(self._preset_summary_request_id):
             return
         self._preset_summary_dirty = False
-        active_preset_name = str((payload or {}).get("active_preset_name") or "").strip()
-        active_lists = list((payload or {}).get("active_lists") or [])
-
-        if active_preset_name:
-            self.preset_name_label.setText(active_preset_name)
-            set_tooltip(self.preset_name_label, active_preset_name)
-        else:
-            self.preset_name_label.setText(
-                tr_catalog("page.z2_control.preset.not_selected", language=self._ui_language, default="Не выбран")
-            )
-            set_tooltip(self.preset_name_label, "")
-
-        if active_lists:
-            self.strategy_label.setText(" • ".join(active_lists))
-            set_tooltip(self.strategy_label, "\n".join(active_lists))
-        else:
-            self.strategy_label.setText(
-                tr_catalog("page.z2_control.preset.no_active_lists", language=self._ui_language, default="Нет активных листов")
-            )
-            set_tooltip(self.strategy_label, "")
+        plan = self._controller.build_preset_summary_plan(payload, language=self._ui_language)
+        self.preset_name_label.setText(plan.preset_name_text)
+        set_tooltip(self.preset_name_label, plan.preset_name_tooltip)
+        self.strategy_label.setText(plan.strategy_text)
+        set_tooltip(self.strategy_label, plan.strategy_tooltip)
 
     def _on_discord_restart_changed(self, enabled: bool) -> None:
         self._advanced_settings_request_id += 1
         self._advanced_settings_dirty = False
-        try:
-            from discord.discord_restart import set_discord_restart_setting
-
-            set_discord_restart_setting(bool(enabled))
-        except Exception:
-            pass
+        self._controller.save_discord_restart_setting(enabled)
 
     def _on_wssize_toggled(self, enabled: bool) -> None:
         self._advanced_settings_request_id += 1
         self._advanced_settings_dirty = False
-        try:
-            from core.presets.direct_facade import DirectPresetFacade
-
-            DirectPresetFacade.from_launch_method("direct_zapret2").set_wssize_enabled(bool(enabled))
-        except Exception:
-            pass
+        self._controller.save_wssize_enabled(enabled)
 
     def _on_debug_log_toggled(self, enabled: bool) -> None:
         self._advanced_settings_request_id += 1
         self._advanced_settings_dirty = False
-        try:
-            from core.presets.direct_facade import DirectPresetFacade
-
-            DirectPresetFacade.from_launch_method("direct_zapret2").set_debug_log_enabled(bool(enabled))
-        except Exception:
-            pass
+        self._controller.save_debug_log_enabled(enabled)
 
     # ==================== Direct mode UI: Basic/Advanced ====================
 
-    def _get_direct_launch_mode_setting(self) -> str:
-        try:
-            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
-
-            mode = (get_direct_zapret2_ui_mode() or "").strip().lower()
-            if mode in ("basic", "advanced"):
-                return mode
-        except Exception:
-            pass
-        return "advanced"
-
     def _sync_direct_launch_mode_from_settings(self) -> None:
-        self._refresh_direct_mode_label()
+        plan = self._controller.build_direct_mode_label_plan(language=self._ui_language)
+        self.direct_mode_label.setText(plan.label_text)
 
     def _open_direct_mode_dialog(self) -> None:
-        try:
-            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
-        except ImportError:
-            return
-        current = get_direct_zapret2_ui_mode()
+        current = self._controller.get_direct_launch_mode_setting()
         dlg = DirectLaunchModeDialog(current, self.window(), language=self._ui_language)
         if dlg.exec():
             new_mode = dlg.get_mode()
@@ -952,60 +813,25 @@ class Zapret2DirectControlPage(BasePage):
                 self._on_direct_launch_mode_selected(new_mode)
                 self.direct_mode_changed.emit(new_mode)
 
-    def _refresh_direct_mode_label(self) -> None:
-        try:
-            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
-            mode = get_direct_zapret2_ui_mode()
-            key = "page.z2_control.mode.basic" if mode == "basic" else "page.z2_control.mode.advanced"
-            default = "Basic" if mode == "basic" else "Advanced"
-            self.direct_mode_label.setText(tr_catalog(key, language=self._ui_language, default=default))
-        except Exception:
-            pass
-
     def _on_direct_launch_mode_selected(self, mode: str) -> None:
         wanted = str(mode or "").strip().lower()
         if wanted not in ("basic", "advanced"):
             return
 
-        current = self._get_direct_launch_mode_setting()
-        if wanted == current:
-            self._sync_direct_launch_mode_from_settings()
-            return
-
-        try:
-            from strategy_menu.ui_prefs_store import set_direct_zapret2_ui_mode
-
-            set_direct_zapret2_ui_mode(wanted)
-        except Exception:
-            pass
-
-        # Re-save the selected source preset through the new direct core,
-        # so strategy ids are reinterpreted against the currently selected
-        # basic/advanced catalogs without going through legacy registry reloads.
-        try:
-            from dpi.direct_runtime_apply_policy import request_direct_runtime_content_apply
-            from core.presets.direct_facade import DirectPresetFacade
-
-            facade = DirectPresetFacade.from_launch_method(
-                "direct_zapret2",
-                on_dpi_reload_needed=lambda: request_direct_runtime_content_apply(
-                    self.parent_app,
-                    launch_method="direct_zapret2",
-                    reason="direct_launch_mode_changed",
-                ),
+        current = self._controller.get_direct_launch_mode_setting()
+        plan = self._controller.build_direct_mode_change_plan(
+            wanted_mode=wanted,
+            current_mode=current,
+        )
+        if plan.should_apply:
+            self._controller.apply_direct_mode_change(
+                wanted_mode=wanted,
+                parent_app=self.parent_app,
             )
-            selections = facade.get_strategy_selections() or {}
-            facade.set_strategy_selections(selections, save_and_sync=True)
-        except Exception:
-            pass
-
-        # Refresh labels that depend on active strategy args.
-        try:
+        if plan.refresh_strategy_after:
             self.update_strategy("")
-        except Exception:
-            pass
-
-        self._sync_direct_launch_mode_from_settings()
+        if plan.refresh_mode_label_after:
+            self._sync_direct_launch_mode_from_settings()
 
     def _set_toggle_checked(self, toggle, checked: bool) -> None:
         try:
@@ -1067,6 +893,28 @@ class Zapret2DirectControlPage(BasePage):
         except Exception:
             pass
 
+    def _show_action_result_plan(self, plan, toggle=None) -> None:
+        if plan.revert_checked is not None and toggle is not None:
+            self._set_toggle_checked(toggle, plan.revert_checked)
+
+        if plan.final_status:
+            self._set_status(plan.final_status)
+
+        if plan.level == "success":
+            InfoBar.success(title=plan.title, content=plan.content, parent=self.window())
+        elif plan.level == "warning":
+            InfoBar.warning(title=plan.title, content=plan.content, parent=self.window())
+        else:
+            InfoBar.error(title=plan.title, content=plan.content, parent=self.window())
+
+    def _run_confirmation_dialog(self, dialog_plan, toggle=None) -> bool:
+        box = MessageBox(dialog_plan.title, dialog_plan.content, self.window())
+        if box.exec():
+            return True
+        if dialog_plan.revert_checked is not None and toggle is not None:
+            self._set_toggle_checked(toggle, dialog_plan.revert_checked)
+        return False
+
     def _on_auto_dpi_toggled(self, enabled: bool) -> None:
         try:
             plan = self._controller.save_auto_dpi(enabled)
@@ -1076,150 +924,54 @@ class Zapret2DirectControlPage(BasePage):
             self._sync_program_settings()
 
     def _on_defender_toggled(self, disable: bool) -> None:
-        import ctypes
-
-        if not ctypes.windll.shell32.IsUserAnAdmin():
-            InfoBar.error(title="Требуются права администратора", content="Для управления Windows Defender требуются права администратора. Перезапустите программу от имени администратора.", parent=self.window())
-            self._set_toggle_checked(self.defender_toggle, not disable)
+        start_plan = self._controller.build_defender_toggle_start_plan(
+            disable=disable,
+            language=self._ui_language,
+        )
+        if start_plan.blocked:
+            InfoBar.error(
+                title=start_plan.blocked_title,
+                content=start_plan.blocked_content,
+                parent=self.window(),
+            )
+            if start_plan.blocked_revert_checked is not None:
+                self._set_toggle_checked(self.defender_toggle, start_plan.blocked_revert_checked)
             return
 
         try:
-            from altmenu.defender_manager import WindowsDefenderManager, set_defender_disabled
-
-            manager = WindowsDefenderManager(status_callback=self._set_status)
-
-            if disable:
-                # Первое подтверждение: подробное предупреждение о последствиях
-                # Пользователь должен осознанно принять решение об отключении защиты
-                box = MessageBox(
-                    tr_catalog(
-                        "page.z2_control.dialog.defender_disable.title",
-                        language=self._ui_language,
-                        default="⚠️ Отключение Windows Defender",
-                    ),
-                    "Вы собираетесь отключить встроенную антивирусную защиту Windows.\n\n"
-                    "Что произойдёт:\n"
-                    "• Защита в реальном времени будет отключена\n"
-                    "• Облачная защита и SmartScreen будут отключены\n"
-                    "• Автоматическая отправка образцов будет отключена\n"
-                    "• Мониторинг поведения программ будет отключён\n\n"
-                    "⚠️ Ваш компьютер станет уязвим для вирусов и вредоносного ПО.\n"
-                    "Отключайте только если вы понимаете, что делаете.\n"
-                    "Вы сможете включить Defender обратно в любой момент.",
-                    self.window(),
-                )
-                if not box.exec():
-                    self._set_toggle_checked(self.defender_toggle, False)
+            for dialog_plan in start_plan.confirmations:
+                if not self._run_confirmation_dialog(dialog_plan, self.defender_toggle):
                     return
 
-                # Второе подтверждение: финальное согласие пользователя
-                box2 = MessageBox(
-                    "Подтверждение",
-                    "Вы уверены? Нажимая «ОК», вы подтверждаете, что:\n\n"
-                    "• Вы самостоятельно приняли решение отключить Windows Defender\n"
-                    "• Вы осознаёте риски работы без антивирусной защиты\n"
-                    "• Вы знаете, что можете включить защиту обратно\n\n"
-                    "Может потребоваться перезагрузка для полного применения.",
-                    self.window(),
-                )
-                if not box2.exec():
-                    self._set_toggle_checked(self.defender_toggle, False)
-                    return
+            if start_plan.start_status:
+                self._set_status(start_plan.start_status)
 
-                self._set_status("Отключение Windows Defender...")
-                success, count = manager.disable_defender()
-
-                if success:
-                    set_defender_disabled(True)
-                    InfoBar.success(title="Windows Defender отключен", content=f"Windows Defender успешно отключен. Применено {count} настроек. Может потребоваться перезагрузка.", parent=self.window())
-                else:
-                    InfoBar.error(title="Ошибка", content="Не удалось отключить Windows Defender. Возможно, некоторые настройки заблокированы системой.", parent=self.window())
-                    self._set_toggle_checked(self.defender_toggle, False)
-            else:
-                box = MessageBox(
-                    tr_catalog(
-                        "page.z2_control.dialog.defender_enable.title",
-                        language=self._ui_language,
-                        default="Включение Windows Defender",
-                    ),
-                    "Включить Windows Defender обратно?\n\n"
-                    "Это восстановит защиту вашего компьютера.",
-                    self.window(),
-                )
-                if not box.exec():
-                    self._set_toggle_checked(self.defender_toggle, True)
-                    return
-
-                self._set_status("Включение Windows Defender...")
-                success, count = manager.enable_defender()
-
-                if success:
-                    set_defender_disabled(False)
-                    InfoBar.success(title="Windows Defender включен", content="Windows Defender успешно включен. Защита вашего компьютера восстановлена.", parent=self.window())
-                else:
-                    InfoBar.warning(title="Частичный успех", content="Windows Defender включен частично. Некоторые настройки могут потребовать ручного исправления.", parent=self.window())
-
-            self._set_status("Готово")
-
-        except Exception as e:
-            InfoBar.error(title="Ошибка", content=f"Произошла ошибка при изменении настроек Windows Defender: {e}", parent=self.window())
+            result_plan = self._controller.run_defender_toggle(
+                disable=disable,
+                status_callback=self._set_status,
+            )
+            self._show_action_result_plan(result_plan, self.defender_toggle)
         finally:
             self._sync_program_settings()
 
     def _on_max_blocker_toggled(self, enable: bool) -> None:
+        start_plan = self._controller.build_max_block_toggle_start_plan(
+            enable=enable,
+            language=self._ui_language,
+        )
         try:
-            from altmenu.max_blocker import MaxBlockerManager
-
-            manager = MaxBlockerManager(status_callback=self._set_status)
-
-            if enable:
-                box = MessageBox(
-                    tr_catalog(
-                        "page.z2_control.dialog.max_block_enable.title",
-                        language=self._ui_language,
-                        default="Блокировка MAX",
-                    ),
-                    "Включить блокировку установки и работы программы MAX?\n\n"
-                    "• Заблокирует запуск max.exe, max.msi и других файлов MAX\n"
-                    "• Добавит правила блокировки в Windows Firewall\n"
-                    "• Заблокирует домены MAX в файле hosts",
-                    self.window(),
-                )
-                if not box.exec():
-                    self._set_toggle_checked(self.max_block_toggle, False)
+            for dialog_plan in start_plan.confirmations:
+                if not self._run_confirmation_dialog(dialog_plan, self.max_block_toggle):
                     return
 
-                success, message = manager.enable_blocking()
-                if success:
-                    InfoBar.success(title="Блокировка включена", content=message, parent=self.window())
-                else:
-                    InfoBar.warning(title="Ошибка", content=f"Не удалось полностью включить блокировку: {message}", parent=self.window())
-                    self._set_toggle_checked(self.max_block_toggle, False)
-            else:
-                box = MessageBox(
-                    tr_catalog(
-                        "page.z2_control.dialog.max_block_disable.title",
-                        language=self._ui_language,
-                        default="Отключение блокировки MAX",
-                    ),
-                    "Отключить блокировку программы MAX?\n\n"
-                    "Это удалит все созданные блокировки и правила.",
-                    self.window(),
-                )
-                if not box.exec():
-                    self._set_toggle_checked(self.max_block_toggle, True)
-                    return
+            if start_plan.start_status:
+                self._set_status(start_plan.start_status)
 
-                success, message = manager.disable_blocking()
-                if success:
-                    InfoBar.success(title="Блокировка отключена", content=message, parent=self.window())
-                else:
-                    InfoBar.warning(title="Ошибка", content=f"Не удалось полностью отключить блокировку: {message}", parent=self.window())
-
-            self._set_status("Готово")
-
-        except Exception as e:
-            InfoBar.error(title="Ошибка", content=f"Ошибка при переключении блокировки MAX: {e}", parent=self.window())
+            result_plan = self._controller.run_max_block_toggle(
+                enable=enable,
+                status_callback=self._set_status,
+            )
+            self._show_action_result_plan(result_plan, self.max_block_toggle)
         finally:
             self._sync_program_settings()
 
@@ -1281,17 +1033,24 @@ class Zapret2DirectControlPage(BasePage):
         )
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
-        if "mode_revision" in changed_fields:
+        plan = self._controller.build_ui_state_change_plan(
+            state=state,
+            changed_fields=changed_fields,
+            page_visible=self.isVisible(),
+        )
+        if plan.refresh_mode_label:
             self._sync_direct_launch_mode_from_settings()
-        if "active_preset_revision" in changed_fields or not changed_fields:
+        if plan.mark_advanced_dirty:
             self._advanced_settings_dirty = True
+        if plan.mark_preset_summary_dirty:
             self._preset_summary_dirty = True
-            if self.isVisible():
-                self._schedule_advanced_settings_reload(force=True)
-                self._schedule_preset_summary_reload(force=True)
-        self.set_loading(state.dpi_busy, state.dpi_busy_text)
-        self.update_status(state.dpi_phase or ("running" if state.dpi_running else "stopped"), state.dpi_last_error)
-        self.update_strategy(state.current_strategy_summary or "")
+        if plan.reload_advanced_now:
+            self._schedule_advanced_settings_reload(force=True)
+        if plan.reload_summary_now:
+            self._schedule_preset_summary_reload(force=True)
+        self.set_loading(plan.loading, plan.loading_text)
+        self.update_status(plan.update_status_state, plan.update_status_error)
+        self.update_strategy(plan.strategy_summary)
 
     def update_status(self, state: str | bool, last_error: str = ""):
         plan = self._controller.build_status_plan(
@@ -1312,8 +1071,11 @@ class Zapret2DirectControlPage(BasePage):
         self.stop_and_exit_btn.setVisible(plan.show_stop_and_exit)
 
     def update_strategy(self, name: str):
-        self._update_stop_winws_button_text()
-        self._schedule_preset_summary_reload()
+        plan = self._controller.build_strategy_update_plan(name=name)
+        if plan["refresh_stop_button"]:
+            self._update_stop_winws_button_text()
+        if plan["schedule_preset_summary_reload"]:
+            self._schedule_preset_summary_reload()
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -1330,7 +1092,10 @@ class Zapret2DirectControlPage(BasePage):
 
         self.current_preset_caption.setText(tr_catalog("page.z2_control.preset.current", language=self._ui_language, default="Текущий активный пресет"))
         self.direct_mode_caption.setText(tr_catalog("page.z2_control.direct_mode.caption", language=self._ui_language, default="Режим прямого запуска"))
-        self.advanced_desc.setText(tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете"))
+        if getattr(self, "advanced_notice", None) is not None:
+            self.advanced_notice.setText(
+                tr_catalog("page.z2_control.advanced.warning", language=self._ui_language, default="⚠ Изменяйте только если знаете что делаете")
+            )
         try:
             title_label = getattr(self.program_settings_card, "titleLabel", None)
             if title_label is not None:
@@ -1421,11 +1186,19 @@ class Zapret2DirectControlPage(BasePage):
                 title_label.setText(tr_catalog("page.z2_control.card.advanced", language=self._ui_language, default="ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"))
         except Exception:
             pass
-        self.blobs_title_label.setText(tr_catalog("page.z2_control.blobs.title", language=self._ui_language, default="Блобы"))
-        self.blobs_desc_label.setText(tr_catalog("page.z2_control.blobs.desc", language=self._ui_language, default="Бинарные данные (.bin / hex) для стратегий"))
+        if getattr(self, "blobs_action_card", None) is not None:
+            self.blobs_action_card.setTitle(
+                tr_catalog("page.z2_control.blobs.title", language=self._ui_language, default="Блобы")
+            )
+            self.blobs_action_card.setContent(
+                tr_catalog("page.z2_control.blobs.desc", language=self._ui_language, default="Бинарные данные (.bin / hex) для стратегий")
+            )
+            self.blobs_open_btn.setText(
+                tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть")
+            )
 
         self._update_stop_winws_button_text()
-        self._refresh_direct_mode_label()
+        self._sync_direct_launch_mode_from_settings()
         try:
             self.discord_restart_toggle.set_texts(
                 tr_catalog("page.dpi_settings.discord_restart.title", language=self._ui_language, default="Перезапуск Discord"),

@@ -27,6 +27,7 @@ from ui.compat_widgets import (
     SettingsCard,
     ActionButton,
     PrimaryActionButton,
+    QuickActionsBar,
     ResetActionButton,
     StatusIndicator,
     enable_setting_card_group_auto_height,
@@ -68,7 +69,7 @@ class StopButton(ActionButton):
     """Кнопка остановки (нейтральная, не акцентная)"""
 
     def __init__(self, text: str, icon_name: str = None, accent: bool = False, parent=None):
-        super().__init__(text, icon_name, accent=False, parent=parent)
+        super().__init__(text, icon_name, parent=parent)
 
 
 class ControlPage(BasePage):
@@ -376,28 +377,27 @@ class ControlPage(BasePage):
         self.folder_btn.clicked.connect(self._open_folder)
 
         self.additional_section_label = None
-        self.extra_actions_group = SettingCardGroup(
-            tr_catalog("page.control.section.additional", language=self._ui_language, default="Дополнительные действия"),
-            self.content,
+        self.additional_section_label = StrongBodyLabel(
+            tr_catalog("page.control.section.additional", language=self._ui_language, default="Дополнительные действия")
         )
-        self.test_action_card = PushSettingCard(
-            tr_catalog("page.control.button.connection_test", language=self._ui_language, default="Тест соединения"),
-            qta.icon("fa5s.wifi", color="#60cdff"),
-            tr_catalog("page.control.button.connection_test", language=self._ui_language, default="Тест соединения"),
-            tr_catalog("page.control.section.additional.test_desc", language=self._ui_language, default="Проверить сетевое подключение и доступность маршрута"),
-        )
-        self.test_action_card.clicked.connect(self._open_connection_test)
+        self.add_widget(self.additional_section_label)
 
-        self.folder_action_card = PushSettingCard(
-            tr_catalog("page.control.button.open_folder", language=self._ui_language, default="Открыть папку"),
-            qta.icon("fa5s.folder-open", color="#ffc107"),
-            tr_catalog("page.control.button.open_folder", language=self._ui_language, default="Открыть папку"),
-            tr_catalog("page.control.section.additional.folder_desc", language=self._ui_language, default="Быстро перейти к рабочей папке программы"),
+        self.extra_actions_group = QuickActionsBar(self.content)
+        self.test_btn.setToolTip(
+            tr_catalog(
+                "page.control.section.additional.test_desc",
+                language=self._ui_language,
+                default="Проверить сетевое подключение и доступность маршрута",
+            )
         )
-        self.folder_action_card.clicked.connect(self._open_folder)
-
-        self.extra_actions_group.addSettingCards([self.test_action_card, self.folder_action_card])
-        enable_setting_card_group_auto_height(self.extra_actions_group)
+        self.folder_btn.setToolTip(
+            tr_catalog(
+                "page.control.section.additional.folder_desc",
+                language=self._ui_language,
+                default="Быстро перейти к рабочей папке программы",
+            )
+        )
+        self.extra_actions_group.add_buttons([self.test_btn, self.folder_btn])
         self.add_widget(self.extra_actions_group)
 
     def on_page_activated(self, first_show: bool) -> None:
@@ -641,11 +641,16 @@ class ControlPage(BasePage):
         )
         self.test_btn.setText(tr_catalog("page.control.button.connection_test", language=self._ui_language, default="Тест соединения"))
         self.folder_btn.setText(tr_catalog("page.control.button.open_folder", language=self._ui_language, default="Открыть папку"))
-        extra_group_title = getattr(getattr(self, "extra_actions_group", None), "titleLabel", None)
-        if extra_group_title is not None:
-            extra_group_title.setText(
+        if self.additional_section_label is not None:
+            self.additional_section_label.setText(
                 tr_catalog("page.control.section.additional", language=self._ui_language, default="Дополнительные действия")
             )
+        self.test_btn.setToolTip(
+            tr_catalog("page.control.section.additional.test_desc", language=self._ui_language, default="Проверить сетевое подключение и доступность маршрута")
+        )
+        self.folder_btn.setToolTip(
+            tr_catalog("page.control.section.additional.folder_desc", language=self._ui_language, default="Быстро перейти к рабочей папке программы")
+        )
         title_label = getattr(getattr(self, "program_settings_card", None), "titleLabel", None)
         if title_label is not None:
             title_label.setText(
@@ -690,32 +695,6 @@ class ControlPage(BasePage):
                 self._reset_program_desc_label.setText(
                     tr_catalog("page.control.setting.reset.desc", language=self._ui_language, default="Очистить кэш проверок запуска (без удаления пресетов/настроек)")
                 )
-        if getattr(self, "test_action_card", None) is not None:
-            try:
-                self.test_action_card.setTitle(
-                    tr_catalog("page.control.button.connection_test", language=self._ui_language, default="Тест соединения")
-                )
-                self.test_action_card.setContent(
-                    tr_catalog("page.control.section.additional.test_desc", language=self._ui_language, default="Проверить сетевое подключение и доступность маршрута")
-                )
-                self.test_action_card.button.setText(
-                    tr_catalog("page.control.button.connection_test", language=self._ui_language, default="Тест соединения")
-                )
-            except Exception:
-                pass
-        if getattr(self, "folder_action_card", None) is not None:
-            try:
-                self.folder_action_card.setTitle(
-                    tr_catalog("page.control.button.open_folder", language=self._ui_language, default="Открыть папку")
-                )
-                self.folder_action_card.setContent(
-                    tr_catalog("page.control.section.additional.folder_desc", language=self._ui_language, default="Быстро перейти к рабочей папке программы")
-                )
-                self.folder_action_card.button.setText(
-                    tr_catalog("page.control.button.open_folder", language=self._ui_language, default="Открыть папку")
-                )
-            except Exception:
-                pass
         self._update_stop_winws_button_text()
         phase, last_error = self._get_current_dpi_runtime_state()
         self.update_status(phase, last_error)

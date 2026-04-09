@@ -12,7 +12,6 @@ try:
         LineEdit, MessageBox, InfoBar,
         PushButton, PrimaryPushButton,
         BodyLabel, CaptionLabel, StrongBodyLabel, SubtitleLabel,
-        SettingCardGroup, PushSettingCard, PrimaryPushSettingCard,
     )
     _HAS_FLUENT = True
 except ImportError:
@@ -24,9 +23,6 @@ except ImportError:
     PrimaryPushButton = QPushButton  # type: ignore[assignment]
     MessageBox = None
     InfoBar = None
-    SettingCardGroup = None  # type: ignore[assignment]
-    PushSettingCard = None  # type: ignore[assignment]
-    PrimaryPushSettingCard = None  # type: ignore[assignment]
     _HAS_FLUENT = False
 
 import webbrowser
@@ -34,7 +30,7 @@ import webbrowser
 from donater.premium_page_controller import PremiumPageController
 from donater.premium_worker import PremiumWorkerThread
 from .base_page import BasePage
-from ui.compat_widgets import SettingsCard, RefreshButton
+from ui.compat_widgets import SettingsCard, RefreshButton, QuickActionsBar
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.theme_semantic import get_semantic_palette
 from ui.text_catalog import tr as tr_catalog
@@ -156,11 +152,7 @@ class PremiumPage(BasePage):
         self._pairing_status_timer = QTimer(self)
         self._pairing_status_timer.setInterval(self._PAIRING_AUTOPOLL_INTERVAL_MS)
         self._pairing_status_timer.timeout.connect(self._poll_pairing_status)
-        self._actions_group = None
-        self._refresh_action_card = None
-        self._change_key_action_card = None
-        self._test_action_card = None
-        self._extend_action_card = None
+        self._actions_bar = None
 
         self.enable_deferred_ui_build()
         self._initialized = False
@@ -535,61 +527,55 @@ class PremiumPage(BasePage):
         # ─── Действия ────────────────────────────────────────────────────────
         self.add_section_title(text_key="page.premium.section.actions")
 
-        self._actions_group = SettingCardGroup(
-            self._tr("page.premium.section.actions", "Действия"),
-            self.content,
-        )
-
         self.refresh_btn = RefreshButton(self._tr("page.premium.button.refresh_status", "Обновить статус"))
         self.refresh_btn.clicked.connect(self._check_status)
-        self._refresh_action_card = SettingsCard()
-        refresh_layout = QHBoxLayout()
-        refresh_layout.setContentsMargins(10, 6, 12, 6)
-        refresh_layout.addWidget(self.refresh_btn)
-        refresh_layout.addStretch()
-        self._refresh_action_card.add_layout(refresh_layout)
-        self._actions_group.addSettingCard(self._refresh_action_card)
+        self.refresh_btn.setToolTip(
+            self._tr(
+                "page.premium.action.refresh_status.description",
+                "Повторно запросить Premium-статус и обновить данные устройства.",
+            )
+        )
 
-        self._change_key_action_card = PushSettingCard(
-            self._tr("page.premium.button.reset_activation", "Сбросить активацию"),
-            qta.icon("fa5s.exchange-alt", color="#ff9800"),
-            self._tr("page.premium.button.reset_activation", "Сбросить активацию"),
+        self._actions_bar = QuickActionsBar(self.content)
+        self._actions_bar.add_button(self.refresh_btn)
+
+        self.change_key_btn = PushButton()
+        self.change_key_btn.setText(self._tr("page.premium.button.reset_activation", "Сбросить активацию"))
+        self.change_key_btn.setIcon(qta.icon("fa5s.exchange-alt", color="#ff9800"))
+        self.change_key_btn.setToolTip(
             self._tr(
                 "page.premium.action.reset_activation.description",
                 "Удалить токен устройства, офлайн-кэш и код привязки на этом компьютере.",
-            ),
+            )
         )
-        self.change_key_btn = self._change_key_action_card.button
         self.change_key_btn.clicked.connect(self._change_key)
-        self._actions_group.addSettingCard(self._change_key_action_card)
+        self._actions_bar.add_button(self.change_key_btn)
 
-        self._test_action_card = PushSettingCard(
-            self._tr("page.premium.button.test_connection", "Проверить соединение"),
-            qta.icon("fa5s.plug", color="#60cdff"),
-            self._tr("page.premium.button.test_connection", "Проверить соединение"),
+        self.test_btn = PushButton()
+        self.test_btn.setText(self._tr("page.premium.button.test_connection", "Проверить соединение"))
+        self.test_btn.setIcon(qta.icon("fa5s.plug", color="#60cdff"))
+        self.test_btn.setToolTip(
             self._tr(
                 "page.premium.action.test_connection.description",
                 "Проверить доступность Premium backend и соединение с сервером.",
-            ),
+            )
         )
-        self.test_btn = self._test_action_card.button
         self.test_btn.clicked.connect(self._test_connection)
-        self._actions_group.addSettingCard(self._test_action_card)
+        self._actions_bar.add_button(self.test_btn)
 
-        self._extend_action_card = PrimaryPushSettingCard(
-            self._tr("page.premium.button.extend", "Продлить подписку"),
-            qta.icon("fa5b.telegram", color="#229ED9"),
-            self._tr("page.premium.button.extend", "Продлить подписку"),
+        self.extend_btn = PrimaryPushButton()
+        self.extend_btn.setText(self._tr("page.premium.button.extend", "Продлить подписку"))
+        self.extend_btn.setIcon(qta.icon("fa5b.telegram", color="#229ED9"))
+        self.extend_btn.setToolTip(
             self._tr(
                 "page.premium.action.extend.description",
                 "Открыть Telegram-бота для продления подписки или покупки Premium.",
-            ),
+            )
         )
-        self.extend_btn = self._extend_action_card.button
         self.extend_btn.clicked.connect(self._open_extend_bot)
-        self._actions_group.addSettingCard(self._extend_action_card)
+        self._actions_bar.add_button(self.extend_btn)
 
-        self.add_widget(self._actions_group)
+        self.add_widget(self._actions_bar)
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -608,45 +594,38 @@ class PremiumPage(BasePage):
             self.activate_btn.setText(self._tr("page.premium.button.create_code", "Создать код"))
 
         self.open_bot_btn.setText(self._tr("page.premium.button.open_bot", "Открыть бота"))
-        try:
-            title_label = getattr(getattr(self, "_actions_group", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(self._tr("page.premium.section.actions", "Действия"))
-        except Exception:
-            pass
         self.refresh_btn.setText(self._tr("page.premium.button.refresh_status", "Обновить статус"))
         self.change_key_btn.setText(self._tr("page.premium.button.reset_activation", "Сбросить активацию"))
         self.extend_btn.setText(self._tr("page.premium.button.extend", "Продлить подписку"))
+        self.refresh_btn.setToolTip(
+            self._tr(
+                "page.premium.action.refresh_status.description",
+                "Повторно запросить Premium-статус и обновить данные устройства.",
+            )
+        )
+        self.change_key_btn.setToolTip(
+            self._tr(
+                "page.premium.action.reset_activation.description",
+                "Удалить токен устройства, офлайн-кэш и код привязки на этом компьютере.",
+            )
+        )
+        self.extend_btn.setToolTip(
+            self._tr(
+                "page.premium.action.extend.description",
+                "Открыть Telegram-бота для продления подписки или покупки Premium.",
+            )
+        )
 
         if self._connection_test_in_progress:
             self.test_btn.setText(self._tr("page.premium.button.test_connection.loading", "Проверка..."))
         else:
             self.test_btn.setText(self._tr("page.premium.button.test_connection", "Проверить соединение"))
-
-        if self._change_key_action_card is not None:
-            self._change_key_action_card.setTitle(self._tr("page.premium.button.reset_activation", "Сбросить активацию"))
-            self._change_key_action_card.setContent(
-                self._tr(
-                    "page.premium.action.reset_activation.description",
-                    "Удалить токен устройства, офлайн-кэш и код привязки на этом компьютере.",
-                )
+        self.test_btn.setToolTip(
+            self._tr(
+                "page.premium.action.test_connection.description",
+                "Проверить доступность Premium backend и соединение с сервером.",
             )
-        if self._test_action_card is not None:
-            self._test_action_card.setTitle(self._tr("page.premium.button.test_connection", "Проверить соединение"))
-            self._test_action_card.setContent(
-                self._tr(
-                    "page.premium.action.test_connection.description",
-                    "Проверить доступность Premium backend и соединение с сервером.",
-                )
-            )
-        if self._extend_action_card is not None:
-            self._extend_action_card.setTitle(self._tr("page.premium.button.extend", "Продлить подписку"))
-            self._extend_action_card.setContent(
-                self._tr(
-                    "page.premium.action.extend.description",
-                    "Открыть Telegram-бота для продления подписки или покупки Premium.",
-                )
-            )
+        )
 
         self._update_device_info()
         self._render_server_status()
@@ -992,8 +971,6 @@ class PremiumPage(BasePage):
         self._connection_test_in_progress = plan.connection_in_progress
         self.test_btn.setEnabled(plan.test_enabled)
         self.test_btn.setText(self._tr(plan.test_text_key, plan.test_text_default))
-        if self._test_action_card is not None:
-            self._test_action_card.setEnabled(plan.test_enabled)
         self._server_status_mode = plan.server_status_plan.mode
         self._server_status_message = plan.server_status_plan.message
         self._server_status_success = plan.server_status_plan.success
@@ -1011,8 +988,6 @@ class PremiumPage(BasePage):
         self._connection_test_in_progress = plan.connection_in_progress
         self.test_btn.setEnabled(plan.test_enabled)
         self.test_btn.setText(self._tr(plan.test_text_key, plan.test_text_default))
-        if self._test_action_card is not None:
-            self._test_action_card.setEnabled(plan.test_enabled)
         self._server_status_mode = plan.server_status_plan.mode
         self._server_status_message = plan.server_status_plan.message
         self._server_status_success = plan.server_status_plan.success
@@ -1023,8 +998,6 @@ class PremiumPage(BasePage):
         self._connection_test_in_progress = plan.connection_in_progress
         self.test_btn.setEnabled(plan.test_enabled)
         self.test_btn.setText(self._tr(plan.test_text_key, plan.test_text_default))
-        if self._test_action_card is not None:
-            self._test_action_card.setEnabled(plan.test_enabled)
         self._server_status_mode = plan.server_status_plan.mode
         self._server_status_message = plan.server_status_plan.message
         self._server_status_success = plan.server_status_plan.success

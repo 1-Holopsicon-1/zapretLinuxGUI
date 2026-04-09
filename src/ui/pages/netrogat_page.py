@@ -11,15 +11,13 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 try:
-    from qfluentwidgets import LineEdit, MessageBox, InfoBar, SettingCardGroup, PushSettingCard, PrimaryPushSettingCard
+    from qfluentwidgets import LineEdit, MessageBox, InfoBar, SettingCardGroup
     _HAS_FLUENT = True
 except ImportError:
     LineEdit = QLineEdit
     MessageBox = None
     InfoBar = None
     SettingCardGroup = None  # type: ignore[assignment]
-    PushSettingCard = None  # type: ignore[assignment]
-    PrimaryPushSettingCard = None  # type: ignore[assignment]
     _HAS_FLUENT = False
 
 try:
@@ -31,7 +29,14 @@ except ImportError:
 
 from .base_page import BasePage, ScrollBlockingPlainTextEdit
 from core.hostlist_page_controller import HostlistPageController
-from ui.compat_widgets import SettingsCard, ActionButton
+from ui.compat_widgets import (
+    SettingsCard,
+    ActionButton,
+    PrimaryActionButton,
+    QuickActionsBar,
+    insert_widget_into_setting_card_group,
+    set_tooltip,
+)
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from log import log
@@ -55,16 +60,13 @@ class NetrogatPage(BasePage):
         self._add_card = None
         self._actions_card = None
         self._actions_group = None
+        self._actions_bar = None
         self._editor_card = None
         self._hint_label = None
         self._add_defaults_btn = None
         self._open_btn = None
         self._open_final_btn = None
         self._clear_btn = None
-        self._add_defaults_card = None
-        self._open_file_card = None
-        self._open_final_card = None
-        self._clear_all_card = None
         self._status_state = {
             "total": 0,
             "base": 0,
@@ -126,7 +128,7 @@ class NetrogatPage(BasePage):
         self.input.returnPressed.connect(self._add)
         add_layout.addWidget(self.input, 1)
 
-        self.add_btn = ActionButton(self._tr("page.netrogat.button.add", "Добавить"), "fa5s.plus", accent=True)
+        self.add_btn = PrimaryActionButton(self._tr("page.netrogat.button.add", "Добавить"), "fa5s.plus")
         self.add_btn.setFixedHeight(38)
         self.add_btn.clicked.connect(self._add)
         add_layout.addWidget(self.add_btn)
@@ -146,54 +148,67 @@ class NetrogatPage(BasePage):
         )
         self._actions_group = actions_group
 
-        card_cls = PrimaryPushSettingCard if PrimaryPushSettingCard is not None else PushSettingCard
-        self._add_defaults_card = card_cls(
+        self._actions_bar = QuickActionsBar(self.content)
+
+        self._add_defaults_btn = PrimaryActionButton(
             self._tr("page.netrogat.button.add_missing", "Добавить недостающие"),
-            qta.icon("fa5s.plus-circle", color=tokens.accent_hex),
-            self._tr("page.netrogat.button.add_missing", "Добавить недостающие"),
+            "fa5s.plus-circle",
+        )
+        self._add_defaults_btn.clicked.connect(self._add_missing_defaults)
+        set_tooltip(
+            self._add_defaults_btn,
             self._tr(
                 "page.netrogat.action.add_missing.description",
                 "Восстановить недостающие домены по умолчанию в системной базе netrogat.",
             ),
         )
-        self._add_defaults_card.clicked.connect(self._add_missing_defaults)
-        actions_group.addSettingCard(self._add_defaults_card)
 
-        self._open_file_card = PushSettingCard(
+        self._open_btn = ActionButton(
             self._tr("page.netrogat.button.open_file", "Открыть файл"),
-            qta.icon("fa5s.external-link-alt", color=tokens.accent_hex),
-            self._tr("page.netrogat.button.open_file", "Открыть файл"),
+            "fa5s.external-link-alt",
+        )
+        self._open_btn.clicked.connect(self._open_file)
+        set_tooltip(
+            self._open_btn,
             self._tr(
                 "page.netrogat.action.open_file.description",
                 "Сохраняет изменения и открывает netrogat.user.txt в проводнике.",
             ),
         )
-        self._open_file_card.clicked.connect(self._open_file)
-        actions_group.addSettingCard(self._open_file_card)
 
-        self._open_final_card = PushSettingCard(
+        self._open_final_btn = ActionButton(
             self._tr("page.netrogat.button.open_final", "Открыть итоговый"),
-            qta.icon("fa5s.file-alt", color="#4CAF50"),
-            self._tr("page.netrogat.button.open_final", "Открыть итоговый"),
+            "fa5s.file-alt",
+        )
+        self._open_final_btn.clicked.connect(self._open_final_file)
+        set_tooltip(
+            self._open_final_btn,
             self._tr(
                 "page.netrogat.action.open_final.description",
                 "Сохраняет изменения и открывает собранный итоговый файл netrogat.txt.",
             ),
         )
-        self._open_final_card.clicked.connect(self._open_final_file)
-        actions_group.addSettingCard(self._open_final_card)
 
-        self._clear_all_card = PushSettingCard(
+        self._clear_btn = ActionButton(
             self._tr("page.netrogat.button.clear_all", "Очистить всё"),
-            qta.icon("fa5s.trash-alt", color="#ff9800"),
-            self._tr("page.netrogat.button.clear_all", "Очистить всё"),
+            "fa5s.trash-alt",
+        )
+        self._clear_btn.clicked.connect(self._clear_all)
+        set_tooltip(
+            self._clear_btn,
             self._tr(
                 "page.netrogat.action.clear_all.description",
                 "Удаляет все пользовательские домены из netrogat.user.txt.",
             ),
         )
-        self._clear_all_card.clicked.connect(self._clear_all)
-        actions_group.addSettingCard(self._clear_all_card)
+
+        self._actions_bar.add_buttons([
+            self._add_defaults_btn,
+            self._open_btn,
+            self._open_final_btn,
+            self._clear_btn,
+        ])
+        insert_widget_into_setting_card_group(actions_group, 1, self._actions_bar)
         self.layout.addWidget(actions_group)
 
         # Текстовый редактор (вместо списка)
@@ -303,48 +318,40 @@ class NetrogatPage(BasePage):
         self.add_btn.setText(self._tr("page.netrogat.button.add", "Добавить"))
         if self._add_defaults_btn is not None:
             self._add_defaults_btn.setText(self._tr("page.netrogat.button.add_missing", "Добавить недостающие"))
-        if self._add_defaults_card is not None:
-            self._add_defaults_card.setTitle(self._tr("page.netrogat.button.add_missing", "Добавить недостающие"))
-            self._add_defaults_card.setContent(
+            set_tooltip(
+                self._add_defaults_btn,
                 self._tr(
                     "page.netrogat.action.add_missing.description",
                     "Восстановить недостающие домены по умолчанию в системной базе netrogat.",
                 )
             )
-            self._add_defaults_card.button.setText(self._tr("page.netrogat.button.add_missing", "Добавить недостающие"))
         if self._open_btn is not None:
             self._open_btn.setText(self._tr("page.netrogat.button.open_file", "Открыть файл"))
-        if self._open_file_card is not None:
-            self._open_file_card.setTitle(self._tr("page.netrogat.button.open_file", "Открыть файл"))
-            self._open_file_card.setContent(
+            set_tooltip(
+                self._open_btn,
                 self._tr(
                     "page.netrogat.action.open_file.description",
                     "Сохраняет изменения и открывает netrogat.user.txt в проводнике.",
                 )
             )
-            self._open_file_card.button.setText(self._tr("page.netrogat.button.open_file", "Открыть файл"))
         if self._open_final_btn is not None:
             self._open_final_btn.setText(self._tr("page.netrogat.button.open_final", "Открыть итоговый"))
-        if self._open_final_card is not None:
-            self._open_final_card.setTitle(self._tr("page.netrogat.button.open_final", "Открыть итоговый"))
-            self._open_final_card.setContent(
+            set_tooltip(
+                self._open_final_btn,
                 self._tr(
                     "page.netrogat.action.open_final.description",
                     "Сохраняет изменения и открывает собранный итоговый файл netrogat.txt.",
                 )
             )
-            self._open_final_card.button.setText(self._tr("page.netrogat.button.open_final", "Открыть итоговый"))
         if self._clear_btn is not None:
             self._clear_btn.setText(self._tr("page.netrogat.button.clear_all", "Очистить всё"))
-        if self._clear_all_card is not None:
-            self._clear_all_card.setTitle(self._tr("page.netrogat.button.clear_all", "Очистить всё"))
-            self._clear_all_card.setContent(
+            set_tooltip(
+                self._clear_btn,
                 self._tr(
                     "page.netrogat.action.clear_all.description",
                     "Удаляет все пользовательские домены из netrogat.user.txt.",
                 )
             )
-            self._clear_all_card.button.setText(self._tr("page.netrogat.button.clear_all", "Очистить всё"))
 
         self.text_edit.setPlaceholderText(
             self._tr(

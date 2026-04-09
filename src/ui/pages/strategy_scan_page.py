@@ -17,6 +17,7 @@ import qtawesome as qta
 from blockcheck.strategy_scan_page_controller import StrategyScanPageController
 from blockcheck.strategy_scan_worker import StrategyScanWorker
 from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
+from ui.compat_widgets import QuickActionsBar
 from ui.popup_menu import exec_popup_menu
 from ui.text_catalog import tr as tr_catalog
 
@@ -25,15 +26,11 @@ try:
         ComboBox, CaptionLabel, BodyLabel,
         ProgressBar,
         TableWidget, PushButton, LineEdit, RoundMenu,
-        SettingCardGroup, PushSettingCard, PrimaryPushSettingCard,
     )
     HAS_FLUENT = True
 except ImportError:
     HAS_FLUENT = False
     RoundMenu = None
-    SettingCardGroup = None  # type: ignore[assignment]
-    PushSettingCard = None  # type: ignore[assignment]
-    PrimaryPushSettingCard = None  # type: ignore[assignment]
     from PyQt6.QtWidgets import (
         QComboBox as ComboBox,
         QTableWidget as TableWidget,
@@ -84,9 +81,8 @@ class StrategyScanPage(BasePage):
         self._games_scope_label: QLabel | None = None
         self._games_scope_combo = None
         self._udp_scope_hint_label: QLabel | None = None
-        self._actions_group = None
-        self._start_action_card = None
-        self._stop_action_card = None
+        self._actions_title_label = None
+        self._actions_bar = None
         self._prepare_support_btn = None
         self._support_status_label = None
 
@@ -250,63 +246,39 @@ class StrategyScanPage(BasePage):
 
         self.add_widget(self._control_card)
 
-        if SettingCardGroup is not None and PushSettingCard is not None and PrimaryPushSettingCard is not None and HAS_FLUENT:
-            actions_group = SettingCardGroup(
-                tr_catalog("page.strategy_scan.actions.title", default="Действия"),
-                self.content,
+        self._actions_title_label = BodyLabel(
+            tr_catalog("page.strategy_scan.actions.title", default="Действия")
+        )
+        self.add_widget(self._actions_title_label)
+
+        self._actions_bar = QuickActionsBar(self.content)
+
+        self._start_btn = PushButton()
+        self._start_btn.setText(tr_catalog("page.strategy_scan.start", default="Начать сканирование"))
+        self._start_btn.setIcon(qta.icon("fa5s.search", color="#4CAF50"))
+        self._start_btn.setToolTip(
+            tr_catalog(
+                "page.strategy_scan.action.start.description",
+                default="Запустить автоматический перебор стратегий обхода DPI для выбранной цели.",
             )
-            self._actions_group = actions_group
+        )
+        self._start_btn.clicked.connect(self._on_start)
+        self._actions_bar.add_button(self._start_btn)
 
-            self._start_action_card = PrimaryPushSettingCard(
-                tr_catalog("page.strategy_scan.start", default="Начать сканирование"),
-                qta.icon("fa5s.search", color="#4CAF50"),
-                tr_catalog("page.strategy_scan.start", default="Начать сканирование"),
-                tr_catalog(
-                    "page.strategy_scan.action.start.description",
-                    default="Запустить автоматический перебор стратегий обхода DPI для выбранной цели.",
-                ),
+        self._stop_btn = PushButton()
+        self._stop_btn.setText(tr_catalog("page.strategy_scan.stop", default="Остановить"))
+        self._stop_btn.setIcon(qta.icon("fa5s.stop", color="#ff9800"))
+        self._stop_btn.setToolTip(
+            tr_catalog(
+                "page.strategy_scan.action.stop.description",
+                default="Остановить текущее сканирование стратегий и вернуть страницу в обычный режим.",
             )
-            self._start_action_card.clicked.connect(self._on_start)
-            self._start_btn = self._start_action_card.button
-            actions_group.addSettingCard(self._start_action_card)
+        )
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._on_stop)
+        self._actions_bar.add_button(self._stop_btn)
 
-            self._stop_action_card = PushSettingCard(
-                tr_catalog("page.strategy_scan.stop", default="Остановить"),
-                qta.icon("fa5s.stop", color="#ff9800"),
-                tr_catalog("page.strategy_scan.stop", default="Остановить"),
-                tr_catalog(
-                    "page.strategy_scan.action.stop.description",
-                    default="Остановить текущее сканирование стратегий и вернуть страницу в обычный режим.",
-                ),
-            )
-            self._stop_action_card.clicked.connect(self._on_stop)
-            self._stop_btn = self._stop_action_card.button
-            self._stop_action_card.setEnabled(False)
-            actions_group.addSettingCard(self._stop_action_card)
-
-            self.add_widget(actions_group)
-        else:
-            # Row 2: buttons
-            btn_row = QHBoxLayout()
-            btn_row.setSpacing(12)
-
-            self._start_btn = PrimaryActionButton(
-                tr_catalog("page.strategy_scan.start", default="Начать сканирование"),
-                icon_name="fa5s.search",
-            )
-            self._start_btn.clicked.connect(self._on_start)
-            btn_row.addWidget(self._start_btn)
-
-            self._stop_btn = ActionButton(
-                tr_catalog("page.strategy_scan.stop", default="Остановить"),
-                icon_name="fa5s.stop",
-            )
-            self._stop_btn.setEnabled(False)
-            self._stop_btn.clicked.connect(self._on_stop)
-            btn_row.addWidget(self._stop_btn)
-
-            btn_row.addStretch()
-            self._control_card.add_layout(btn_row)
+        self.add_widget(self._actions_bar)
 
         # ── Warning Card ──
         self._warning_card = SettingsCard(
@@ -547,28 +519,20 @@ class StrategyScanPage(BasePage):
         self._warning_card.set_title(plan.warning_title)
         self._start_btn.setText(plan.start_text)
         self._stop_btn.setText(plan.stop_text)
-        try:
-            title_label = getattr(getattr(self, "_actions_group", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(tr_catalog("page.strategy_scan.actions.title", default="Действия"))
-        except Exception:
-            pass
-        if self._start_action_card is not None:
-            self._start_action_card.setTitle(plan.start_text)
-            self._start_action_card.setContent(
-                tr_catalog(
-                    "page.strategy_scan.action.start.description",
-                    default="Запустить автоматический перебор стратегий обхода DPI для выбранной цели.",
-                )
+        if self._actions_title_label is not None:
+            self._actions_title_label.setText(tr_catalog("page.strategy_scan.actions.title", default="Действия"))
+        self._start_btn.setToolTip(
+            tr_catalog(
+                "page.strategy_scan.action.start.description",
+                default="Запустить автоматический перебор стратегий обхода DPI для выбранной цели.",
             )
-        if self._stop_action_card is not None:
-            self._stop_action_card.setTitle(plan.stop_text)
-            self._stop_action_card.setContent(
-                tr_catalog(
-                    "page.strategy_scan.action.stop.description",
-                    default="Остановить текущее сканирование стратегий и вернуть страницу в обычный режим.",
-                )
+        )
+        self._stop_btn.setToolTip(
+            tr_catalog(
+                "page.strategy_scan.action.stop.description",
+                default="Остановить текущее сканирование стратегий и вернуть страницу в обычный режим.",
             )
+        )
         if self._prepare_support_btn is not None:
             self._prepare_support_btn.setText(plan.prepare_support_text)
         self._protocol_combo.setItemText(0, plan.protocol_items[0])
@@ -877,10 +841,6 @@ class StrategyScanPage(BasePage):
     def _apply_interaction_plan(self, plan) -> None:
         self._start_btn.setEnabled(plan.start_enabled)
         self._stop_btn.setEnabled(plan.stop_enabled)
-        if self._start_action_card is not None:
-            self._start_action_card.setEnabled(plan.start_enabled)
-        if self._stop_action_card is not None:
-            self._stop_action_card.setEnabled(plan.stop_enabled)
         self._protocol_combo.setEnabled(plan.protocol_enabled)
         if self._games_scope_combo is not None:
             self._games_scope_combo.setEnabled(plan.games_scope_enabled)

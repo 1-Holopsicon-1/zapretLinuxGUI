@@ -12,7 +12,7 @@ import qtawesome as qta
 
 from hosts.page_controller import HostsPageController
 from .base_page import BasePage
-from ui.compat_widgets import SettingsCard
+from ui.compat_widgets import SettingsCard, SemanticNotice
 from ui.text_catalog import tr as tr_catalog
 
 from log import log
@@ -719,35 +719,14 @@ class HostsPage(BasePage):
 
     def _build_browser_warning(self):
         """Предупреждение о необходимости перезапуска браузера"""
-        semantic = get_semantic_palette()
-        warning_layout = QHBoxLayout()
-        warning_layout.setContentsMargins(12, 4, 12, 4)
-        warning_layout.setSpacing(10)
-
-        # Иконка предупреждения (QLabel с pixmap — оставляем)
-        icon_label = QLabel()
-        icon_label.setPixmap(qta.icon('fa5s.sync-alt', color=semantic.warning).pixmap(16, 16))
-        warning_layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignVCenter)
-
-        # Текст предупреждения
-        self._browser_warning_label = CaptionLabel(
+        self._browser_warning_label = SemanticNotice(
             self._tr(
                 "page.hosts.warning.browser_restart",
                 "После добавления или удаления доменов необходимо перезапустить браузер, чтобы изменения вступили в силу.",
-            )
+            ),
+            tone="warning",
         )
-        self._browser_warning_label.setWordWrap(True)
-        self._browser_warning_label.setStyleSheet(
-            f"color: {semantic.warning_soft}; font-size: 11px; background: transparent;"
-        )
-        warning_layout.addWidget(self._browser_warning_label, 1)
-
-        # Простой контейнер без фона
-        warning_widget = QWidget()
-        warning_widget.setLayout(warning_layout)
-        warning_widget.setStyleSheet("background: transparent;")
-
-        self.add_widget(warning_widget)
+        self.add_widget(self._browser_warning_label)
 
     def _build_status_section(self):
         status_card = SettingsCard()

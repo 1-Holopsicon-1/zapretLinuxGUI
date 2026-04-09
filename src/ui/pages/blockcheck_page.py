@@ -27,12 +27,9 @@ from qfluentwidgets import (
     PushButton,
     LineEdit,
     SegmentedWidget,
-    SettingCardGroup,
-    PushSettingCard,
-    PrimaryPushSettingCard,
 )
 
-from ui.compat_widgets import SettingsCard, InfoBarHelper, CheckBox
+from ui.compat_widgets import SettingsCard, InfoBarHelper, CheckBox, QuickActionsBar
 
 logger = logging.getLogger(__name__)
 
@@ -250,9 +247,8 @@ class BlockcheckPage(BasePage):
         self._tcp_section_label: QLabel | None = None
         self._tcp_table = None
         self._runtime_warnings_seen: set[str] = set()
-        self._actions_group = None
-        self._start_action_card = None
-        self._stop_action_card = None
+        self._actions_title_label = None
+        self._actions_bar = None
         self._prepare_support_btn = None
         self._support_status_label = None
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
@@ -351,39 +347,39 @@ class BlockcheckPage(BasePage):
         self._control_card.add_widget(self._status_label)
         self._add_tab_widget(self._control_card)
 
-        self._actions_group = SettingCardGroup(
-            tr_catalog("page.blockcheck.actions.title", default="Действия"),
-            self.content,
+        self._actions_title_label = StrongBodyLabel(
+            tr_catalog("page.blockcheck.actions.title", default="Действия")
         )
+        self._add_tab_widget(self._actions_title_label)
 
-        self._start_action_card = PrimaryPushSettingCard(
-            tr_catalog("page.blockcheck.start", default="Запустить"),
-            qta.icon("fa5s.play", color="#4CAF50"),
-            tr_catalog("page.blockcheck.start", default="Запустить"),
+        self._actions_bar = QuickActionsBar(self.content)
+
+        self._start_btn = PushButton()
+        self._start_btn.setText(tr_catalog("page.blockcheck.start", default="Запустить"))
+        self._start_btn.setIcon(qta.icon("fa5s.play", color="#4CAF50"))
+        self._start_btn.setToolTip(
             tr_catalog(
                 "page.blockcheck.action.start.description",
                 default="Запустить анализ блокировок и проверку DPI для выбранного режима.",
-            ),
+            )
         )
-        self._start_btn = self._start_action_card.button
         self._start_btn.clicked.connect(self._on_start)
-        self._actions_group.addSettingCard(self._start_action_card)
+        self._actions_bar.add_button(self._start_btn)
 
-        self._stop_action_card = PushSettingCard(
-            tr_catalog("page.blockcheck.stop", default="Остановить"),
-            qta.icon("fa5s.stop", color="#ff9800"),
-            tr_catalog("page.blockcheck.stop", default="Остановить"),
+        self._stop_btn = PushButton()
+        self._stop_btn.setText(tr_catalog("page.blockcheck.stop", default="Остановить"))
+        self._stop_btn.setIcon(qta.icon("fa5s.stop", color="#ff9800"))
+        self._stop_btn.setToolTip(
             tr_catalog(
                 "page.blockcheck.action.stop.description",
                 default="Остановить текущую проверку и вернуть страницу в обычный режим.",
-            ),
+            )
         )
-        self._stop_btn = self._stop_action_card.button
         self._stop_btn.clicked.connect(self._on_stop)
-        self._stop_action_card.setEnabled(False)
-        self._actions_group.addSettingCard(self._stop_action_card)
+        self._stop_btn.setEnabled(False)
+        self._actions_bar.add_button(self._stop_btn)
 
-        self._add_tab_widget(self._actions_group)
+        self._add_tab_widget(self._actions_bar)
 
         # ── Custom Domains Card ──
         self._domains_card = SettingsCard(
@@ -732,10 +728,6 @@ class BlockcheckPage(BasePage):
         # UI state
         self._start_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
-        if self._start_action_card is not None:
-            self._start_action_card.setEnabled(False)
-        if self._stop_action_card is not None:
-            self._stop_action_card.setEnabled(True)
         self._mode_combo.setEnabled(False)
         self._skip_failed_cb.setEnabled(False)
         self._progress_bar.setVisible(True)
@@ -769,8 +761,6 @@ class BlockcheckPage(BasePage):
         if self._worker:
             self._worker.stop()
         self._stop_btn.setEnabled(False)
-        if self._stop_action_card is not None:
-            self._stop_action_card.setEnabled(False)
         self._status_label.setText(
             tr_catalog("page.blockcheck.stopping", default="Остановка...")
         )
@@ -949,10 +939,6 @@ class BlockcheckPage(BasePage):
     def _reset_ui(self):
         self._start_btn.setEnabled(True)
         self._stop_btn.setEnabled(False)
-        if self._start_action_card is not None:
-            self._start_action_card.setEnabled(True)
-        if self._stop_action_card is not None:
-            self._stop_action_card.setEnabled(False)
         self._mode_combo.setEnabled(True)
         self._skip_failed_cb.setEnabled(True)
         self._progress_bar.setVisible(False)
@@ -1616,32 +1602,24 @@ class BlockcheckPage(BasePage):
 
             self._start_btn.setText(tr_catalog("page.blockcheck.start", language=language, default="Запустить"))
             self._stop_btn.setText(tr_catalog("page.blockcheck.stop", language=language, default="Остановить"))
-            try:
-                title_label = getattr(getattr(self, "_actions_group", None), "titleLabel", None)
-                if title_label is not None:
-                    title_label.setText(
-                        tr_catalog("page.blockcheck.actions.title", language=language, default="Действия")
-                    )
-            except Exception:
-                pass
-            if self._start_action_card is not None:
-                self._start_action_card.setTitle(tr_catalog("page.blockcheck.start", language=language, default="Запустить"))
-                self._start_action_card.setContent(
-                    tr_catalog(
-                        "page.blockcheck.action.start.description",
-                        language=language,
-                        default="Запустить анализ блокировок и проверку DPI для выбранного режима.",
-                    )
+            if self._actions_title_label is not None:
+                self._actions_title_label.setText(
+                    tr_catalog("page.blockcheck.actions.title", language=language, default="Действия")
                 )
-            if self._stop_action_card is not None:
-                self._stop_action_card.setTitle(tr_catalog("page.blockcheck.stop", language=language, default="Остановить"))
-                self._stop_action_card.setContent(
-                    tr_catalog(
-                        "page.blockcheck.action.stop.description",
-                        language=language,
-                        default="Остановить текущую проверку и вернуть страницу в обычный режим.",
-                    )
+            self._start_btn.setToolTip(
+                tr_catalog(
+                    "page.blockcheck.action.start.description",
+                    language=language,
+                    default="Запустить анализ блокировок и проверку DPI для выбранного режима.",
                 )
+            )
+            self._stop_btn.setToolTip(
+                tr_catalog(
+                    "page.blockcheck.action.stop.description",
+                    language=language,
+                    default="Остановить текущую проверку и вернуть страницу в обычный режим.",
+                )
+            )
             self._skip_failed_cb.setText(tr_catalog("page.blockcheck.skip_failed", language=language, default="Пропускать проблемные домены"))
             self._add_domain_btn.setText(tr_catalog("page.blockcheck.add_domain", language=language, default="Добавить"))
             self._domain_input.setPlaceholderText(tr_catalog("page.blockcheck.domain_placeholder", language=language, default="example.com"))

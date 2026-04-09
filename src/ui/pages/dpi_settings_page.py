@@ -7,9 +7,8 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
 from .base_page import BasePage
 from dpi.dpi_settings_page_controller import DpiSettingsPageController
 from ui.compat_widgets import (
+    build_advanced_settings_section,
     SettingsCard,
-    enable_setting_card_group_auto_height,
-    insert_widget_into_setting_card_group,
 )
 from ui.text_catalog import tr as tr_catalog
 from ui.theme import get_theme_tokens
@@ -48,7 +47,7 @@ class DpiSettingsPage(BasePage):
         self._method_desc_label = None
         self._zapret1_header = None
         self._orchestra_label = None
-        self._advanced_desc_label = None
+        self._advanced_notice = None
         self._controller = DpiSettingsPageController()
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
@@ -67,31 +66,6 @@ class DpiSettingsPage(BasePage):
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
         theme_tokens = tokens or get_theme_tokens()
-        try:
-            if hasattr(self, "zapret2_header") and self.zapret2_header is not None:
-                self.zapret2_header.setStyleSheet(
-                    f"color: {theme_tokens.accent_hex};"
-                )
-        except Exception:
-            pass
-
-        try:
-            if self._zapret1_header is not None:
-                self._zapret1_header.setStyleSheet("color: #ff9800;")
-        except Exception:
-            pass
-
-        try:
-            if self._orchestra_label is not None:
-                self._orchestra_label.setStyleSheet("color: #9c27b0;")
-        except Exception:
-            pass
-
-        try:
-            if self._advanced_desc_label is not None:
-                self._advanced_desc_label.setStyleSheet("color: #ff9800;")
-        except Exception:
-            pass
 
         try:
             if hasattr(self, "separator2") and self.separator2 is not None:
@@ -291,47 +265,22 @@ class DpiSettingsPage(BasePage):
         # ═══════════════════════════════════════════════════════════════════════
         # ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ
         # ═══════════════════════════════════════════════════════════════════════
-        advanced_desc = _CaptionLabel(
-            self._tr("page.dpi_settings.advanced.warning", "⚠ Изменяйте только если знаете что делаете")
-        )
-        self._advanced_desc_label = advanced_desc
-        advanced_desc.setContentsMargins(0, 0, 0, 8)
-
         self.wssize_toggle = Win11ToggleRow(
             "fa5s.ruler-horizontal",
             self._tr("page.dpi_settings.advanced.wssize.title", "Включить --wssize"),
             self._tr("page.dpi_settings.advanced.wssize.desc", "Добавляет параметр размера окна TCP"),
-            "#9c27b0",
         )
         self.debug_log_toggle = Win11ToggleRow(
             "mdi.file-document-outline",
             self._tr("page.dpi_settings.advanced.debug_log.title", "Включить лог-файл (--debug)"),
             self._tr("page.dpi_settings.advanced.debug_log.desc", "Записывает логи winws в папку logs"),
-            "#00bcd4",
         )
-
-        if SettingCardGroup is not None and _HAS_FLUENT_LABELS:
-            self.advanced_card = SettingCardGroup(
-                self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"),
-                self.content,
-            )
-            try:
-                insert_widget_into_setting_card_group(self.advanced_card, 1, advanced_desc)
-            except Exception:
-                pass
-            self.advanced_card.addSettingCard(self.wssize_toggle)
-            self.advanced_card.addSettingCard(self.debug_log_toggle)
-            enable_setting_card_group_auto_height(self.advanced_card)
-        else:
-            self.advanced_card = SettingsCard(
-                self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ")
-            )
-            advanced_layout = QVBoxLayout()
-            advanced_layout.setSpacing(6)
-            advanced_layout.addWidget(advanced_desc)
-            advanced_layout.addWidget(self.wssize_toggle)
-            advanced_layout.addWidget(self.debug_log_toggle)
-            self.advanced_card.add_layout(advanced_layout)
+        self.advanced_card, self._advanced_notice = build_advanced_settings_section(
+            title=self._tr("page.dpi_settings.card.advanced", "ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ"),
+            warning_text=self._tr("page.dpi_settings.advanced.warning", "⚠ Изменяйте только если знаете что делаете"),
+            parent=self.content,
+            toggle_rows=[self.wssize_toggle, self.debug_log_toggle],
+        )
         self.layout.addWidget(self.advanced_card)
         
         self.layout.addStretch()
@@ -647,8 +596,8 @@ class DpiSettingsPage(BasePage):
                     )
             except Exception:
                 pass
-        if self._advanced_desc_label is not None:
-            self._advanced_desc_label.setText(
+        if self._advanced_notice is not None:
+            self._advanced_notice.setText(
                 self._tr("page.dpi_settings.advanced.warning", "⚠ Изменяйте только если знаете что делаете")
             )
         self.wssize_toggle.set_texts(

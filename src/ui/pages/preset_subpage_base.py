@@ -10,6 +10,7 @@ from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget, QFileDialog
 
 from ui.pages.base_page import BasePage
+from ui.compat_widgets import style_semantic_caption_label
 from ui.popup_menu import exec_popup_menu
 from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 
@@ -110,6 +111,7 @@ class _RenameDialog(MessageBoxBase):
         self.nameEdit.setClearButtonEnabled(True)
 
         self.warningLabel = CaptionLabel("", self.widget)
+        style_semantic_caption_label(self.warningLabel, tone="error")
         self.warningLabel.hide()
 
         self.viewLayout.addWidget(self.titleLabel)

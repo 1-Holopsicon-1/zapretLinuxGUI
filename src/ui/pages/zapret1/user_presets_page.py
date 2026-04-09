@@ -49,7 +49,14 @@ from ui.pages.preset_actions_menu import show_preset_actions_menu
 from ui.pages.preset_rating_menu import show_preset_rating_menu
 from ui.pages import user_presets_runtime as shared_runtime
 from ui.pages.user_presets_toolbar import UserPresetsToolbarLayout
-from ui.compat_widgets import ActionButton, SettingsCard, LineEdit, set_tooltip
+from ui.compat_widgets import (
+    ActionButton,
+    PrimaryActionButton,
+    SettingsCard,
+    LineEdit,
+    set_tooltip,
+    style_semantic_caption_label,
+)
 from ui.main_window_state import MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 
@@ -1098,11 +1105,7 @@ class _CreatePresetDialog(MessageBoxBase):
             pass
 
         self.warningLabel = CaptionLabel("", self.widget)
-        try:
-            from PyQt6.QtGui import QColor
-            self.warningLabel.setTextColor("#cf1010", QColor(255, 28, 32))
-        except Exception:
-            self.warningLabel.setStyleSheet("color: #cf1010;")
+        style_semantic_caption_label(self.warningLabel, tone="error")
         self.warningLabel.hide()
 
         self.viewLayout.addWidget(self.titleLabel)
@@ -1178,11 +1181,7 @@ class _RenamePresetDialog(MessageBoxBase):
         self.nameEdit.setClearButtonEnabled(True)
 
         self.warningLabel = CaptionLabel("", self.widget)
-        try:
-            from PyQt6.QtGui import QColor
-            self.warningLabel.setTextColor("#cf1010", QColor(255, 28, 32))
-        except Exception:
-            self.warningLabel.setStyleSheet("color: #cf1010;")
+        style_semantic_caption_label(self.warningLabel, tone="error")
         self.warningLabel.hide()
 
         self.viewLayout.addWidget(self.titleLabel)
@@ -1676,10 +1675,9 @@ class Zapret1UserPresetsPage(BasePage):
         configs_title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         configs_title.setMinimumWidth(0)
         configs_layout.addWidget(configs_title, 1)
-        get_configs_btn = ActionButton(
+        get_configs_btn = PrimaryActionButton(
             self._tr("page.z1_user_presets.configs.button", "Получить конфиги"),
             "fa5s.external-link-alt",
-            accent=True,
         )
         self._get_configs_btn = get_configs_btn
         get_configs_btn.setFixedHeight(36)

@@ -16,7 +16,7 @@ try:
     from qfluentwidgets import (
         BodyLabel, CaptionLabel, StrongBodyLabel,
         CheckBox, IndeterminateProgressBar, LineEdit, InfoBar, MessageBox,
-        SettingCardGroup, PushSettingCard,
+        SettingCardGroup,
     )
     _HAS_FLUENT_LABELS = True
 except ImportError:
@@ -26,7 +26,6 @@ except ImportError:
     InfoBar = None
     MessageBox = None  # type: ignore[assignment]
     SettingCardGroup = None
-    PushSettingCard = None  # type: ignore[assignment]
     _HAS_FLUENT_LABELS = False
 
 from .base_page import BasePage
@@ -34,10 +33,11 @@ from ui.widgets.win11_controls import Win11ToggleRow
 from ui.compat_widgets import (
     SettingsCard,
     ActionButton,
+    QuickActionsBar,
     enable_setting_card_group_auto_height,
     insert_widget_into_setting_card_group,
+    set_tooltip,
 )
-from ui.compat_widgets import ResetActionButton
 from ui.page_runtime import PageSnapshotCache
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
@@ -458,10 +458,9 @@ class NetworkPage(BasePage):
         self._isp_warning_accept_btn = None
         self._isp_warning_dismiss_btn = None
         self._auto_icon_label = None
-        self._force_dns_reset_card = None
+        self._force_dns_reset_row = None
         self._tools_card = None
-        self._test_action_card = None
-        self._dns_flush_card = None
+        self._tools_actions_bar = None
         self._tools_section_label = None
         self.enable_deferred_ui_build(after_build=self._after_ui_built)
 
@@ -514,13 +513,6 @@ class NetworkPage(BasePage):
                 self.test_btn.setEnabled(not self._test_in_progress)
         except Exception:
             pass
-        try:
-            button = getattr(getattr(self, "_test_action_card", None), "button", None)
-            if button is not None:
-                button.setText(text)
-                button.setEnabled(not self._test_in_progress)
-        except Exception:
-            pass
 
     def _after_ui_built(self) -> None:
         self._apply_page_theme(force=True)
@@ -546,29 +538,16 @@ class NetworkPage(BasePage):
         self._update_test_action_text()
 
         if hasattr(self, "dns_flush_btn"):
-            self._set_reset_button_texts(
-                self.dns_flush_btn,
-                "page.network.button.flush_dns_cache",
-                "Сбросить DNS кэш",
-                "page.network.button.flush_dns_cache.confirm",
-                "Сбросить?",
+            self.dns_flush_btn.setText(
+                self._tr("page.network.button.flush_dns_cache", "Сбросить DNS кэш")
             )
-        if getattr(self, "_dns_flush_card", None) is not None:
-            try:
-                self._dns_flush_card.setTitle(
-                    self._tr("page.network.button.flush_dns_cache", "Сбросить DNS кэш")
-                )
-                self._dns_flush_card.setContent(
-                    self._tr(
-                        "page.network.tools.flush_dns.description",
-                        "Очистить локальный кэш DNS Windows, если ответы или домены застряли в старом состоянии.",
-                    )
-                )
-                button = getattr(self._dns_flush_card, "button", None)
-                if button is not None:
-                    button.setText(self._tr("page.network.button.flush_dns_cache", "Сбросить DNS кэш"))
-            except Exception:
-                pass
+            set_tooltip(
+                self.dns_flush_btn,
+                self._tr(
+                    "page.network.tools.flush_dns.description",
+                    "Очистить локальный кэш DNS Windows, если ответы или домены застряли в старом состоянии.",
+                ),
+            )
 
         if hasattr(self, "auto_label"):
             self.auto_label.setText(self._tr("page.network.dns.auto", "Автоматически (DHCP)"))
@@ -601,22 +580,6 @@ class NetworkPage(BasePage):
                     )
             except Exception:
                 pass
-        if getattr(self, "_force_dns_reset_card", None) is not None:
-            try:
-                self._force_dns_reset_card.setTitle(
-                    self._tr("page.network.force_dns.reset.button", "Сбросить DNS на DHCP")
-                )
-                self._force_dns_reset_card.setContent(
-                    self._tr(
-                        "page.network.force_dns.reset.description",
-                        "Отключить Force DNS и вернуть получение DNS через DHCP для всех адаптеров.",
-                    )
-                )
-                button = getattr(self._force_dns_reset_card, "button", None)
-                if button is not None:
-                    button.setText(self._tr("page.network.force_dns.reset.button", "Сбросить DNS на DHCP"))
-            except Exception:
-                pass
         if hasattr(self, "force_dns_toggle"):
             self.force_dns_toggle.set_texts(
                 self._tr("page.network.force_dns.toggle.title", "Принудительный DNS"),
@@ -632,6 +595,12 @@ class NetworkPage(BasePage):
                 "Сбросить DNS на DHCP",
                 "page.network.force_dns.reset.confirm",
                 "Отключить Force DNS и сбросить DNS на DHCP для всех адаптеров?",
+            )
+            self.force_dns_reset_dhcp_btn.setToolTip(
+                self._tr(
+                    "page.network.force_dns.reset.description",
+                    "Отключить Force DNS и вернуть получение DNS через DHCP для всех адаптеров.",
+                )
             )
 
         if hasattr(self, "force_dns_status_label"):
@@ -757,37 +726,40 @@ class NetworkPage(BasePage):
         # ═══════════════════════════════════════════════════════════════
         # ДИАГНОСТИКА
         # ═══════════════════════════════════════════════════════════════
-        if SettingCardGroup is not None and PushSettingCard is not None and _HAS_FLUENT_LABELS:
+        if SettingCardGroup is not None and _HAS_FLUENT_LABELS:
             self._tools_section_label = None
             tools_card = SettingCardGroup(
                 self._tr("page.network.section.tools", "Диагностика"),
                 self.content,
             )
             self._tools_card = tools_card
+            self._tools_actions_bar = QuickActionsBar(self.content)
 
-            self._test_action_card = PushSettingCard(
-                self._tr("page.network.button.test", "Тест соединения"),
-                qta.icon("fa5s.wifi", color=tokens.accent_hex),
-                self._tr("page.network.button.test", "Тест соединения"),
+            self.test_btn = ActionButton(self._tr("page.network.button.test", "Тест соединения"), "fa5s.wifi")
+            self.test_btn.clicked.connect(self._test_connection)
+            set_tooltip(
+                self.test_btn,
                 self._tr(
                     "page.network.tools.test.description",
                     "Проверить доступность DNS и популярных сайтов из этой системы.",
                 ),
             )
-            self._test_action_card.clicked.connect(self._test_connection)
-            tools_card.addSettingCard(self._test_action_card)
 
-            self._dns_flush_card = PushSettingCard(
+            self.dns_flush_btn = ActionButton(
                 self._tr("page.network.button.flush_dns_cache", "Сбросить DNS кэш"),
-                qta.icon("fa5s.eraser", color="#ff9800"),
-                self._tr("page.network.button.flush_dns_cache", "Сбросить DNS кэш"),
+                "fa5s.eraser",
+            )
+            self.dns_flush_btn.clicked.connect(self._confirm_flush_dns_cache)
+            set_tooltip(
+                self.dns_flush_btn,
                 self._tr(
                     "page.network.tools.flush_dns.description",
                     "Очистить локальный кэш DNS Windows, если ответы или домены застряли в старом состоянии.",
                 ),
             )
-            self._dns_flush_card.clicked.connect(self._confirm_flush_dns_cache)
-            tools_card.addSettingCard(self._dns_flush_card)
+
+            self._tools_actions_bar.add_buttons([self.test_btn, self.dns_flush_btn])
+            insert_widget_into_setting_card_group(tools_card, 1, self._tools_actions_bar)
         else:
             self._tools_section_label = self.add_section_title(text_key="page.network.section.tools")
             tools_card = SettingsCard()
@@ -799,14 +771,28 @@ class NetworkPage(BasePage):
             self.test_btn = ActionButton(self._tr("page.network.button.test", "Тест соединения"), "fa5s.wifi")
             self.test_btn.setFixedHeight(28)
             self.test_btn.clicked.connect(self._test_connection)
+            set_tooltip(
+                self.test_btn,
+                self._tr(
+                    "page.network.tools.test.description",
+                    "Проверить доступность DNS и популярных сайтов из этой системы.",
+                ),
+            )
             tools_layout.addWidget(self.test_btn)
             
-            self.dns_flush_btn = ResetActionButton(
+            self.dns_flush_btn = ActionButton(
                 self._tr("page.network.button.flush_dns_cache", "Сбросить DNS кэш"),
-                confirm_text=self._tr("page.network.button.flush_dns_cache.confirm", "Сбросить?"),
+                "fa5s.eraser",
             )
             self.dns_flush_btn.setFixedHeight(28)
-            self.dns_flush_btn.reset_confirmed.connect(self._flush_dns_cache)
+            self.dns_flush_btn.clicked.connect(self._confirm_flush_dns_cache)
+            set_tooltip(
+                self.dns_flush_btn,
+                self._tr(
+                    "page.network.tools.flush_dns.description",
+                    "Очистить локальный кэш DNS Windows, если ответы или домены застряли в старом состоянии.",
+                ),
+            )
             tools_layout.addWidget(self.dns_flush_btn)
             
             tools_layout.addStretch()
@@ -1173,8 +1159,7 @@ class NetworkPage(BasePage):
         self.add_section_title(text_key="page.network.section.force_dns")
         
         # Карточка / fluent-group
-        self._force_dns_reset_card = None
-        if SettingCardGroup is not None and PushSettingCard is not None and _HAS_FLUENT_LABELS:
+        if SettingCardGroup is not None and _HAS_FLUENT_LABELS:
             self.force_dns_card = SettingCardGroup(
                 self._tr(
                     "page.network.force_dns.card.title",
@@ -1223,29 +1208,32 @@ class NetworkPage(BasePage):
             except Exception:
                 pass
 
-        if dns_layout is None:
-            self._force_dns_reset_card = PushSettingCard(
-                self._tr("page.network.force_dns.reset.button", "Сбросить DNS на DHCP"),
-                qta.icon("fa5s.undo", color="#ff9800"),
-                self._tr("page.network.force_dns.reset.button", "Сбросить DNS на DHCP"),
-                self._tr(
-                    "page.network.force_dns.reset.description",
-                    "Отключить Force DNS и вернуть получение DNS через DHCP для всех адаптеров.",
-                ),
+        self.force_dns_reset_dhcp_btn = ResetActionButton(
+            self._tr("page.network.force_dns.reset.button", "Сбросить DNS на DHCP"),
+            confirm_text=self._tr(
+                "page.network.force_dns.reset.confirm",
+                "Отключить Force DNS и сбросить DNS на DHCP для всех адаптеров?",
+            ),
+        )
+        self.force_dns_reset_dhcp_btn.setFixedHeight(30)
+        self.force_dns_reset_dhcp_btn.reset_confirmed.connect(self._reset_dns_to_dhcp)
+        self.force_dns_reset_dhcp_btn.setToolTip(
+            self._tr(
+                "page.network.force_dns.reset.description",
+                "Отключить Force DNS и вернуть получение DNS через DHCP для всех адаптеров.",
             )
-            self._force_dns_reset_card.clicked.connect(self._confirm_reset_dns_to_dhcp)
-            self.force_dns_card.addSettingCard(self._force_dns_reset_card)
+        )
+
+        if dns_layout is None:
+            self._force_dns_reset_row = QWidget(self.force_dns_card)
+            reset_row_layout = QHBoxLayout(self._force_dns_reset_row)
+            reset_row_layout.setContentsMargins(0, 4, 0, 0)
+            reset_row_layout.setSpacing(8)
+            reset_row_layout.addWidget(self.force_dns_reset_dhcp_btn, 0, Qt.AlignmentFlag.AlignLeft)
+            reset_row_layout.addStretch()
+            insert_widget_into_setting_card_group(self.force_dns_card, 2, self._force_dns_reset_row)
             enable_setting_card_group_auto_height(self.force_dns_card)
         else:
-            self.force_dns_reset_dhcp_btn = ResetActionButton(
-                self._tr("page.network.force_dns.reset.button", "Сбросить DNS на DHCP"),
-                confirm_text=self._tr(
-                    "page.network.force_dns.reset.confirm",
-                    "Отключить Force DNS и сбросить DNS на DHCP для всех адаптеров?",
-                ),
-            )
-            self.force_dns_reset_dhcp_btn.setFixedHeight(30)
-            self.force_dns_reset_dhcp_btn.reset_confirmed.connect(self._reset_dns_to_dhcp)
             dns_layout.addWidget(self.force_dns_reset_dhcp_btn, alignment=Qt.AlignmentFlag.AlignLeft)
             self.force_dns_card.add_layout(dns_layout)
         self.add_widget(self.force_dns_card)

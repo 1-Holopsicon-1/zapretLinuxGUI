@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 from .base_page import BasePage, ScrollBlockingPlainTextEdit
 from ui.compat_widgets import (
     SettingsCard,
+    QuickActionsBar,
     enable_setting_card_group_auto_height,
     insert_widget_into_setting_card_group,
 )
@@ -44,8 +45,6 @@ from qfluentwidgets import (
     LineEdit,
     PasswordLineEdit,
     SettingCardGroup,
-    PushSettingCard,
-    PrimaryPushSettingCard,
     PushButton,
     PrimaryPushButton,
 )
@@ -204,8 +203,9 @@ class TelegramProxyPage(BasePage):
         self._status_card.add_widget(self._stats_label)
         layout.addWidget(self._status_card)
 
-        # -- Quick setup card --
-        self._setup_card = SettingCardGroup("Быстрая настройка Telegram", self.content)
+        # -- Quick setup actions --
+        self._setup_section_label = StrongBodyLabel("Быстрая настройка Telegram")
+        layout.addWidget(self._setup_section_label)
 
         setup_desc = CaptionLabel(
             "Нажмите кнопку ниже - Telegram автоматически добавит прокси. "
@@ -213,39 +213,34 @@ class TelegramProxyPage(BasePage):
         )
         self._setup_desc_label = setup_desc
         setup_desc.setWordWrap(True)
-        self._insert_group_label(self._setup_card, setup_desc, 1)
+        layout.addWidget(setup_desc)
 
-        self._setup_open_card = PrimaryPushSettingCard(
-            "Открыть",
-            qta.icon("mdi.telegram", color="#229ED9"),
-            "Добавить прокси в Telegram",
-            "Открыть ссылку для автоматической настройки прокси внутри Telegram.",
-        )
-        self._setup_open_card.clicked.connect(self._on_open_in_telegram)
-        try:
-            self._setup_open_card.button.setToolTip("Откроет ссылку для автоматической настройки прокси")
-        except Exception:
-            pass
-        self._add_settings_item(self._setup_card, self._setup_open_card)
+        self._setup_card = QuickActionsBar(self.content)
 
-        self._setup_copy_card = PushSettingCard(
-            "Копировать",
-            qta.icon("mdi.content-copy", color="#60cdff"),
-            "Скопировать ссылку настройки",
-            "Сохранить ссылку в буфер обмена, если Telegram не открылся автоматически.",
-        )
-        self._setup_copy_card.clicked.connect(self._on_copy_link)
-        self._add_settings_item(self._setup_card, self._setup_copy_card)
-        enable_setting_card_group_auto_height(self._setup_card)
+        self._setup_open_btn = PrimaryPushButton()
+        self._setup_open_btn.setText("Открыть")
+        self._setup_open_btn.setIcon(qta.icon("mdi.telegram", color="#229ED9"))
+        self._setup_open_btn.setToolTip("Открыть ссылку для автоматической настройки прокси внутри Telegram.")
+        self._setup_open_btn.clicked.connect(self._on_open_in_telegram)
+        self._setup_card.add_button(self._setup_open_btn)
+
+        self._setup_copy_btn = PushButton()
+        self._setup_copy_btn.setText("Копировать")
+        self._setup_copy_btn.setIcon(qta.icon("mdi.content-copy", color="#60cdff"))
+        self._setup_copy_btn.setToolTip("Сохранить ссылку в буфер обмена, если Telegram не открылся автоматически.")
+        self._setup_copy_btn.clicked.connect(self._on_copy_link)
+        self._setup_card.add_button(self._setup_copy_btn)
 
         layout.addWidget(self._setup_card)
 
         # -- Settings card --
         self._settings_card = SettingCardGroup("Настройки", self.content)
-        self._settings_host_card = SettingsCard()
+        self._settings_host_row = QWidget(self._settings_card)
 
         # Host + Port setting
-        host_port_row = QHBoxLayout()
+        host_port_row = QHBoxLayout(self._settings_host_row)
+        host_port_row.setContentsMargins(16, 8, 16, 6)
+        host_port_row.setSpacing(12)
         host_label = BodyLabel("Адрес:")
         self._host_label = host_label
         host_port_row.addWidget(host_label)
@@ -271,7 +266,7 @@ class TelegramProxyPage(BasePage):
         self._port_spin.setFixedWidth(140)
         host_port_row.addWidget(self._port_spin)
         host_port_row.addStretch()
-        self._settings_host_card.add_layout(host_port_row)
+        insert_widget_into_setting_card_group(self._settings_card, 1, self._settings_host_row)
 
         # Auto-start toggle
         from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow
@@ -281,7 +276,6 @@ class TelegramProxyPage(BasePage):
             "Запускать прокси автоматически при старте программы",
         )
         self._autostart_toggle.toggle.setChecked(True)
-        self._add_settings_item(self._settings_card, self._settings_host_card)
         self._add_settings_item(self._settings_card, self._autostart_toggle)
 
         # Auto-open deep link toggle
@@ -382,14 +376,12 @@ class TelegramProxyPage(BasePage):
         self._add_settings_item(self._upstream_card, self._upstream_manual_widget)
 
         # MTProxy action (visible only when MTProxy preset selected)
-        self._mtproxy_action_card = PushSettingCard(
-            "Открыть",
-            qta.icon("mdi.telegram", color="#229ED9"),
-            "Добавить MTProxy в Telegram",
-            "MTProxy настраивается в Telegram напрямую. Нажмите для добавления.",
-        )
-        self._mtproxy_action_card.clicked.connect(self._on_open_mtproxy)
-        self._mtproxy_action_widget = self._mtproxy_action_card
+        self._mtproxy_action_btn = PushButton()
+        self._mtproxy_action_btn.setText("Открыть")
+        self._mtproxy_action_btn.setIcon(qta.icon("mdi.telegram", color="#229ED9"))
+        self._mtproxy_action_btn.setToolTip("MTProxy настраивается в Telegram напрямую. Нажмите для добавления.")
+        self._mtproxy_action_btn.clicked.connect(self._on_open_mtproxy)
+        self._mtproxy_action_widget = self._mtproxy_action_btn
         self._mtproxy_action_widget.setVisible(False)
         self._add_settings_item(self._upstream_card, self._mtproxy_action_widget)
         self._current_mtproxy_link = ""
@@ -586,9 +578,8 @@ class TelegramProxyPage(BasePage):
             self._refresh_pivot_texts()
             self._refresh_status_texts()
 
-            title_label = getattr(getattr(self, "_setup_card", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText("Быстрая настройка Telegram")
+            if getattr(self, "_setup_section_label", None) is not None:
+                self._setup_section_label.setText("Быстрая настройка Telegram")
             title_label = getattr(getattr(self, "_settings_card", None), "titleLabel", None)
             if title_label is not None:
                 title_label.setText("Настройки")
@@ -632,30 +623,21 @@ class TelegramProxyPage(BasePage):
                     "SOCKS5 прокси и определение типа блокировки."
                 )
 
-            if getattr(self, "_setup_open_card", None) is not None:
-                self._setup_open_card.setTitle("Добавить прокси в Telegram")
-                self._setup_open_card.setContent(
+            if getattr(self, "_setup_open_btn", None) is not None:
+                self._setup_open_btn.setText("Открыть")
+                self._setup_open_btn.setToolTip(
                     "Открыть ссылку для автоматической настройки прокси внутри Telegram."
                 )
-                button = getattr(self._setup_open_card, "button", None)
-                if button is not None:
-                    button.setText("Открыть")
-            if getattr(self, "_setup_copy_card", None) is not None:
-                self._setup_copy_card.setTitle("Скопировать ссылку настройки")
-                self._setup_copy_card.setContent(
+            if getattr(self, "_setup_copy_btn", None) is not None:
+                self._setup_copy_btn.setText("Копировать")
+                self._setup_copy_btn.setToolTip(
                     "Сохранить ссылку в буфер обмена, если Telegram не открылся автоматически."
                 )
-                button = getattr(self._setup_copy_card, "button", None)
-                if button is not None:
-                    button.setText("Копировать")
-            if getattr(self, "_mtproxy_action_card", None) is not None:
-                self._mtproxy_action_card.setTitle("Добавить MTProxy в Telegram")
-                self._mtproxy_action_card.setContent(
+            if getattr(self, "_mtproxy_action_btn", None) is not None:
+                self._mtproxy_action_btn.setText("Открыть")
+                self._mtproxy_action_btn.setToolTip(
                     "MTProxy настраивается в Telegram напрямую. Нажмите для добавления."
                 )
-                button = getattr(self._mtproxy_action_card, "button", None)
-                if button is not None:
-                    button.setText("Открыть")
             if getattr(self, "_btn_copy_logs", None) is not None:
                 self._btn_copy_logs.setText("Копировать все")
             if getattr(self, "_btn_open_log_file", None) is not None:

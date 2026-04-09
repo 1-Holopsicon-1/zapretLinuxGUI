@@ -358,7 +358,6 @@ class Zapret1StrategyDetailPage(BasePage):
         self._edit_args_btn = ActionButton(
             self._tr("page.z1_strategy_detail.button.edit_args", "Редактировать аргументы"),
             "fa5s.edit",
-            accent=False,
         )
         self._edit_args_btn.clicked.connect(self._open_args_editor)
         controls_row.addWidget(self._edit_args_btn)

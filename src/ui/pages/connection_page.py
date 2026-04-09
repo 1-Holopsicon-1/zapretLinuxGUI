@@ -16,13 +16,11 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     TextEdit,
-    SettingCardGroup,
-    PushSettingCard,
-    PrimaryPushSettingCard,
+    PushButton,
 )
 
 from .base_page import BasePage, ScrollBlockingTextEdit
-from ui.compat_widgets import SettingsCard
+from ui.compat_widgets import QuickActionsBar, SettingsCard
 from connection_test import ConnectionTestWorker
 from ui.connection_page_controller import ConnectionPageController
 from ui.smooth_scroll import apply_editor_smooth_scroll_preference
@@ -76,11 +74,9 @@ class ConnectionTestPage(BasePage):
         self.worker_thread = None
         self.stop_check_timer = None
         self._controller = ConnectionPageController()
-        self._actions_group = None
+        self._actions_title_label = None
+        self._actions_bar = None
         self._controls_card = None
-        self._start_action_card = None
-        self._stop_action_card = None
-        self._support_action_card = None
 
         # Контейнер с ограниченной шириной, чтобы не расползалось за края
         self.container = QWidget(self.content)
@@ -112,16 +108,6 @@ class ConnectionTestPage(BasePage):
             self.progress_bar.start()
         else:
             self.progress_bar.stop()
-
-        try:
-            if self._start_action_card is not None:
-                self._start_action_card.setEnabled(start_enabled)
-            if self._stop_action_card is not None:
-                self._stop_action_card.setEnabled(stop_enabled)
-            if self._support_action_card is not None:
-                self._support_action_card.setEnabled(send_log_enabled)
-        except Exception:
-            pass
 
     def _build_page_ui(self) -> None:
         self._build_header()
@@ -191,56 +177,55 @@ class ConnectionTestPage(BasePage):
         card.add_layout(status_layout)
         self.container_layout.addWidget(card)
 
-        self._actions_group = SettingCardGroup(
-            tr_catalog("page.connection.actions.title", language=self._ui_language, default="Действия"),
-            self.content,
+        self._actions_title_label = StrongBodyLabel(
+            tr_catalog("page.connection.actions.title", language=self._ui_language, default="Действия")
         )
+        self.container_layout.addWidget(self._actions_title_label)
 
-        self._start_action_card = PrimaryPushSettingCard(
-            tr_catalog("page.connection.button.start", language=self._ui_language, default="Запустить тест"),
-            qta.icon("fa5s.play", color="#4CAF50"),
-            tr_catalog("page.connection.button.start", language=self._ui_language, default="Запустить тест"),
+        self._actions_bar = QuickActionsBar(self.content)
+
+        self.start_btn = PushButton()
+        self.start_btn.setText(tr_catalog("page.connection.button.start", language=self._ui_language, default="Запустить тест"))
+        self.start_btn.setIcon(qta.icon("fa5s.play", color="#4CAF50"))
+        self.start_btn.setToolTip(
             tr_catalog(
                 "page.connection.action.start.description",
                 language=self._ui_language,
                 default="Запустить выбранный сценарий диагностики для Discord и YouTube.",
-            ),
+            )
         )
-        self._start_action_card.clicked.connect(self.start_test)
-        self.start_btn = self._start_action_card.button
-        self._actions_group.addSettingCard(self._start_action_card)
+        self.start_btn.clicked.connect(self.start_test)
+        self._actions_bar.add_button(self.start_btn)
 
-        self._stop_action_card = PushSettingCard(
-            tr_catalog("page.connection.button.stop", language=self._ui_language, default="Стоп"),
-            qta.icon("fa5s.stop", color="#ff9800"),
-            tr_catalog("page.connection.button.stop", language=self._ui_language, default="Стоп"),
+        self.stop_btn = PushButton()
+        self.stop_btn.setText(tr_catalog("page.connection.button.stop", language=self._ui_language, default="Стоп"))
+        self.stop_btn.setIcon(qta.icon("fa5s.stop", color="#ff9800"))
+        self.stop_btn.setToolTip(
             tr_catalog(
                 "page.connection.action.stop.description",
                 language=self._ui_language,
                 default="Остановить текущий тест, если он уже запущен.",
-            ),
+            )
         )
-        self._stop_action_card.clicked.connect(self.stop_test)
-        self.stop_btn = self._stop_action_card.button
-        self._stop_action_card.setEnabled(False)
-        self._actions_group.addSettingCard(self._stop_action_card)
+        self.stop_btn.clicked.connect(self.stop_test)
+        self.stop_btn.setEnabled(False)
+        self._actions_bar.add_button(self.stop_btn)
 
-        self._support_action_card = PushSettingCard(
-            tr_catalog("page.connection.button.send_log", language=self._ui_language, default="Подготовить обращение"),
-            qta.icon("fa5b.github", color="#60cdff"),
-            tr_catalog("page.connection.button.send_log", language=self._ui_language, default="Подготовить обращение"),
+        self.send_log_btn = PushButton()
+        self.send_log_btn.setText(tr_catalog("page.connection.button.send_log", language=self._ui_language, default="Подготовить обращение"))
+        self.send_log_btn.setIcon(qta.icon("fa5b.github", color="#60cdff"))
+        self.send_log_btn.setToolTip(
             tr_catalog(
                 "page.connection.action.support.description",
                 language=self._ui_language,
                 default="Собрать архив логов и открыть готовое обращение в GitHub Discussions.",
-            ),
+            )
         )
-        self._support_action_card.clicked.connect(self.open_support_with_log)
-        self.send_log_btn = self._support_action_card.button
-        self._support_action_card.setEnabled(False)
-        self._actions_group.addSettingCard(self._support_action_card)
+        self.send_log_btn.clicked.connect(self.open_support_with_log)
+        self.send_log_btn.setEnabled(False)
+        self._actions_bar.add_button(self.send_log_btn)
 
-        self.container_layout.addWidget(self._actions_group)
+        self.container_layout.addWidget(self._actions_bar)
 
     def _build_log_viewer(self):
         log_card = SettingsCard(tr_catalog("page.connection.card.result", language=self._ui_language, default="Результат тестирования"))
@@ -403,14 +388,10 @@ class ConnectionTestPage(BasePage):
                 )
         except Exception:
             pass
-        try:
-            title_label = getattr(getattr(self, "_actions_group", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(
-                    tr_catalog("page.connection.actions.title", language=self._ui_language, default="Действия")
-                )
-        except Exception:
-            pass
+        if self._actions_title_label is not None:
+            self._actions_title_label.setText(
+                tr_catalog("page.connection.actions.title", language=self._ui_language, default="Действия")
+            )
 
         self.hero_title.setText(tr_catalog("page.connection.hero.title", language=self._ui_language, default="Диагностика сетевых соединений"))
         self.hero_subtitle.setText(
@@ -426,34 +407,31 @@ class ConnectionTestPage(BasePage):
         self.start_btn.setText(tr_catalog("page.connection.button.start", language=self._ui_language, default="Запустить тест"))
         self.stop_btn.setText(tr_catalog("page.connection.button.stop", language=self._ui_language, default="Стоп"))
         self.send_log_btn.setText(tr_catalog("page.connection.button.send_log", language=self._ui_language, default="Подготовить обращение"))
-
-        if self._start_action_card is not None:
-            self._start_action_card.setTitle(tr_catalog("page.connection.button.start", language=self._ui_language, default="Запустить тест"))
-            self._start_action_card.setContent(
-                tr_catalog(
-                    "page.connection.action.start.description",
-                    language=self._ui_language,
-                    default="Запустить выбранный сценарий диагностики для Discord и YouTube.",
-                )
+        if self._actions_title_label is not None:
+            self._actions_title_label.setText(
+                tr_catalog("page.connection.actions.title", language=self._ui_language, default="Действия")
             )
-        if self._stop_action_card is not None:
-            self._stop_action_card.setTitle(tr_catalog("page.connection.button.stop", language=self._ui_language, default="Стоп"))
-            self._stop_action_card.setContent(
-                tr_catalog(
-                    "page.connection.action.stop.description",
-                    language=self._ui_language,
-                    default="Остановить текущий тест, если он уже запущен.",
-                )
+        self.start_btn.setToolTip(
+            tr_catalog(
+                "page.connection.action.start.description",
+                language=self._ui_language,
+                default="Запустить выбранный сценарий диагностики для Discord и YouTube.",
             )
-        if self._support_action_card is not None:
-            self._support_action_card.setTitle(tr_catalog("page.connection.button.send_log", language=self._ui_language, default="Подготовить обращение"))
-            self._support_action_card.setContent(
-                tr_catalog(
-                    "page.connection.action.support.description",
-                    language=self._ui_language,
-                    default="Собрать архив логов и открыть готовое обращение в GitHub Discussions.",
-                )
+        )
+        self.stop_btn.setToolTip(
+            tr_catalog(
+                "page.connection.action.stop.description",
+                language=self._ui_language,
+                default="Остановить текущий тест, если он уже запущен.",
             )
+        )
+        self.send_log_btn.setToolTip(
+            tr_catalog(
+                "page.connection.action.support.description",
+                language=self._ui_language,
+                default="Собрать архив логов и открыть готовое обращение в GitHub Discussions.",
+            )
+        )
     
     def cleanup(self):
         """Очистка потоков при закрытии"""

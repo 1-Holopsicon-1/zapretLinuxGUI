@@ -15,6 +15,9 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QPushButton,
 )
 from PyQt6.QtGui import QIcon, QFont, QColor, QPainter, QPixmap, QTransform
+import qtawesome as qta
+
+from ui.theme_refresh import ThemeRefreshController
 
 try:
     from qfluentwidgets import (
@@ -23,16 +26,18 @@ try:
         SubtitleLabel, TitleLabel, IndeterminateProgressBar, FluentIcon,
         ProgressBar, InfoBar, InfoBarPosition, SwitchButton, isDarkTheme, themeColor,
         LineEdit, ComboBox, CheckBox, SettingCard as FluentSettingCard,
-        ToolTipFilter, ToolTipPosition,
+        ToolTipFilter, ToolTipPosition, FlowLayout,
     )
     HAS_FLUENT = True
     _FluentPushButton = PushButton
 except ImportError:
     HAS_FLUENT = False
     HeaderCardWidget = QFrame  # type: ignore[assignment,misc]
+    SimpleCardWidget = QFrame  # type: ignore[assignment,misc]
     FluentSettingCard = QFrame  # type: ignore[assignment,misc]
     ToolTipFilter = None    # type: ignore[assignment,misc]
     ToolTipPosition = None  # type: ignore[assignment,misc]
+    FlowLayout = None  # type: ignore[assignment,misc]
     _FluentPushButton = QPushButton  # type: ignore[assignment,misc]
 
 
@@ -354,6 +359,216 @@ def insert_widget_into_setting_card_group(group, index: int, widget) -> None:
         pass
 
 
+class QuickActionsBar(SimpleCardWidget if HAS_FLUENT else QFrame):
+    """Компактная fluent-панель быстрых действий без описаний.
+
+    Это канонический паттерн для случаев, когда на странице нужны именно
+    короткие действия-кнопки, а не большие строки настроек с заголовком
+    и поясняющим текстом.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        if HAS_FLUENT and FlowLayout is not None:
+            layout = FlowLayout(self, needAni=False, isTight=True)
+            layout.setContentsMargins(16, 14, 16, 14)
+            layout.setHorizontalSpacing(8)
+            layout.setVerticalSpacing(8)
+        else:
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(16, 14, 16, 14)
+            layout.setSpacing(8)
+
+        self.actions_layout = layout
+
+    def add_button(self, button: QWidget) -> QWidget:
+        if button is None:
+            return button
+        try:
+            button.setFixedHeight(32)
+        except Exception:
+            pass
+        try:
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        except Exception:
+            pass
+        self.actions_layout.addWidget(button)
+        return button
+
+    def add_buttons(self, buttons) -> None:
+        for button in buttons or ():
+            self.add_button(button)
+
+
+class SemanticNotice(QWidget):
+    """Небольшое theme-aware предупреждение/подсказка внутри fluent-групп."""
+
+    def __init__(self, text: str = "", *, tone: str = "warning", parent=None):
+        super().__init__(parent)
+        self._tone = str(tone or "warning").strip().lower() or "warning"
+        self._text = str(text or "")
+        self._icon_label = QLabel(self)
+        self._text_label = CaptionLabel(self) if HAS_FLUENT else QLabel(self)
+        self._text_label.setWordWrap(True)
+        self._text_label.setText(self._text)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
+        layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self._text_label, 1)
+
+        self._theme_refresh = ThemeRefreshController(self, self._apply_theme_refresh)
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        self._text = str(text or "")
+        self._text_label.setText(self._text)
+
+    def text(self) -> str:
+        return self._text
+
+    def _apply_theme_refresh(self, tokens=None, force: bool = False) -> None:
+        _ = force
+        try:
+            from ui.theme_semantic import get_semantic_palette
+
+            palette = get_semantic_palette(getattr(tokens, "theme_name", None))
+            if self._tone == "warning":
+                fg = palette.warning_soft
+                bg = palette.warning_soft_bg
+                icon_color = palette.warning
+                border = "rgba(255, 152, 0, 0.30)"
+            elif self._tone == "error":
+                fg = palette.error
+                bg = palette.error_soft_bg
+                icon_color = palette.error
+                border = palette.error_soft_border
+            else:
+                fg = palette.info
+                bg = "rgba(95, 205, 254, 0.12)"
+                icon_color = palette.info
+                border = "rgba(95, 205, 254, 0.26)"
+        except Exception:
+            fg = "#ff9800"
+            bg = "rgba(255, 152, 0, 0.12)"
+            icon_color = "#ff9800"
+            border = "rgba(255, 152, 0, 0.30)"
+
+        try:
+            self._icon_label.setPixmap(qta.icon("fa5s.exclamation-triangle", color=icon_color).pixmap(14, 14))
+        except Exception:
+            pass
+
+        self._text_label.setStyleSheet(
+            f"color: {fg}; background: transparent;"
+        )
+        self.setStyleSheet(
+            f"SemanticNotice {{ background: {bg}; border: 1px solid {border}; border-radius: 8px; }}"
+        )
+
+
+def style_semantic_caption_label(label, *, tone: str = "error") -> None:
+    """Красит обычный CaptionLabel в semantic-цвет и следит за сменой темы."""
+
+    if label is None:
+        return
+
+    resolved_tone = str(tone or "error").strip().lower() or "error"
+
+    def _apply(tokens=None, force: bool = False) -> None:
+        _ = force
+        try:
+            from ui.theme_semantic import get_semantic_palette
+
+            palette = get_semantic_palette(getattr(tokens, "theme_name", None))
+            if resolved_tone == "warning":
+                color = palette.warning_soft
+            elif resolved_tone == "info":
+                color = palette.info
+            else:
+                color = palette.error
+        except Exception:
+            if resolved_tone == "warning":
+                color = "#ff9800"
+            elif resolved_tone == "info":
+                color = "#5fcdfE"
+            else:
+                color = "#cf1010"
+
+        try:
+            label.setStyleSheet(f"color: {color}; background: transparent;")
+        except Exception:
+            pass
+
+    _apply()
+    try:
+        label._semantic_caption_theme_refresh = ThemeRefreshController(label, _apply)  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def build_premium_badge(text: str, parent=None) -> QLabel:
+    """Создаёт единый бейдж Premium без копирования inline-стилей по страницам."""
+
+    badge = QLabel(str(text or ""), parent)
+    badge.setStyleSheet(
+        "color: #b45309; "
+        "font-size: 10px; "
+        "font-weight: bold; "
+        "background: rgba(255, 193, 7, 0.15); "
+        "padding: 2px 6px; "
+        "border-radius: 4px;"
+    )
+    return badge
+
+
+def build_advanced_settings_section(
+    *,
+    title: str,
+    warning_text: str,
+    parent,
+    toggle_rows=None,
+    action_rows=None,
+):
+    """Собирает единый блок «Дополнительные настройки» для fluent/fallback UI."""
+
+    toggle_rows = [row for row in (toggle_rows or ()) if row is not None]
+    action_rows = [row for row in (action_rows or ()) if row is not None]
+
+    warning = SemanticNotice(warning_text, tone="warning", parent=parent)
+
+    if HAS_FLUENT:
+        try:
+            from qfluentwidgets import SettingCardGroup
+        except Exception:
+            SettingCardGroup = None  # type: ignore[assignment]
+    else:
+        SettingCardGroup = None  # type: ignore[assignment]
+
+    if SettingCardGroup is not None:
+        group = SettingCardGroup(title, parent)
+        insert_widget_into_setting_card_group(group, 1, warning)
+        for row in toggle_rows:
+            group.addSettingCard(row)
+        for row in action_rows:
+            group.addSettingCard(row)
+        enable_setting_card_group_auto_height(group)
+        return group, warning
+
+    group = SettingsCard(title, parent)
+    layout = QVBoxLayout()
+    layout.setSpacing(6)
+    layout.addWidget(warning)
+    for row in toggle_rows:
+        layout.addWidget(row)
+    for row in action_rows:
+        layout.addWidget(row)
+    group.add_layout(layout)
+    return group, warning
+
+
 # ---------------------------------------------------------------------------
 # ActionButton — non-accent PushButton (use PrimaryActionButton for accent)
 # ---------------------------------------------------------------------------
@@ -366,10 +581,9 @@ class ActionButton(PushButton if HAS_FLUENT else QPushButton):
     Subclasses (StopButton etc.) rely on this being a real class.
     """
 
-    def __init__(self, text: str, icon_name: str | None = None, accent: bool = False, parent=None):
+    def __init__(self, text: str, icon_name: str | None = None, parent=None):
         super().__init__(parent)
         self.setText(text)
-        self.accent = accent
         self._icon_name = icon_name
         self._theme_refresh_scheduled = False
         self._last_icon_color = None

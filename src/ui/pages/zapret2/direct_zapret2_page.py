@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 from ui.pages.base_page import BasePage
-from ui.compat_widgets import SettingsCard, RefreshButton
+from ui.compat_widgets import QuickActionsBar, RefreshButton
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.widgets import PresetTargetsList
 from ui.theme import get_theme_tokens
@@ -27,9 +27,7 @@ from qfluentwidgets import (
     CaptionLabel,
     BodyLabel,
     PushButton,
-    PrimaryPushSettingCard,
-    SettingCardGroup,
-    PushSettingCard,
+    PrimaryPushButton,
 )
 
 
@@ -84,14 +82,10 @@ class Zapret2StrategiesPageNew(BasePage):
         self._list_structure_signature = None
         self._empty_state_label = None
         self._request_btn = None
-        self._request_card = None
         self._expand_btn = None
         self._collapse_btn = None
         self._info_btn = None
-        self._toolbar_group = None
-        self._expand_card = None
-        self._collapse_card = None
-        self._info_card = None
+        self._toolbar_actions_bar = None
         self._render_probe_build_started_at = None
         self._render_probe_build_finished_at = None
         self._render_probe_first_paint_logged = False
@@ -217,91 +211,85 @@ class Zapret2StrategiesPageNew(BasePage):
             self._list_structure_signature = self._build_list_structure_signature(payload)
             _log_startup_z2_direct_metric("_build_content.payload", (_time.perf_counter() - _t_payload) * 1000)
 
-            # Карточка с переходом на форму запроса новой категории
-            _t_request_link = _time.perf_counter()
-            _hint_text = tr_catalog(
-                "page.z2_direct.request.hint",
-                language=self._ui_language,
-                default=(
-                    "Хотите добавить новый сайт или сервис в Zapret 2? "
-                    "Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset."
-                ),
-            )
-            self._request_card = PrimaryPushSettingCard(
-                tr_catalog("page.z2_direct.request.button", language=self._ui_language, default="ОТКРЫТЬ ФОРМУ НА GITHUB"),
-                qta.icon("fa5b.github", color=get_theme_tokens().accent_hex),
-                tr_catalog("page.z2_direct.request.card.title", language=self._ui_language, default="Открыть форму на GitHub"),
-                _hint_text,
-            )
-            self._request_card.clicked.connect(self._open_category_request_form)
-            self._request_btn = self._request_card.button
-            request_card = self._request_card
-            self.content_layout.addWidget(request_card)
-            _log_startup_z2_direct_metric("_build_content.request_card", (_time.perf_counter() - _t_request_link) * 1000)
-
-            # Панель действий (toolbar)
+            # Панель быстрых действий: только stock fluent-кнопки без описаний.
             _t_toolbar = _time.perf_counter()
-            self._toolbar_group = SettingCardGroup(
-                tr_catalog("page.z2_direct.toolbar.title", language=self._ui_language, default="Действия"),
-                self.content,
+            self.add_section_title(text_key="page.z2_direct.toolbar.title")
+            self._toolbar_actions_bar = QuickActionsBar(self.content)
+
+            self._request_btn = PrimaryPushButton()
+            self._request_btn.setText(
+                tr_catalog("page.z2_direct.request.button", language=self._ui_language, default="ОТКРЫТЬ ФОРМУ НА GITHUB")
             )
-            actions_card = self._toolbar_group
+            self._request_btn.setIcon(qta.icon("fa5b.github", color=get_theme_tokens().accent_hex))
+            self._request_btn.clicked.connect(self._open_category_request_form)
+            self._request_btn.setToolTip(
+                tr_catalog(
+                    "page.z2_direct.request.hint",
+                    language=self._ui_language,
+                    default=(
+                        "Хотите добавить новый сайт или сервис в Zapret 2? "
+                        "Откройте готовую форму на GitHub и опишите, что нужно добавить в hostlist или ipset."
+                    ),
+                )
+            )
+            self._toolbar_actions_bar.add_button(self._request_btn)
 
             self._reload_btn = RefreshButton()
             self._reload_btn.clicked.connect(self._reload_strategies)
-            reload_card = SettingsCard()
-            reload_layout = QHBoxLayout()
-            reload_layout.setContentsMargins(10, 6, 12, 6)
-            reload_layout.addWidget(self._reload_btn)
-            reload_layout.addStretch()
-            reload_card.add_layout(reload_layout)
-            self._toolbar_group.addSettingCard(reload_card)
+            self._reload_btn.setToolTip(
+                tr_catalog(
+                    "page.z2_direct.toolbar.reload.description",
+                    language=self._ui_language,
+                    default="Обновить список категорий, target'ов и выбранных стратегий.",
+                )
+            )
+            self._toolbar_actions_bar.add_button(self._reload_btn)
 
-            self._expand_card = PushSettingCard(
-                tr_catalog("page.z2_direct.toolbar.expand", language=self._ui_language, default="Развернуть"),
-                qta.icon("fa5s.expand-alt", color="#4CAF50"),
-                tr_catalog("page.z2_direct.toolbar.expand", language=self._ui_language, default="Развернуть"),
+            self._expand_btn = PushButton()
+            self._expand_btn.setText(
+                tr_catalog("page.z2_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
+            )
+            self._expand_btn.setIcon(qta.icon("fa5s.expand-alt", color="#4CAF50"))
+            self._expand_btn.clicked.connect(self._expand_all)
+            self._expand_btn.setToolTip(
                 tr_catalog(
                     "page.z2_direct.toolbar.expand.description",
                     language=self._ui_language,
                     default="Развернуть все категории и target'ы в списке.",
-                ),
-                self.content,
+                )
             )
-            self._expand_card.clicked.connect(self._expand_all)
-            self._expand_btn = self._expand_card.button
-            self._toolbar_group.addSettingCard(self._expand_card)
+            self._toolbar_actions_bar.add_button(self._expand_btn)
 
-            self._collapse_card = PushSettingCard(
-                tr_catalog("page.z2_direct.toolbar.collapse", language=self._ui_language, default="Свернуть"),
-                qta.icon("fa5s.compress-alt", color="#ff9800"),
-                tr_catalog("page.z2_direct.toolbar.collapse", language=self._ui_language, default="Свернуть"),
+            self._collapse_btn = PushButton()
+            self._collapse_btn.setText(
+                tr_catalog("page.z2_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
+            )
+            self._collapse_btn.setIcon(qta.icon("fa5s.compress-alt", color="#ff9800"))
+            self._collapse_btn.clicked.connect(self._collapse_all)
+            self._collapse_btn.setToolTip(
                 tr_catalog(
                     "page.z2_direct.toolbar.collapse.description",
                     language=self._ui_language,
                     default="Свернуть все категории и target'ы в списке.",
-                ),
-                self.content,
+                )
             )
-            self._collapse_card.clicked.connect(self._collapse_all)
-            self._collapse_btn = self._collapse_card.button
-            self._toolbar_group.addSettingCard(self._collapse_card)
+            self._toolbar_actions_bar.add_button(self._collapse_btn)
 
-            self._info_card = PushSettingCard(
-                tr_catalog("page.z2_direct.toolbar.info", language=self._ui_language, default="Что это такое?"),
-                qta.icon("fa5s.question-circle", color="#60cdff"),
-                tr_catalog("page.z2_direct.toolbar.info", language=self._ui_language, default="Что это такое?"),
+            self._info_btn = PushButton()
+            self._info_btn.setText(
+                tr_catalog("page.z2_direct.toolbar.info", language=self._ui_language, default="Что это такое?")
+            )
+            self._info_btn.setIcon(qta.icon("fa5s.question-circle", color="#60cdff"))
+            self._info_btn.clicked.connect(self._show_info_popup)
+            self._info_btn.setToolTip(
                 tr_catalog(
                     "page.z2_direct.toolbar.info.description",
                     language=self._ui_language,
                     default="Показать краткое объяснение по работе прямого запуска Zapret 2.",
-                ),
-                self.content,
+                )
             )
-            self._info_card.clicked.connect(self._show_info_popup)
-            self._info_btn = self._info_card.button
-            self._toolbar_group.addSettingCard(self._info_card)
-            self.content_layout.addWidget(actions_card)
+            self._toolbar_actions_bar.add_button(self._info_btn)
+            self.content_layout.addWidget(self._toolbar_actions_bar)
             _log_startup_z2_direct_metric("_build_content.toolbar", (_time.perf_counter() - _t_toolbar) * 1000)
 
             if not target_items:
@@ -782,20 +770,11 @@ class Zapret2StrategiesPageNew(BasePage):
         super().set_ui_language(language)
         self._rebuild_breadcrumb()
 
-        try:
-            title_label = getattr(getattr(self, "_toolbar_group", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(
-                    tr_catalog("page.z2_direct.toolbar.title", language=self._ui_language, default="Действия")
-                )
-        except Exception:
-            pass
-
-        if self._request_card is not None:
-            self._request_card.setTitle(
-                tr_catalog("page.z2_direct.request.card.title", language=self._ui_language, default="Открыть форму на GitHub")
+        if self._request_btn is not None:
+            self._request_btn.setText(
+                tr_catalog("page.z2_direct.request.button", language=self._ui_language, default="ОТКРЫТЬ ФОРМУ НА GITHUB")
             )
-            self._request_card.setContent(
+            self._request_btn.setToolTip(
                 tr_catalog(
                     "page.z2_direct.request.hint",
                     language=self._ui_language,
@@ -805,19 +784,11 @@ class Zapret2StrategiesPageNew(BasePage):
                     ),
                 )
             )
-        if self._request_btn is not None:
-            self._request_btn.setText(
-                tr_catalog("page.z2_direct.request.button", language=self._ui_language, default="ОТКРЫТЬ ФОРМУ НА GITHUB")
-            )
         if self._expand_btn is not None:
             self._expand_btn.setText(
                 tr_catalog("page.z2_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
             )
-        if self._expand_card is not None:
-            self._expand_card.setTitle(
-                tr_catalog("page.z2_direct.toolbar.expand", language=self._ui_language, default="Развернуть")
-            )
-            self._expand_card.setContent(
+            self._expand_btn.setToolTip(
                 tr_catalog(
                     "page.z2_direct.toolbar.expand.description",
                     language=self._ui_language,
@@ -828,11 +799,7 @@ class Zapret2StrategiesPageNew(BasePage):
             self._collapse_btn.setText(
                 tr_catalog("page.z2_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
             )
-        if self._collapse_card is not None:
-            self._collapse_card.setTitle(
-                tr_catalog("page.z2_direct.toolbar.collapse", language=self._ui_language, default="Свернуть")
-            )
-            self._collapse_card.setContent(
+            self._collapse_btn.setToolTip(
                 tr_catalog(
                     "page.z2_direct.toolbar.collapse.description",
                     language=self._ui_language,
@@ -843,11 +810,7 @@ class Zapret2StrategiesPageNew(BasePage):
             self._info_btn.setText(
                 tr_catalog("page.z2_direct.toolbar.info", language=self._ui_language, default="Что это такое?")
             )
-        if self._info_card is not None:
-            self._info_card.setTitle(
-                tr_catalog("page.z2_direct.toolbar.info", language=self._ui_language, default="Что это такое?")
-            )
-            self._info_card.setContent(
+            self._info_btn.setToolTip(
                 tr_catalog(
                     "page.z2_direct.toolbar.info.description",
                     language=self._ui_language,

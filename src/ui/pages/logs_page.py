@@ -11,13 +11,12 @@ from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     StrongBodyLabel,
+    PushButton,
     PushButton as FluentPushButton,
     ComboBox,
     SegmentedWidget,
     ToolButton,
     InfoBar,
-    SettingCardGroup,
-    PushSettingCard,
 )
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QPixmap, QPainter, QTransform, QIcon
 import qtawesome as qta
@@ -27,7 +26,7 @@ import queue
 import html
 
 from .base_page import BasePage, ScrollBlockingTextEdit
-from ui.compat_widgets import SettingsCard, set_tooltip
+from ui.compat_widgets import QuickActionsBar, SettingsCard, set_tooltip
 from ui.text_catalog import tr as tr_catalog
 from ui.theme import get_theme_tokens
 from log import log
@@ -106,13 +105,10 @@ class LogsPage(BasePage):
         self._orchestra_text_label = None
         self._send_status_text = ""
         self._send_status_tone = "neutral"
-        self._controls_actions_group = None
-        self._copy_action_card = None
-        self._clear_action_card = None
-        self._folder_action_card = None
-        self._send_actions_group = None
-        self._send_log_action_card = None
-        self._open_logs_action_card = None
+        self._controls_actions_title = None
+        self._controls_actions_bar = None
+        self._send_actions_title = None
+        self._send_actions_bar = None
 
         # Winws output worker
         self._winws_thread = None
@@ -428,14 +424,10 @@ class LogsPage(BasePage):
         except Exception:
             pass
 
-        try:
-            title_label = getattr(getattr(self, "_controls_actions_group", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(
-                    tr_catalog("page.logs.actions.title", language=self._ui_language, default="Действия")
-                )
-        except Exception:
-            pass
+        if self._controls_actions_title is not None:
+            self._controls_actions_title.setText(
+                tr_catalog("page.logs.actions.title", language=self._ui_language, default="Действия")
+            )
 
         try:
             set_tooltip(
@@ -449,39 +441,27 @@ class LogsPage(BasePage):
             self.copy_btn.setText(tr_catalog("page.logs.button.copy", language=self._ui_language, default="Копировать"))
             self.clear_btn.setText(tr_catalog("page.logs.button.clear", language=self._ui_language, default="Очистить"))
             self.folder_btn.setText(tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка"))
-            if self._copy_action_card is not None:
-                self._copy_action_card.setTitle(
-                    tr_catalog("page.logs.button.copy", language=self._ui_language, default="Копировать")
+            self.copy_btn.setToolTip(
+                tr_catalog(
+                    "page.logs.action.copy.description",
+                    language=self._ui_language,
+                    default="Скопировать содержимое текущего лога в буфер обмена.",
                 )
-                self._copy_action_card.setContent(
-                    tr_catalog(
-                        "page.logs.action.copy.description",
-                        language=self._ui_language,
-                        default="Скопировать содержимое текущего лога в буфер обмена.",
-                    )
+            )
+            self.clear_btn.setToolTip(
+                tr_catalog(
+                    "page.logs.action.clear.description",
+                    language=self._ui_language,
+                    default="Очистить только текущее окно просмотра, не удаляя файл лога.",
                 )
-            if self._clear_action_card is not None:
-                self._clear_action_card.setTitle(
-                    tr_catalog("page.logs.button.clear", language=self._ui_language, default="Очистить")
+            )
+            self.folder_btn.setToolTip(
+                tr_catalog(
+                    "page.logs.action.folder.description",
+                    language=self._ui_language,
+                    default="Открыть папку logs с файлами приложения.",
                 )
-                self._clear_action_card.setContent(
-                    tr_catalog(
-                        "page.logs.action.clear.description",
-                        language=self._ui_language,
-                        default="Очистить только текущее окно просмотра, не удаляя файл лога.",
-                    )
-                )
-            if self._folder_action_card is not None:
-                self._folder_action_card.setTitle(
-                    tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка")
-                )
-                self._folder_action_card.setContent(
-                    tr_catalog(
-                        "page.logs.action.folder.description",
-                        language=self._ui_language,
-                        default="Открыть папку logs с файлами приложения.",
-                    )
-                )
+            )
             self.errors_title_label.setText(tr_catalog("page.logs.errors.title", language=self._ui_language, default="Ошибки и предупреждения"))
             self.clear_errors_btn.setText(tr_catalog("page.logs.button.clear", language=self._ui_language, default="Очистить"))
             self.clear_winws_btn.setText(tr_catalog("page.logs.button.clear", language=self._ui_language, default="Очистить"))
@@ -500,9 +480,8 @@ class LogsPage(BasePage):
                 self.send_card,
                 tr_catalog("page.logs.send.card.title", language=self._ui_language, default="Поддержка через GitHub Discussions"),
             )
-            title_label = getattr(getattr(self, "_send_actions_group", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText(
+            if self._send_actions_title is not None:
+                self._send_actions_title.setText(
                     tr_catalog("page.logs.send.actions.title", language=self._ui_language, default="Действия")
                 )
             self._orchestra_text_label.setText(
@@ -532,28 +511,20 @@ class LogsPage(BasePage):
             self.open_logs_folder_btn.setText(
                 tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка")
             )
-            if self._send_log_action_card is not None:
-                self._send_log_action_card.setTitle(
-                    tr_catalog("page.logs.send.button.send", language=self._ui_language, default="Подготовить обращение")
+            self.send_log_btn.setToolTip(
+                tr_catalog(
+                    "page.logs.send.action.send.description",
+                    language=self._ui_language,
+                    default="Собрать ZIP из свежих логов, скопировать шаблон обращения и открыть GitHub Discussions.",
                 )
-                self._send_log_action_card.setContent(
-                    tr_catalog(
-                        "page.logs.send.action.send.description",
-                        language=self._ui_language,
-                        default="Собрать ZIP из свежих логов, скопировать шаблон обращения и открыть GitHub Discussions.",
-                    )
+            )
+            self.open_logs_folder_btn.setToolTip(
+                tr_catalog(
+                    "page.logs.send.action.folder.description",
+                    language=self._ui_language,
+                    default="Открыть папку logs, где лежат логи и подготовленные support bundles.",
                 )
-            if self._open_logs_action_card is not None:
-                self._open_logs_action_card.setTitle(
-                    tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка")
-                )
-                self._open_logs_action_card.setContent(
-                    tr_catalog(
-                        "page.logs.send.action.folder.description",
-                        language=self._ui_language,
-                        default="Открыть папку logs, где лежат логи и подготовленные support bundles.",
-                    )
-                )
+            )
         except Exception:
             pass
 
@@ -608,54 +579,53 @@ class LogsPage(BasePage):
         controls_card.add_layout(controls_main)
         parent_layout.addWidget(controls_card)
 
-        self._controls_actions_group = SettingCardGroup(
-            tr_catalog("page.logs.actions.title", language=self._ui_language, default="Действия"),
-            self.content,
+        self._controls_actions_title = StrongBodyLabel(
+            tr_catalog("page.logs.actions.title", language=self._ui_language, default="Действия")
         )
+        parent_layout.addWidget(self._controls_actions_title)
 
-        self._copy_action_card = PushSettingCard(
-            tr_catalog("page.logs.button.copy", language=self._ui_language, default="Копировать"),
-            qta.icon("fa5s.copy", color=tokens.accent_hex),
-            tr_catalog("page.logs.button.copy", language=self._ui_language, default="Копировать"),
+        self._controls_actions_bar = QuickActionsBar(self.content)
+
+        self.copy_btn = PushButton()
+        self.copy_btn.setText(tr_catalog("page.logs.button.copy", language=self._ui_language, default="Копировать"))
+        self.copy_btn.setIcon(qta.icon("fa5s.copy", color=tokens.accent_hex))
+        self.copy_btn.setToolTip(
             tr_catalog(
                 "page.logs.action.copy.description",
                 language=self._ui_language,
                 default="Скопировать содержимое текущего лога в буфер обмена.",
-            ),
+            )
         )
-        self._copy_action_card.clicked.connect(self._copy_log)
-        self.copy_btn = self._copy_action_card.button
-        self._controls_actions_group.addSettingCard(self._copy_action_card)
+        self.copy_btn.clicked.connect(self._copy_log)
+        self._controls_actions_bar.add_button(self.copy_btn)
 
-        self._clear_action_card = PushSettingCard(
-            tr_catalog("page.logs.button.clear", language=self._ui_language, default="Очистить"),
-            qta.icon("fa5s.eraser", color="#ff9800"),
-            tr_catalog("page.logs.button.clear", language=self._ui_language, default="Очистить"),
+        self.clear_btn = PushButton()
+        self.clear_btn.setText(tr_catalog("page.logs.button.clear", language=self._ui_language, default="Очистить"))
+        self.clear_btn.setIcon(qta.icon("fa5s.eraser", color="#ff9800"))
+        self.clear_btn.setToolTip(
             tr_catalog(
                 "page.logs.action.clear.description",
                 language=self._ui_language,
                 default="Очистить только текущее окно просмотра, не удаляя файл лога.",
-            ),
+            )
         )
-        self._clear_action_card.clicked.connect(self._clear_view)
-        self.clear_btn = self._clear_action_card.button
-        self._controls_actions_group.addSettingCard(self._clear_action_card)
+        self.clear_btn.clicked.connect(self._clear_view)
+        self._controls_actions_bar.add_button(self.clear_btn)
 
-        self._folder_action_card = PushSettingCard(
-            tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка"),
-            qta.icon("fa5s.folder-open", color=tokens.accent_hex),
-            tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка"),
+        self.folder_btn = PushButton()
+        self.folder_btn.setText(tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка"))
+        self.folder_btn.setIcon(qta.icon("fa5s.folder-open", color=tokens.accent_hex))
+        self.folder_btn.setToolTip(
             tr_catalog(
                 "page.logs.action.folder.description",
                 language=self._ui_language,
                 default="Открыть папку logs с файлами приложения.",
-            ),
+            )
         )
-        self._folder_action_card.clicked.connect(self._open_folder)
-        self.folder_btn = self._folder_action_card.button
-        self._controls_actions_group.addSettingCard(self._folder_action_card)
+        self.folder_btn.clicked.connect(self._open_folder)
+        self._controls_actions_bar.add_button(self.folder_btn)
 
-        parent_layout.addWidget(self._controls_actions_group)
+        parent_layout.addWidget(self._controls_actions_bar)
 
         # ═══════════════════════════════════════════════════════════
         # Область логов
@@ -888,40 +858,44 @@ class LogsPage(BasePage):
         send_card.add_layout(send_layout)
         parent_layout.addWidget(send_card)
 
-        self._send_actions_group = SettingCardGroup(
-            tr_catalog("page.logs.send.actions.title", language=self._ui_language, default="Действия"),
-            self.content,
+        self._send_actions_title = StrongBodyLabel(
+            tr_catalog("page.logs.send.actions.title", language=self._ui_language, default="Действия")
         )
+        parent_layout.addWidget(self._send_actions_title)
 
-        self._send_log_action_card = PushSettingCard(
-            tr_catalog("page.logs.send.button.send", language=self._ui_language, default="Подготовить обращение"),
-            qta.icon("fa5b.github", color=tokens.accent_hex),
-            tr_catalog("page.logs.send.button.send", language=self._ui_language, default="Подготовить обращение"),
+        self._send_actions_bar = QuickActionsBar(self.content)
+
+        self.send_log_btn = PushButton()
+        self.send_log_btn.setText(
+            tr_catalog("page.logs.send.button.send", language=self._ui_language, default="Подготовить обращение")
+        )
+        self.send_log_btn.setIcon(qta.icon("fa5b.github", color=tokens.accent_hex))
+        self.send_log_btn.setToolTip(
             tr_catalog(
                 "page.logs.send.action.send.description",
                 language=self._ui_language,
                 default="Собрать ZIP из свежих логов, скопировать шаблон обращения и открыть GitHub Discussions.",
-            ),
+            )
         )
-        self._send_log_action_card.clicked.connect(self._prepare_support_from_logs)
-        self.send_log_btn = self._send_log_action_card.button
-        self._send_actions_group.addSettingCard(self._send_log_action_card)
+        self.send_log_btn.clicked.connect(self._prepare_support_from_logs)
+        self._send_actions_bar.add_button(self.send_log_btn)
 
-        self._open_logs_action_card = PushSettingCard(
-            tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка"),
-            qta.icon("fa5s.folder-open", color=tokens.accent_hex),
-            tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка"),
+        self.open_logs_folder_btn = PushButton()
+        self.open_logs_folder_btn.setText(
+            tr_catalog("page.logs.button.folder", language=self._ui_language, default="Папка")
+        )
+        self.open_logs_folder_btn.setIcon(qta.icon("fa5s.folder-open", color=tokens.accent_hex))
+        self.open_logs_folder_btn.setToolTip(
             tr_catalog(
                 "page.logs.send.action.folder.description",
                 language=self._ui_language,
                 default="Открыть папку logs, где лежат логи и подготовленные support bundles.",
-            ),
+            )
         )
-        self._open_logs_action_card.clicked.connect(self._open_folder)
-        self.open_logs_folder_btn = self._open_logs_action_card.button
-        self._send_actions_group.addSettingCard(self._open_logs_action_card)
+        self.open_logs_folder_btn.clicked.connect(self._open_folder)
+        self._send_actions_bar.add_button(self.open_logs_folder_btn)
 
-        parent_layout.addWidget(self._send_actions_group)
+        parent_layout.addWidget(self._send_actions_bar)
 
         # Растяжка чтобы форма была вверху
         parent_layout.addStretch()
