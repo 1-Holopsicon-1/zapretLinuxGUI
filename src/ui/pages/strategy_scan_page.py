@@ -384,22 +384,15 @@ class StrategyScanPage(BasePage):
         w.setStyleSheet("background: transparent;")
         return w
 
-    def _scan_protocol_from_combo(self) -> str:
-        """Current scan protocol from UI combo."""
-        return self._controller.scan_protocol_from_value(self._protocol_combo.currentData())
-
-    def _udp_games_scope_from_combo(self) -> str:
-        """Current UDP games scope selection from UI combo."""
-        if self._games_scope_combo is None:
-            return "all"
-        data = self._games_scope_combo.currentData()
-        return self._controller.normalize_udp_games_scope(str(data or "all"))
-
     def _on_protocol_changed(self, _index: int) -> None:
         """Adjust target input defaults when protocol changes."""
-        protocol = self._scan_protocol_from_combo()
+        selection = self._controller.build_selection_state(
+            protocol_value=self._protocol_combo.currentData(),
+            udp_scope_value=self._games_scope_combo.currentData() if self._games_scope_combo is not None else "all",
+            mode_index=self._mode_combo.currentIndex() if self._mode_combo is not None else 0,
+        )
         plan = self._controller.build_protocol_ui_plan(
-            scan_protocol=protocol,
+            scan_protocol=selection.scan_protocol,
             current_value=self._target_input.text(),
         )
 
@@ -428,9 +421,14 @@ class StrategyScanPage(BasePage):
         if self._udp_scope_hint_label is None:
             return
 
+        selection = self._controller.build_selection_state(
+            protocol_value=self._protocol_combo.currentData(),
+            udp_scope_value=self._games_scope_combo.currentData() if self._games_scope_combo is not None else "all",
+            mode_index=self._mode_combo.currentIndex() if self._mode_combo is not None else 0,
+        )
         hint_plan = self._controller.build_udp_scope_hint_plan(
-            scan_protocol=self._scan_protocol_from_combo(),
-            udp_games_scope=self._udp_games_scope_from_combo(),
+            scan_protocol=selection.scan_protocol,
+            udp_games_scope=selection.udp_games_scope,
             scope_all_label=tr_catalog("page.strategy_scan.udp_scope_all", default="Все ipset (по умолчанию)"),
             scope_games_only_label=tr_catalog("page.strategy_scan.udp_scope_games_only", default="Только игровые ipset"),
         )
@@ -447,9 +445,13 @@ class StrategyScanPage(BasePage):
             menu = RoundMenu(parent=self)
         else:
             menu = QMenu(self)
-        protocol = self._scan_protocol_from_combo()
+        selection = self._controller.build_selection_state(
+            protocol_value=self._protocol_combo.currentData(),
+            udp_scope_value=self._games_scope_combo.currentData() if self._games_scope_combo is not None else "all",
+            mode_index=self._mode_combo.currentIndex() if self._mode_combo is not None else 0,
+        )
         menu_plan = self._controller.build_quick_target_menu_plan(
-            scan_protocol=protocol,
+            scan_protocol=selection.scan_protocol,
             current_value=self._target_input.text(),
         )
 
@@ -535,16 +537,17 @@ class StrategyScanPage(BasePage):
         if self._worker and self._worker.is_running:
             return
 
-        scan_protocol = self._scan_protocol_from_combo()
-        scan_games_scope = self._udp_games_scope_from_combo() if scan_protocol == "udp_games" else "all"
-
-        mode = self._controller.mode_from_index(self._mode_combo.currentIndex())
+        selection = self._controller.build_selection_state(
+            protocol_value=self._protocol_combo.currentData(),
+            udp_scope_value=self._games_scope_combo.currentData() if self._games_scope_combo is not None else "all",
+            mode_index=self._mode_combo.currentIndex(),
+        )
 
         start_plan = self._controller.plan_scan_start(
             raw_target_input=self._target_input.text(),
-            scan_protocol=scan_protocol,
-            udp_games_scope=scan_games_scope,
-            mode=mode,
+            scan_protocol=selection.scan_protocol,
+            udp_games_scope=selection.udp_games_scope,
+            mode=selection.mode,
             previous_target=self._scan_target,
             previous_protocol=self._scan_protocol,
             previous_scope=self._scan_udp_games_scope,
@@ -821,9 +824,14 @@ class StrategyScanPage(BasePage):
             self._quick_domain_btn.setEnabled(plan.quick_domain_enabled)
 
     def _reset_ui(self):
+        selection = self._controller.build_selection_state(
+            protocol_value=self._protocol_combo.currentData(),
+            udp_scope_value=self._games_scope_combo.currentData() if self._games_scope_combo is not None else "all",
+            mode_index=self._mode_combo.currentIndex() if self._mode_combo is not None else 0,
+        )
         self._apply_interaction_plan(
             self._controller.build_idle_interaction_plan(
-                is_udp_games=self._scan_protocol_from_combo() == "udp_games",
+                is_udp_games=selection.scan_protocol == "udp_games",
             )
         )
 
@@ -833,24 +841,23 @@ class StrategyScanPage(BasePage):
         self._support_status_label.setText(str(text or "").strip())
 
     def _prepare_support_from_strategy_scan(self) -> None:
-        scan_protocol = self._scan_protocol or self._scan_protocol_from_combo()
-        target = self._scan_target or self._controller.normalize_target_input(
-            self._target_input.text(),
-            scan_protocol,
+        support_context = self._controller.build_support_context(
+            stored_scan_protocol=self._scan_protocol,
+            stored_scan_target=self._scan_target,
+            raw_protocol_value=self._protocol_combo.currentData() if self._protocol_combo is not None else None,
+            raw_target_input=self._target_input.text(),
+            raw_protocol_label=self._protocol_combo.currentText() if self._protocol_combo is not None else "",
+            raw_mode_label=self._mode_combo.currentText() if self._mode_combo is not None else "",
+            stored_mode=self._scan_mode,
         )
-        if not target:
-            target = self._controller.default_target_for_protocol(scan_protocol)
-
-        protocol_label = self._protocol_combo.currentText() if self._protocol_combo is not None else scan_protocol
-        mode_label = self._mode_combo.currentText() if self._mode_combo is not None else self._scan_mode
 
         try:
             feedback = self._controller.prepare_support(
                 run_log_file=self._run_log_file,
-                target=target,
-                protocol_label=protocol_label,
-                mode_label=mode_label,
-                scan_protocol=scan_protocol,
+                target=support_context.target,
+                protocol_label=support_context.protocol_label,
+                mode_label=support_context.mode_label,
+                scan_protocol=support_context.scan_protocol,
             )
             result = feedback.result
             if result.zip_path:

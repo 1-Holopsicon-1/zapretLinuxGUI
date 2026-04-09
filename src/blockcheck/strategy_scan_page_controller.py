@@ -150,6 +150,21 @@ class StrategyScanUiMessagePlan:
     status_text: str = ""
 
 
+@dataclass(slots=True)
+class StrategyScanSelectionState:
+    scan_protocol: str
+    udp_games_scope: str
+    mode: str
+
+
+@dataclass(slots=True)
+class StrategyScanSupportContext:
+    scan_protocol: str
+    target: str
+    protocol_label: str
+    mode_label: str
+
+
 class StrategyScanPageController:
     def __init__(self) -> None:
         self._quick_domains_cache: list[str] | None = None
@@ -168,6 +183,25 @@ class StrategyScanPageController:
     def mode_from_index(index: int) -> str:
         mode_map = {0: "quick", 1: "standard", 2: "full"}
         return mode_map.get(int(index), "quick")
+
+    def build_selection_state(
+        self,
+        *,
+        protocol_value,
+        udp_scope_value,
+        mode_index: int,
+    ) -> StrategyScanSelectionState:
+        scan_protocol = self.scan_protocol_from_value(protocol_value)
+        udp_games_scope = (
+            self.normalize_udp_games_scope(udp_scope_value)
+            if scan_protocol == "udp_games"
+            else "all"
+        )
+        return StrategyScanSelectionState(
+            scan_protocol=scan_protocol,
+            udp_games_scope=udp_games_scope,
+            mode=self.mode_from_index(mode_index),
+        )
 
     @staticmethod
     def normalize_udp_games_scope(scope: str) -> str:
@@ -580,6 +614,31 @@ class StrategyScanPageController:
             title_default="Ошибка сканирования",
             body_text=f"Не удалось подготовить обращение:\n{error_text}",
             status_text="Ошибка подготовки",
+        )
+
+    def build_support_context(
+        self,
+        *,
+        stored_scan_protocol: str,
+        stored_scan_target: str,
+        raw_protocol_value,
+        raw_target_input: str,
+        raw_protocol_label: str,
+        raw_mode_label: str,
+        stored_mode: str,
+    ) -> StrategyScanSupportContext:
+        scan_protocol = stored_scan_protocol or self.scan_protocol_from_value(raw_protocol_value)
+        target = stored_scan_target or self.normalize_target_input(raw_target_input, scan_protocol)
+        if not target:
+            target = self.default_target_for_protocol(scan_protocol)
+
+        protocol_label = str(raw_protocol_label or "").strip() or scan_protocol
+        mode_label = str(raw_mode_label or "").strip() or str(stored_mode or "")
+        return StrategyScanSupportContext(
+            scan_protocol=scan_protocol,
+            target=target,
+            protocol_label=protocol_label,
+            mode_label=mode_label,
         )
 
     @staticmethod
