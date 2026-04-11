@@ -100,6 +100,12 @@ class AutostartAppInitPlan:
     strategy_text: str
 
 
+@dataclass(slots=True)
+class AutostartPageInitPlan:
+    should_schedule_detection: bool
+    detection_delay_ms: int
+
+
 class AutostartPageController:
     @staticmethod
     def create_detector_worker() -> AutostartDetectorWorker:
@@ -119,6 +125,13 @@ class AutostartPageController:
     def build_show_event_plan(*, spontaneous: bool) -> AutostartShowEventPlan:
         return AutostartShowEventPlan(
             should_schedule_detection=not bool(spontaneous),
+            detection_delay_ms=50,
+        )
+
+    @staticmethod
+    def build_page_init_plan(*, runtime_initialized: bool) -> AutostartPageInitPlan:
+        return AutostartPageInitPlan(
+            should_schedule_detection=not bool(runtime_initialized),
             detection_delay_ms=50,
         )
 
@@ -200,10 +213,11 @@ class AutostartPageController:
             return None, None, None
         return collect_direct_strategy_args(app_instance)
 
-    def setup_direct_service(self, app_instance) -> AutostartActionResult:
+    @staticmethod
+    def setup_direct_service(app_instance) -> AutostartActionResult:
         from autostart.autostart_direct_service import setup_direct_service
 
-        args, name, winws_exe = self._collect_direct_strategy(app_instance)
+        args, name, winws_exe = AutostartPageController._collect_direct_strategy(app_instance)
         if not args or not winws_exe:
             return AutostartActionResult(False, None, None)
 
@@ -217,10 +231,11 @@ class AutostartPageController:
         )
         return AutostartActionResult(ok=ok, autostart_type="service" if ok else None, strategy_name=name)
 
-    def setup_direct_logon_task(self, app_instance) -> AutostartActionResult:
+    @staticmethod
+    def setup_direct_logon_task(app_instance) -> AutostartActionResult:
         from autostart.autostart_direct import setup_direct_autostart_task
 
-        args, name, winws_exe = self._collect_direct_strategy(app_instance)
+        args, name, winws_exe = AutostartPageController._collect_direct_strategy(app_instance)
         if not args or not winws_exe:
             return AutostartActionResult(False, None, None)
 
@@ -234,10 +249,11 @@ class AutostartPageController:
         )
         return AutostartActionResult(ok=ok, autostart_type="logon" if ok else None, strategy_name=name)
 
-    def setup_direct_boot_task(self, app_instance) -> AutostartActionResult:
+    @staticmethod
+    def setup_direct_boot_task(app_instance) -> AutostartActionResult:
         from autostart.autostart_direct import setup_direct_autostart_service
 
-        args, name, winws_exe = self._collect_direct_strategy(app_instance)
+        args, name, winws_exe = AutostartPageController._collect_direct_strategy(app_instance)
         if not args or not winws_exe:
             return AutostartActionResult(False, None, None)
 

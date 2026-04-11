@@ -55,7 +55,6 @@ class NetrogatPage(BasePage):
             title_key="page.netrogat.title",
             subtitle_key="page.netrogat.subtitle",
         )
-        self._controller = HostlistPageController()
         self._desc_label = None
         self._add_card = None
         self._actions_card = None
@@ -73,17 +72,15 @@ class NetrogatPage(BasePage):
             "user": 0,
             "saved": False,
         }
-        self._initial_load_requested = False
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._runtime_initialized = False
+        self._build_ui()
         self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        if self._initial_load_requested:
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
             return
-        self._initial_load_requested = True
+        self._runtime_initialized = True
         QTimer.singleShot(0, self._load)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
@@ -265,7 +262,7 @@ class NetrogatPage(BasePage):
         self.layout.addWidget(self.status_label)
 
     def _load(self):
-        state = self._controller.load_custom_netrogat_text()
+        state = HostlistPageController.load_custom_netrogat_text()
         # Блокируем сигнал чтобы не срабатывало автосохранение
         self.text_edit.blockSignals(True)
         self.text_edit.setPlainText(state.text)
@@ -381,7 +378,7 @@ class NetrogatPage(BasePage):
 
     def _save(self):
         text = self.text_edit.toPlainText()
-        state = self._controller.save_custom_netrogat_text(text)
+        state = HostlistPageController.save_custom_netrogat_text(text)
         if state.success:
             # Обновляем UI - заменяем URL на домены
             new_text = state.normalized_text
@@ -404,14 +401,14 @@ class NetrogatPage(BasePage):
         log("Не удалось сохранить netrogat.user.txt или синхронизировать итоговый netrogat.txt", "ERROR")
 
     def _update_status(self):
-        plan = self._controller.build_custom_netrogat_status_plan(self.text_edit.toPlainText())
+        plan = HostlistPageController.build_custom_netrogat_status_plan(self.text_edit.toPlainText())
         self._status_state["total"] = plan.total_count
         self._status_state["base"] = plan.base_count
         self._status_state["user"] = plan.user_count
         self._render_status_label()
 
     def _add(self):
-        plan = self._controller.build_add_custom_netrogat_plan(
+        plan = HostlistPageController.build_add_custom_netrogat_plan(
             raw_text=self.input.text().strip(),
             current_text=self.text_edit.toPlainText(),
         )
@@ -466,7 +463,7 @@ class NetrogatPage(BasePage):
         try:
             # Сохраняем перед открытием
             self._save()
-            self._controller.open_netrogat_user_file()
+            HostlistPageController.open_netrogat_user_file()
         except Exception as e:
             log(f"Ошибка открытия netrogat.user.txt: {e}", "ERROR")
             if InfoBar:
@@ -480,7 +477,7 @@ class NetrogatPage(BasePage):
         try:
             # Сохраняем user и пересобираем итог перед открытием
             self._save()
-            self._controller.open_netrogat_final_file()
+            HostlistPageController.open_netrogat_final_file()
         except Exception as e:
             log(f"Ошибка открытия итогового netrogat.txt: {e}", "ERROR")
             if InfoBar:
@@ -496,7 +493,7 @@ class NetrogatPage(BasePage):
 
     def _add_missing_defaults(self):
         self._save()
-        added = self._controller.add_missing_netrogat_defaults()
+        added = HostlistPageController.add_missing_netrogat_defaults()
         if added == 0:
             if InfoBar:
                 InfoBar.success(

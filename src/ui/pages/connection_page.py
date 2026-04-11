@@ -73,10 +73,10 @@ class ConnectionTestPage(BasePage):
         self.worker = None
         self.worker_thread = None
         self.stop_check_timer = None
-        self._controller = ConnectionPageController()
         self._actions_title_label = None
         self._actions_bar = None
         self._controls_card = None
+        self._pending_start_focus = False
 
         # Контейнер с ограниченной шириной, чтобы не расползалось за края
         self.container = QWidget(self.content)
@@ -87,7 +87,30 @@ class ConnectionTestPage(BasePage):
         self.container_layout.setSpacing(14)
         self.container_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
-        self.enable_deferred_ui_build(build=self._build_page_ui)
+        self._build_page_ui()
+
+    def _apply_pending_start_focus_if_ready(self) -> None:
+        if not self._pending_start_focus:
+            return
+        if not self.is_page_ready():
+            return
+        self.run_when_page_ready(self._apply_pending_start_focus)
+
+    def request_start_focus(self) -> None:
+        self._pending_start_focus = True
+        self._apply_pending_start_focus_if_ready()
+
+    def _apply_pending_start_focus(self) -> None:
+        if not self._pending_start_focus:
+            return
+        button = getattr(self, "start_btn", None)
+        if button is None:
+            return
+        try:
+            button.setFocus()
+        except Exception:
+            return
+        self._pending_start_focus = False
 
     def _apply_interaction_state(
         self,
@@ -243,7 +266,7 @@ class ConnectionTestPage(BasePage):
             return
 
         selection = self.test_combo.currentText()
-        plan = self._controller.build_start_plan(selection=selection)
+        plan = ConnectionPageController.build_start_plan(selection=selection)
 
         self.result_text.clear()
         for line in plan.start_lines:
@@ -277,7 +300,7 @@ class ConnectionTestPage(BasePage):
         if not self.worker or not self.worker_thread:
             return
 
-        plan = self._controller.build_stop_plan()
+        plan = ConnectionPageController.build_stop_plan()
         for line in plan.append_lines:
             self._append(line)
         self._set_status(plan.status_text, plan.status_tone)
@@ -290,7 +313,7 @@ class ConnectionTestPage(BasePage):
             if not self.stop_check_timer:
                 return
             self.stop_check_attempts += 1
-            poll_plan = self._controller.build_stop_poll_plan(
+            poll_plan = ConnectionPageController.build_stop_poll_plan(
                 attempt_count=self.stop_check_attempts,
                 thread_running=bool(self.worker_thread and self.worker_thread.isRunning()),
                 max_attempts=plan.max_attempts,
@@ -318,7 +341,7 @@ class ConnectionTestPage(BasePage):
         self._on_worker_finished()
 
     def _on_worker_update(self, message: str):
-        for line in self._controller.build_worker_update_lines(message):
+        for line in ConnectionPageController.build_worker_update_lines(message):
             self._append(line)
 
         scrollbar = self.result_text.verticalScrollBar()
@@ -330,7 +353,7 @@ class ConnectionTestPage(BasePage):
         self.worker_thread = None
         self.stop_check_timer = None
 
-        plan = self._controller.build_finish_plan()
+        plan = ConnectionPageController.build_finish_plan()
         self._apply_interaction_state(
             start_enabled=plan.start_enabled,
             stop_enabled=plan.stop_enabled,
@@ -348,7 +371,7 @@ class ConnectionTestPage(BasePage):
     # DNS и поддержка
     # ──────────────────────────────────────────────────────────────
     def open_support_with_log(self):
-        plan = self._controller.prepare_support_request_for_connection(
+        plan = ConnectionPageController.prepare_support_request_for_connection(
             selection=self.test_combo.currentText(),
         )
         for line in plan.log_lines:
@@ -378,8 +401,6 @@ class ConnectionTestPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-        if self.is_deferred_ui_build_pending():
-            return
 
         try:
             if self._controls_card is not None:
@@ -437,7 +458,7 @@ class ConnectionTestPage(BasePage):
         """Очистка потоков при закрытии"""
         from log import log
         try:
-            cleanup_plan = self._controller.build_cleanup_plan(
+            cleanup_plan = ConnectionPageController.build_cleanup_plan(
                 has_worker=self.worker is not None,
                 thread_running=bool(self.worker_thread and self.worker_thread.isRunning()),
             )

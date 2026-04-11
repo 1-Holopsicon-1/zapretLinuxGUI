@@ -39,7 +39,6 @@ class DNSCheckPage(BasePage):
         )
         self.worker = None
         self.thread = None
-        self._controller = DNSCheckPageController()
         self._status_tone = "muted"
         self._status_bold = False
         self._info_icon_labels = []
@@ -52,9 +51,7 @@ class DNSCheckPage(BasePage):
         self._actions_title_label = None
         self._actions_bar = None
 
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         self._apply_page_theme(force=True)
 
     def _apply_interaction_state(
@@ -270,7 +267,7 @@ class DNSCheckPage(BasePage):
             return
         
         self.result_text.clear()
-        start_plan = self._controller.build_start_plan()
+        start_plan = DNSCheckPageController.build_start_plan()
         self._apply_interaction_state(
             check_enabled=start_plan.check_enabled,
             quick_enabled=start_plan.quick_enabled,
@@ -281,7 +278,7 @@ class DNSCheckPage(BasePage):
         
         # Создаём поток и worker
         self.thread = QThread()
-        self.worker = self._controller.create_worker()
+        self.worker = DNSCheckPageController.create_worker()
         self.worker.moveToThread(self.thread)
         
         # Подключаем сигналы
@@ -296,7 +293,7 @@ class DNSCheckPage(BasePage):
         """Добавляет текст в результаты с форматированием."""
         tokens = get_theme_tokens()
         semantic = get_semantic_palette()
-        plan = self._controller.build_result_line_plan(text)
+        plan = DNSCheckPageController.build_result_line_plan(text)
         role_map = {
             "success": semantic.success,
             "error": semantic.error,
@@ -324,7 +321,7 @@ class DNSCheckPage(BasePage):
     def on_check_finished(self, results):
         """Обработчик завершения проверки."""
         # Обновляем статус
-        plan = self._controller.build_finish_plan(results)
+        plan = DNSCheckPageController.build_finish_plan(results)
         self._apply_interaction_state(
             check_enabled=plan.check_enabled,
             quick_enabled=plan.quick_enabled,
@@ -334,7 +331,7 @@ class DNSCheckPage(BasePage):
         self._set_status(plan.status_text, tone=plan.status_tone, bold=True)
         
         # Очистка потока
-        cleanup_plan = self._controller.build_cleanup_plan(
+        cleanup_plan = DNSCheckPageController.build_cleanup_plan(
             has_thread=self.thread is not None,
             has_worker=self.worker is not None,
             thread_running=bool(self.thread and self.thread.isRunning()),
@@ -352,7 +349,7 @@ class DNSCheckPage(BasePage):
     def quick_dns_check(self):
         """Выполняет быструю проверку только системного DNS."""
         self.result_text.clear()
-        plan = self._controller.run_quick_dns_check()
+        plan = DNSCheckPageController.run_quick_dns_check()
         for line in plan.lines:
             self.append_result(line)
         self.save_button.setEnabled(plan.enable_save)
@@ -362,7 +359,7 @@ class DNSCheckPage(BasePage):
         from PyQt6.QtWidgets import QFileDialog
         
         # Выбираем путь для сохранения
-        default_filename = self._controller.build_save_default_filename()
+        default_filename = DNSCheckPageController.build_save_default_filename()
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Сохранить результаты DNS проверки",
@@ -371,7 +368,7 @@ class DNSCheckPage(BasePage):
         )
         
         if file_path:
-            plan = self._controller.save_results_text(
+            plan = DNSCheckPageController.save_results_text(
                 file_path=file_path,
                 plain_text=self.result_text.toPlainText(),
             )
@@ -385,7 +382,7 @@ class DNSCheckPage(BasePage):
         """Очистка потоков при закрытии"""
         from log import log
         try:
-            cleanup_plan = self._controller.build_cleanup_plan(
+            cleanup_plan = DNSCheckPageController.build_cleanup_plan(
                 has_thread=self.thread is not None,
                 has_worker=self.worker is not None,
                 thread_running=bool(self.thread and self.thread.isRunning()),

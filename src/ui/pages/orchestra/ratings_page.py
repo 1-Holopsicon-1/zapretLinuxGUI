@@ -49,11 +49,17 @@ class OrchestraRatingsPage(BasePage):
         self._no_runner = False
         self._filter_card = None
         self._history_card = None
+        self._runtime_initialized = False
 
-        self.enable_deferred_ui_build(build=self._setup_ui, after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._setup_ui()
         self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
+
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
+            return
+        self._runtime_initialized = True
+        self._refresh_data()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)
@@ -152,11 +158,6 @@ class OrchestraRatingsPage(BasePage):
             icon_name = "mdi.loading" if self._refresh_loading else "mdi.refresh"
             icon_color = tokens.fg_faint if self._refresh_loading else tokens.fg
             self.refresh_btn.setIcon(qta.icon(icon_name, color=icon_color))
-
-    def on_page_activated(self, first_show: bool) -> None:
-        """При активации страницы загружаем данные."""
-        _ = first_show
-        self._refresh_data()
 
     def _get_runner(self):
         """Получает orchestra_runner из главного окна"""
@@ -295,8 +296,6 @@ class OrchestraRatingsPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-        if self.is_deferred_ui_build_pending():
-            return
 
         if self._filter_card is not None and hasattr(self._filter_card, "_title_label"):
             self._filter_card._title_label.setText(

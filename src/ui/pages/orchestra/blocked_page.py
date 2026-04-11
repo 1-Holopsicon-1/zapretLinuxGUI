@@ -238,15 +238,20 @@ class OrchestraBlockedPage(BasePage):
         self._hint_label = None
         self._add_card = None
         self._list_card = None
-        # Инициализируем пустые данные (будут загружены при первом showEvent)
+        # Инициализируем пустые данные. Первый reload выполняется после build/init страницы.
         self._direct_blocked_by_askey = {askey: {} for askey in ASKEY_ALL}
-        self._initial_load_done = False
+        self._runtime_initialized = False
         self._refresh_loading = False
 
-        self.enable_deferred_ui_build(build=self._setup_ui, after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._setup_ui()
         self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
+
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
+            return
+        self._runtime_initialized = True
+        self._reload_from_registry()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)
@@ -443,8 +448,6 @@ class OrchestraBlockedPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-        if self.is_deferred_ui_build_pending():
-            return
 
         if self._add_card is not None and hasattr(self._add_card, "_title_label"):
             self._add_card._title_label.setText(
@@ -489,14 +492,6 @@ class OrchestraBlockedPage(BasePage):
         )
 
         self._refresh_data()
-
-    def on_page_activated(self, first_show: bool) -> None:
-        """При активации страницы загружаем данные один раз."""
-        _ = first_show
-        # Загружаем данные только при первом показе
-        if not self._initial_load_done:
-            self._initial_load_done = True
-            self._reload_from_registry()
 
     def _get_runner(self):
         """Получает orchestra_runner из главного окна"""

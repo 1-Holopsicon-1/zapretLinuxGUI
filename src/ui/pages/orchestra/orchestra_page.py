@@ -64,7 +64,6 @@ class OrchestraPage(BasePage):
             subtitle_key="page.orchestra.subtitle",
         )
 
-        self._controller = OrchestraPageController()
         self._info_label = None
         self._filter_label = None
         self._clear_filter_btn = None
@@ -80,7 +79,7 @@ class OrchestraPage(BasePage):
         self._clear_learned_reset_timer.setSingleShot(True)
         self._clear_learned_reset_timer.timeout.connect(self._reset_clear_learned_button)
 
-        self.enable_deferred_ui_build()
+        self._build_ui()
 
         # Путь к лог-файлу (берём из runner динамически)
         self._log_file_path = None  # Устанавливается в _update_log_file_path()
@@ -102,6 +101,7 @@ class OrchestraPage(BasePage):
         self._log_queue_timer = QTimer(self)
         self._log_queue_timer.timeout.connect(self._process_log_queue)
         # НЕ стартуем здесь — только при start_monitoring() / showEvent()
+        self._runtime_started = False
 
         # Подключаем сигнал для обновления логов (теперь только из main thread)
         self.log_received.connect(self._on_log_received)
@@ -424,7 +424,7 @@ class OrchestraPage(BasePage):
         """Обновляет статус на основе состояния"""
         self._current_state = state
         tokens = get_theme_tokens()
-        plan = self._controller.build_status_display_plan(
+        plan = OrchestraPageController.build_status_display_plan(
             state=state,
             idle_state=self.STATE_IDLE,
             learning_state=self.STATE_LEARNING,
@@ -451,7 +451,7 @@ class OrchestraPage(BasePage):
         if self.clear_learned_btn is None:
             return
         tokens = get_theme_tokens()
-        plan = self._controller.build_clear_learned_button_plan(
+        plan = OrchestraPageController.build_clear_learned_button_plan(
             pending=self._clear_learned_pending,
             default_text=self._tr("page.orchestra.button.clear_learning", "Сбросить обучение"),
             pending_text=self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!"),
@@ -463,7 +463,7 @@ class OrchestraPage(BasePage):
     def _reset_clear_learned_button(self) -> None:
         self._clear_learned_pending = False
         if self.clear_learned_btn is not None:
-            plan = self._controller.build_clear_learned_button_plan(
+            plan = OrchestraPageController.build_clear_learned_button_plan(
                 pending=False,
                 default_text=self._tr("page.orchestra.button.clear_learning", "Сбросить обучение"),
                 pending_text=self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!"),
@@ -478,7 +478,7 @@ class OrchestraPage(BasePage):
             self._clear_learned_reset_timer.stop()
             self._clear_learned_pending = False
             if self.clear_learned_btn is not None:
-                plan = self._controller.build_clear_learned_button_plan(
+                plan = OrchestraPageController.build_clear_learned_button_plan(
                     pending=False,
                     default_text=self._tr("page.orchestra.button.clear_learning", "Сбросить обучение"),
                     pending_text=self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!"),
@@ -493,7 +493,7 @@ class OrchestraPage(BasePage):
 
         self._clear_learned_pending = True
         if self.clear_learned_btn is not None:
-            plan = self._controller.build_clear_learned_button_plan(
+            plan = OrchestraPageController.build_clear_learned_button_plan(
                 pending=True,
                 default_text=self._tr("page.orchestra.button.clear_learning", "Сбросить обучение"),
                 pending_text=self._tr("page.orchestra.button.clear_learning.pending", "Это всё сотрёт!"),
@@ -520,7 +520,7 @@ class OrchestraPage(BasePage):
             if hasattr(app, 'dpi_starter') and app.dpi_starter:
                 runner_alive = bool(app.dpi_starter.check_process_running_wmi(silent=True))
 
-            plan = self._controller.build_update_cycle_plan(runner_alive=runner_alive)
+            plan = OrchestraPageController.build_update_cycle_plan(runner_alive=runner_alive)
             if plan.next_state == self.STATE_IDLE:
                 self._update_status(self.STATE_IDLE)
             if plan.refresh_learned:
@@ -564,7 +564,7 @@ class OrchestraPage(BasePage):
         - "[17:45:13] 🔄 Strategy rotated to 2" - ротация (LEARNING)
         - "[18:08:36] ⚡ RST detected - DPI block" - RST блок (LEARNING)
         """
-        plan = self._controller.detect_state_from_line(
+        plan = OrchestraPageController.detect_state_from_line(
             line=line,
             current_state=self._current_state,
             idle_state=self.STATE_IDLE,
@@ -580,7 +580,7 @@ class OrchestraPage(BasePage):
         try:
             app = self.window()
             runner = app.orchestra_runner if hasattr(app, 'orchestra_runner') else None
-            plan = self._controller.build_learned_data_plan_from_runner(runner)
+            plan = OrchestraPageController.build_learned_data_plan_from_runner(runner)
             self._update_domains(plan.data)
         except Exception as e:
             log(f"Ошибка чтения обученных доменов: {e}", "DEBUG")
@@ -609,7 +609,7 @@ class OrchestraPage(BasePage):
         """Проверяет, соответствует ли строка текущему фильтру"""
         domain_filter = self.log_filter_input.text().strip().lower()
         protocol_filter = self._current_protocol_filter_code()
-        return self._controller.matches_filter(
+        return OrchestraPageController.matches_filter(
             text=text,
             domain_filter=domain_filter,
             protocol_filter=protocol_filter,
@@ -617,7 +617,7 @@ class OrchestraPage(BasePage):
 
     def _apply_log_filter(self):
         """Применяет фильтр к логу"""
-        filtered_lines = self._controller.filter_lines(
+        filtered_lines = OrchestraPageController.filter_lines(
             lines=self._full_log_lines,
             domain_filter=self.log_filter_input.text().strip().lower(),
             protocol_filter=self._current_protocol_filter_code(),
@@ -646,11 +646,11 @@ class OrchestraPage(BasePage):
         try:
             app = self.window()
             runner = app.orchestra_runner if hasattr(app, 'orchestra_runner') else None
-            self._controller.ensure_output_callback(runner, self.emit_log)
+            OrchestraPageController.ensure_output_callback(runner, self.emit_log)
         except Exception:
             pass
 
-        plan = self._controller.build_start_monitoring_plan()
+        plan = OrchestraPageController.build_start_monitoring_plan()
         if plan.reset_log_position:
             self._last_log_position = 0
         if plan.queue_timer_interval_ms is not None:
@@ -662,7 +662,7 @@ class OrchestraPage(BasePage):
 
     def stop_monitoring(self):
         """Останавливает мониторинг"""
-        plan = self._controller.build_stop_monitoring_plan()
+        plan = OrchestraPageController.build_stop_monitoring_plan()
         if plan.queue_timer_interval_ms is None:
             self._log_queue_timer.stop()
         if plan.update_timer_interval_ms is None:
@@ -671,11 +671,13 @@ class OrchestraPage(BasePage):
     def on_page_activated(self, first_show: bool) -> None:
         """Автозапуск мониторинга при активации страницы."""
         _ = first_show
-        self.start_monitoring()
+        if not self._runtime_started:
+            self._runtime_started = True
+            self.start_monitoring()
 
     def on_page_hidden(self) -> None:
-        """Остановка мониторинга при скрытии страницы."""
-        self.stop_monitoring()
+        """Скрытие страницы не должно выключать runtime оркестратора."""
+        pass
 
     def set_learned_data(self, data: dict):
         """Устанавливает данные обучения"""
@@ -777,7 +779,7 @@ class OrchestraPage(BasePage):
             app = self.window()
             if hasattr(app, 'orchestra_runner') and app.orchestra_runner:
                 logs = app.orchestra_runner.get_log_history()
-                plan = self._controller.build_log_history_plan(
+                plan = OrchestraPageController.build_log_history_plan(
                     logs=logs,
                     current_suffix_text=self._tr("page.orchestra.log_history.current_suffix", " (текущий)"),
                     none_text=self._tr("page.orchestra.log_history.none", "  Нет сохранённых логов"),
@@ -811,7 +813,7 @@ class OrchestraPage(BasePage):
             app = self.window()
             if hasattr(app, 'orchestra_runner') and app.orchestra_runner:
                 content = app.orchestra_runner.get_log_content(log_id)
-                plan = self._controller.build_log_history_view_plan(
+                plan = OrchestraPageController.build_log_history_view_plan(
                     log_id=log_id,
                     has_content=bool(content),
                 )
@@ -839,7 +841,7 @@ class OrchestraPage(BasePage):
             app = self.window()
             if hasattr(app, 'orchestra_runner') and app.orchestra_runner:
                 deleted = bool(app.orchestra_runner.delete_log(log_id))
-                plan = self._controller.build_log_history_delete_plan(
+                plan = OrchestraPageController.build_log_history_delete_plan(
                     log_id=log_id,
                     deleted=deleted,
                 )
@@ -857,7 +859,7 @@ class OrchestraPage(BasePage):
             app = self.window()
             if hasattr(app, 'orchestra_runner') and app.orchestra_runner:
                 deleted = app.orchestra_runner.clear_all_logs()
-                plan = self._controller.build_log_history_clear_all_plan(
+                plan = OrchestraPageController.build_log_history_clear_all_plan(
                     deleted_count=deleted,
                 )
                 self._update_log_history()
@@ -902,7 +904,7 @@ class OrchestraPage(BasePage):
             except Exception:
                 pass
 
-            context_plan = self._controller.build_context_menu_plan(
+            context_plan = OrchestraPageController.build_context_menu_plan(
                 domain=domain,
                 strategy=strategy,
                 is_blocked=is_blocked,
@@ -932,7 +934,7 @@ class OrchestraPage(BasePage):
                 ),
             )
         else:
-            context_plan = self._controller.build_context_menu_plan(
+            context_plan = OrchestraPageController.build_context_menu_plan(
                 domain=None,
                 strategy=None,
                 is_blocked=False,
@@ -978,7 +980,7 @@ class OrchestraPage(BasePage):
         - "[19:55:15] 🔓 UNLOCKED: youtube.com :443 - re-learning..."
         - "[HH:MM:SS] ✓ SUCCESS: domain UDP strategy=1"
         """
-        parsed = self._controller.parse_log_line_for_strategy(line)
+        parsed = OrchestraPageController.parse_log_line_for_strategy(line)
         if parsed is None:
             return None
         return (parsed.domain, parsed.strategy, parsed.protocol)
@@ -998,7 +1000,7 @@ class OrchestraPage(BasePage):
         try:
             app = self.window()
             runner = app.orchestra_runner if hasattr(app, 'orchestra_runner') else None
-            plan = self._controller.lock_strategy(
+            plan = OrchestraPageController.lock_strategy(
                 runner,
                 domain=domain,
                 strategy=strategy,
@@ -1018,7 +1020,7 @@ class OrchestraPage(BasePage):
         try:
             app = self.window()
             runner = app.orchestra_runner if hasattr(app, 'orchestra_runner') else None
-            plan = self._controller.block_strategy(
+            plan = OrchestraPageController.block_strategy(
                 runner,
                 domain=domain,
                 strategy=strategy,
@@ -1038,7 +1040,7 @@ class OrchestraPage(BasePage):
         try:
             app = self.window()
             runner = app.orchestra_runner if hasattr(app, 'orchestra_runner') else None
-            plan = self._controller.unblock_strategy(
+            plan = OrchestraPageController.unblock_strategy(
                 runner,
                 domain=domain,
                 strategy=strategy,
@@ -1057,7 +1059,7 @@ class OrchestraPage(BasePage):
         try:
             app = self.window()
             runner = app.orchestra_runner if hasattr(app, 'orchestra_runner') else None
-            plan = self._controller.add_to_whitelist(runner, domain=domain)
+            plan = OrchestraPageController.add_to_whitelist(runner, domain=domain)
             for message in plan.messages:
                 self.append_log(message)
         except Exception as e:

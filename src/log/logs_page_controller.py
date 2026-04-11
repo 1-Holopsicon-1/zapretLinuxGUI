@@ -69,10 +69,12 @@ class LogsStatsTextPlan:
 
 
 class LogsPageController:
-    def get_current_log_file(self) -> str:
+    @staticmethod
+    def get_current_log_file() -> str:
         return getattr(global_logger, "log_file", LOG_FILE)
 
-    def list_logs(self, *, run_cleanup: bool) -> LogsListState:
+    @staticmethod
+    def list_logs(*, run_cleanup: bool) -> LogsListState:
         cleanup_deleted = 0
         cleanup_errors: list[str] = []
         cleanup_total = 0
@@ -86,7 +88,7 @@ class LogsPageController:
         log_files.extend(glob.glob(os.path.join(LOGS_FOLDER, "blockcheck_run_*.log")))
         log_files.sort(key=os.path.getmtime, reverse=True)
 
-        current_log = self.get_current_log_file()
+        current_log = LogsPageController.get_current_log_file()
         entries: list[dict] = []
         for index, log_path in enumerate(log_files):
             size_kb = os.path.getsize(log_path) / 1024
@@ -113,7 +115,8 @@ class LogsPageController:
             cleanup_total=cleanup_total,
         )
 
-    def build_stats(self) -> LogsStatsState:
+    @staticmethod
+    def build_stats() -> LogsStatsState:
         app_logs = glob.glob(os.path.join(LOGS_FOLDER, "zapret_log_*.txt"))
         app_logs.extend(glob.glob(os.path.join(LOGS_FOLDER, "zapret_[0-9]*.log")))
         app_logs.extend(glob.glob(os.path.join(LOGS_FOLDER, "blockcheck_run_*.log")))
@@ -128,13 +131,15 @@ class LogsPageController:
             max_debug_logs=MAX_DEBUG_LOG_FILES,
         )
 
-    def resolve_winws_exe_name(self, launch_method: str) -> str:
+    @staticmethod
+    def resolve_winws_exe_name(launch_method: str) -> str:
         try:
             return os.path.basename(get_winws_exe_for_method(launch_method)) or "winws.exe"
         except Exception:
             return "winws.exe"
 
-    def get_running_runner_source(self, launch_method: str, orchestra_runner):
+    @staticmethod
+    def get_running_runner_source(launch_method: str, orchestra_runner):
         direct_runner = get_current_runner()
 
         orchestra_running = bool(orchestra_runner and orchestra_runner.is_running())
@@ -153,7 +158,8 @@ class LogsPageController:
             return "orchestra", orchestra_runner
         return None, None
 
-    def get_runner_pid(self, runner):
+    @staticmethod
+    def get_runner_pid(runner):
         if not runner:
             return "?"
 
@@ -186,7 +192,8 @@ class LogsPageController:
 
         return "?"
 
-    def get_orchestra_log_path(self, orchestra_runner):
+    @staticmethod
+    def get_orchestra_log_path(orchestra_runner):
         try:
             if orchestra_runner:
                 if orchestra_runner.current_log_id and orchestra_runner.debug_log_path:
@@ -213,11 +220,12 @@ class LogsPageController:
         log("Лог оркестратора не найден для отправки", "WARNING")
         return None
 
-    def prepare_support_bundle(self, *, current_log_file: str, orchestra_runner):
+    @staticmethod
+    def prepare_support_bundle(*, current_log_file: str, orchestra_runner):
         candidate_paths = [
             current_log_file,
-            self.get_current_log_file(),
-            self.get_orchestra_log_path(orchestra_runner),
+            LogsPageController.get_current_log_file(),
+            LogsPageController.get_orchestra_log_path(orchestra_runner),
             os.path.join(LOGS_FOLDER, "commands_full.log"),
             os.path.join(LOGS_FOLDER, "last_command.txt"),
         ]
@@ -229,7 +237,8 @@ class LogsPageController:
             extra_note="Если проблема связана с оркестратором, в архив по возможности добавлен и его свежий лог.",
         )
 
-    def open_logs_folder(self) -> None:
+    @staticmethod
+    def open_logs_folder() -> None:
         subprocess.run(["explorer", LOGS_FOLDER], check=False)
 
     @staticmethod
@@ -333,11 +342,12 @@ class LogsPageController:
             )
         )
 
-    def build_winws_output_plan(self, *, launch_method: str, orchestra_runner, language: str) -> LogsWinwsOutputPlan:
-        source, runner = self.get_running_runner_source(launch_method, orchestra_runner)
+    @staticmethod
+    def build_winws_output_plan(*, launch_method: str, orchestra_runner, language: str) -> LogsWinwsOutputPlan:
+        source, runner = LogsPageController.get_running_runner_source(launch_method, orchestra_runner)
 
         if source == "orchestra" and runner:
-            pid = self.get_runner_pid(runner)
+            pid = LogsPageController.get_runner_pid(runner)
             return LogsWinwsOutputPlan(
                 action="orchestra",
                 status_kind="running",
@@ -387,7 +397,7 @@ class LogsPageController:
         strategy_name = strategy_info.get("name", "winws")
         if len(strategy_name) > 35:
             strategy_name = strategy_name[:32] + "..."
-        pid = strategy_info.get("pid") or self.get_runner_pid(runner)
+        pid = strategy_info.get("pid") or LogsPageController.get_runner_pid(runner)
 
         return LogsWinwsOutputPlan(
             action="start_worker",

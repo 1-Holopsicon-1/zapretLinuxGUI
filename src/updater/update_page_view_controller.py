@@ -338,8 +338,9 @@ class UpdatePageViewController:
         except Exception as e:
             return UpdateChannelActionResult(False, str(e))
 
+    @classmethod
     def build_update_status_transition_plan(
-        self,
+        cls,
         *,
         target_state: str,
         language: str,
@@ -349,7 +350,7 @@ class UpdatePageViewController:
         elapsed: float = 0.0,
         found_update: bool | None = None,
     ) -> UpdateStatusTransitionPlan:
-        tr = lambda key, default: self._tr(language, key, default)
+        tr = lambda key, default: cls._tr(language, key, default)
         state = str(target_state or "").strip().lower()
 
         if state == "checking":
@@ -492,8 +493,9 @@ class UpdatePageViewController:
             check_enabled=None,
         )
 
+    @classmethod
     def build_changelog_update_plan(
-        self,
+        cls,
         *,
         version: str,
         changelog: str,
@@ -501,7 +503,7 @@ class UpdatePageViewController:
         accent_hex: str,
         language: str,
     ) -> ChangelogUpdatePlan:
-        tr = lambda key, default: self._tr(language, key, default)
+        tr = lambda key, default: cls._tr(language, key, default)
 
         clean_changelog = str(changelog or "")
         if clean_changelog and len(clean_changelog) > 200:
@@ -520,15 +522,16 @@ class UpdatePageViewController:
             ).format(current=app_version, target=version),
             install_text=tr("page.servers.changelog.button.install", "Установить"),
             raw_changelog=clean_changelog,
-            changelog_html=self.make_links_clickable(clean_changelog, accent_hex) if clean_changelog else "",
+            changelog_html=cls.make_links_clickable(clean_changelog, accent_hex) if clean_changelog else "",
             changelog_visible=bool(clean_changelog),
             progress_visible=False,
             buttons_visible=True,
             close_visible=True,
         )
 
-    def build_changelog_download_start_plan(self, *, version: str, language: str, now: float) -> ChangelogDownloadStartPlan:
-        tr = lambda key, default: self._tr(language, key, default)
+    @classmethod
+    def build_changelog_download_start_plan(cls, *, version: str, language: str, now: float) -> ChangelogDownloadStartPlan:
+        tr = lambda key, default: cls._tr(language, key, default)
 
         return ChangelogDownloadStartPlan(
             mode="downloading",
@@ -558,8 +561,9 @@ class UpdatePageViewController:
             download_error_text="",
         )
 
+    @classmethod
     def build_changelog_progress_plan(
-        self,
+        cls,
         *,
         percent: int,
         done_bytes: int,
@@ -571,7 +575,7 @@ class UpdatePageViewController:
         now: float,
         progress_bar_visible: bool,
     ) -> ChangelogProgressPlan:
-        tr = lambda key, default: self._tr(language, key, default)
+        tr = lambda key, default: cls._tr(language, key, default)
 
         hide_indeterminate = not progress_bar_visible and done_bytes > 0
         show_progress_bar = progress_bar_visible or done_bytes > 0
@@ -655,8 +659,9 @@ class UpdatePageViewController:
             download_eta_seconds=download_eta_seconds,
         )
 
+    @classmethod
     def build_changelog_terminal_plan(
-        self,
+        cls,
         *,
         kind: str,
         language: str,
@@ -669,7 +674,7 @@ class UpdatePageViewController:
         download_speed_kb: float | None = None,
         download_eta_seconds: float | None = None,
     ) -> ChangelogTerminalPlan:
-        tr = lambda key, default: self._tr(language, key, default)
+        tr = lambda key, default: cls._tr(language, key, default)
 
         if kind == "installing":
             return ChangelogTerminalPlan(

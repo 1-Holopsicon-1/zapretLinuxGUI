@@ -48,18 +48,16 @@ class IpsetPage(BasePage):
             "default": "Загрузка информации...",
             "kwargs": {},
         }
-        self._info_load_requested = False
+        self._runtime_initialized = False
 
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        if self._info_load_requested:
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
             return
-        self._info_load_requested = True
+        self._runtime_initialized = True
         QTimer.singleShot(0, self._load_info)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:

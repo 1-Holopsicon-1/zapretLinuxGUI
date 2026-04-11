@@ -21,7 +21,7 @@ except ImportError:
     PrimaryPushSettingCard = None  # type: ignore[assignment]
     SettingCardGroup = None  # type: ignore[assignment]
 
-from ui.support_page_controller import SupportPageController
+from ui.about_page_controller import AboutPageController
 from ui.text_catalog import tr as tr_catalog
 from ui.theme import get_theme_tokens
 
@@ -46,9 +46,8 @@ class SupportPage(BasePage):
         self._tg_card = None
         self._dc_card = None
         self._community_group = None
-        self._controller = SupportPageController()
-
-        self.enable_deferred_ui_build()
+        self._build_ui()
+        self._apply_page_theme(force=True)
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)
@@ -176,7 +175,7 @@ class SupportPage(BasePage):
                 pass
 
     def _open_support_discussions(self) -> None:
-        result = self._controller.open_support_discussions()
+        result = AboutPageController.open_support_discussions()
         if (not result.ok) and InfoBar is not None:
             InfoBar.warning(
                 title=self._tr("page.support.error.title", "Ошибка"),
@@ -188,7 +187,7 @@ class SupportPage(BasePage):
             )
 
     def _open_telegram_support(self) -> None:
-        result = self._controller.open_telegram_support()
+        result = AboutPageController.open_telegram("zaprethelp")
         if (not result.ok) and InfoBar is not None:
             InfoBar.warning(
                 title=self._tr("page.support.error.title", "Ошибка"),
@@ -200,7 +199,7 @@ class SupportPage(BasePage):
             )
 
     def _open_discord(self) -> None:
-        result = self._controller.open_discord()
+        result = AboutPageController.open_discord("https://discord.gg/kkcBDG2uws")
         if (not result.ok) and InfoBar is not None:
             InfoBar.warning(
                 title=self._tr("page.support.error.title", "Ошибка"),

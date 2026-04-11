@@ -288,22 +288,20 @@ class AutostartPage(BasePage):
             subtitle_key="page.autostart.subtitle",
         )
 
-        self._controller = AutostartPageController()
         self._app_instance = None
         self.strategy_name = None
         self._current_autostart_type = None  # Текущий активный тип автозапуска
         self._detector_worker = None  # Фоновый поток для определения типа
         self._detection_pending = False  # Флаг ожидания результата
         self._current_mode_method = ""
+        self._runtime_initialized = False
 
-        self._autostart_enabled = False
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
 
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)
@@ -314,20 +312,26 @@ class AutostartPage(BasePage):
                 return text
         return text
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        plan = self._controller.build_show_event_plan(
-            spontaneous=False,
+    def _run_runtime_init_once(self) -> None:
+        plan = AutostartPageController.build_page_init_plan(
+            runtime_initialized=self._runtime_initialized,
         )
         if not plan.should_schedule_detection:
             return
-        QTimer.singleShot(plan.detection_delay_ms, self._start_autostart_detection)
+        self._runtime_initialized = True
+        self._schedule_autostart_detection_when_ready(plan.detection_delay_ms)
+
+    def _schedule_autostart_detection_when_ready(self, delay_ms: int) -> None:
+        self.run_when_page_ready(
+            lambda delay=delay_ms: QTimer.singleShot(delay, self._start_autostart_detection)
+        )
 
     def _start_autostart_detection(self):
         """Запускает определение типа автозапуска в фоновом потоке"""
         if not self.isVisible():
+            self.run_when_page_ready(self._start_autostart_detection)
             return
-        plan = self._controller.build_detection_start_plan(
+        plan = AutostartPageController.build_detection_start_plan(
             detection_pending=self._detection_pending,
             worker_running=bool(self._detector_worker is not None and self._detector_worker.isRunning()),
         )
@@ -335,13 +339,13 @@ class AutostartPage(BasePage):
             return
 
         self._detection_pending = True
-        self._detector_worker = self._controller.create_detector_worker()
+        self._detector_worker = AutostartPageController.create_detector_worker()
         self._detector_worker.finished.connect(self._on_autostart_detected)
         self._detector_worker.start()
 
     def _on_autostart_detected(self, autostart_type: str):
         """Обработчик результата определения типа автозапуска"""
-        plan = self._controller.build_detection_result_plan(autostart_type)
+        plan = AutostartPageController.build_detection_result_plan(autostart_type)
         self._detection_pending = plan.detection_pending
 
         log(f"Detected autostart type: {plan.autostart_type}", "DEBUG")
@@ -367,7 +371,7 @@ class AutostartPage(BasePage):
     def _auto_init(self):
         """Автоматическая инициализация из parent или глобального контекста"""
         try:
-            plan = self._controller.resolve_app_init_plan(
+            plan = AutostartPageController.resolve_app_init_plan(
                 self.parent(),
                 strategy_name=self.strategy_name,
                 strategy_not_selected_text=self._tr("page.autostart.strategy.not_selected", "Не выбрана"),
@@ -657,7 +661,7 @@ class AutostartPage(BasePage):
         try:
             from strategy_menu import get_strategy_launch_method
             method = get_strategy_launch_method()
-            plan = self._controller.build_mode_plan(method)
+            plan = AutostartPageController.build_mode_plan(method)
             self._current_mode_method = plan.method
             self.mode_label.setText(plan.mode_text)
 
@@ -707,7 +711,8 @@ class AutostartPage(BasePage):
 
         # Keep the status icon consistent with the current theme.
         if hasattr(self, "status_icon"):
-            if getattr(self, "_autostart_enabled", False):
+            autostart_enabled, _active_type = self._current_autostart_state()
+            if autostart_enabled:
                 self.status_icon.setPixmap(qta.icon('fa5s.check-circle', color=get_semantic_palette().success).pixmap(20, 20))
             else:
                 self.status_icon.setPixmap(qta.icon('fa5s.circle', color=tokens.fg_faint).pixmap(20, 20))
@@ -775,15 +780,16 @@ class AutostartPage(BasePage):
             )
         )
 
+        enabled, active_type = self._current_autostart_state()
         self.update_status(
-            self._autostart_enabled,
+            enabled,
             self.strategy_name,
-            self._current_autostart_type,
+            active_type,
         )
 
     def update_status(self, enabled: bool, strategy_name: str = None, autostart_type: str = None):
         """Обновляет отображение статуса автозапуска"""
-        plan = self._controller.build_status_plan(
+        plan = AutostartPageController.build_status_plan(
             enabled=enabled,
             strategy_name=strategy_name,
             autostart_type=autostart_type,
@@ -796,7 +802,6 @@ class AutostartPage(BasePage):
             strategy_not_selected_text=self._tr("page.autostart.strategy.not_selected", "Не выбрана"),
         )
 
-        self._autostart_enabled = plan.enabled
         self._current_autostart_type = plan.active_type
         if strategy_name:
             self.strategy_name = strategy_name
@@ -816,6 +821,18 @@ class AutostartPage(BasePage):
         # Обновляем режим при каждом обновлении статуса
         self._update_mode()
 
+    def _current_autostart_state(self) -> tuple[bool, str | None]:
+        store = self._ui_state_store
+        if store is not None:
+            try:
+                snapshot = store.snapshot()
+                return bool(snapshot.autostart_enabled), str(snapshot.autostart_type or "") or None
+            except Exception:
+                pass
+
+        enabled = bool(self.disable_btn.isVisible()) if hasattr(self, "disable_btn") else False
+        return enabled, self._current_autostart_type
+
     def _update_options_state(self, autostart_enabled: bool, active_type: str = None):
         """Обновляет состояние карточек автозапуска (блокировка неактивных)"""
         # Если тип не передан но автозапуск включён, используем сохранённый тип
@@ -825,7 +842,7 @@ class AutostartPage(BasePage):
         log(f"_update_options_state: enabled={autostart_enabled}, type={active_type}", "DEBUG")
 
         type_to_card = {"gui": self.gui_option}
-        option_state_map = self._controller.build_option_state_map(
+        option_state_map = AutostartPageController.build_option_state_map(
             autostart_enabled=autostart_enabled,
             active_type=active_type,
         )
@@ -854,8 +871,8 @@ class AutostartPage(BasePage):
     def _on_disable_clicked(self):
         """Отключение автозапуска"""
         try:
-            result = self._controller.disable_autostart()
-            plan = self._controller.build_disable_apply_plan(result)
+            result = AutostartPageController.disable_autostart()
+            plan = AutostartPageController.build_disable_apply_plan(result)
             self._apply_action_plan(plan)
 
         except Exception as e:
@@ -864,8 +881,8 @@ class AutostartPage(BasePage):
     def _on_gui_autostart(self):
         """Автозапуск GUI программы"""
         try:
-            result = self._controller.setup_gui_autostart(self.strategy_name)
-            plan = self._controller.build_setup_apply_plan(
+            result = AutostartPageController.setup_gui_autostart(self.strategy_name)
+            plan = AutostartPageController.build_setup_apply_plan(
                 result,
                 failure_message="Не удалось настроить автозапуск GUI",
             )
@@ -877,8 +894,8 @@ class AutostartPage(BasePage):
     def _on_service_autostart(self):
         """Создание службы Windows"""
         try:
-            result = self._controller.setup_direct_service(self.app_instance)
-            plan = self._controller.build_setup_apply_plan(
+            result = AutostartPageController.setup_direct_service(self.app_instance)
+            plan = AutostartPageController.build_setup_apply_plan(
                 result,
                 failure_message="Ошибка создания службы",
             )
@@ -889,8 +906,8 @@ class AutostartPage(BasePage):
     def _on_logon_autostart(self):
         """Задача при входе пользователя"""
         try:
-            result = self._controller.setup_direct_logon_task(self.app_instance)
-            plan = self._controller.build_setup_apply_plan(
+            result = AutostartPageController.setup_direct_logon_task(self.app_instance)
+            plan = AutostartPageController.build_setup_apply_plan(
                 result,
                 failure_message="Ошибка создания задачи",
             )
@@ -901,8 +918,8 @@ class AutostartPage(BasePage):
     def _on_boot_autostart(self):
         """Задача при загрузке системы"""
         try:
-            result = self._controller.setup_direct_boot_task(self.app_instance)
-            plan = self._controller.build_setup_apply_plan(
+            result = AutostartPageController.setup_direct_boot_task(self.app_instance)
+            plan = AutostartPageController.build_setup_apply_plan(
                 result,
                 failure_message="Ошибка создания задачи",
             )

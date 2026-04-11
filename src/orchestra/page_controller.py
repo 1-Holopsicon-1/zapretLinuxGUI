@@ -252,11 +252,12 @@ class OrchestraPageController:
             return "FAIL" in text_upper or "✗" in text or "X " in text
         return True
 
-    def filter_lines(self, *, lines: list[str], domain_filter: str, protocol_filter: str) -> list[str]:
+    @staticmethod
+    def filter_lines(*, lines: list[str], domain_filter: str, protocol_filter: str) -> list[str]:
         return [
             line
             for line in lines
-            if self.matches_filter(
+            if OrchestraPageController.matches_filter(
                 text=line,
                 domain_filter=domain_filter,
                 protocol_filter=protocol_filter,

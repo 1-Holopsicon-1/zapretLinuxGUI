@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import qtawesome as qta
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget,
     QFrame, QSizePolicy, QLayout,
@@ -45,6 +45,9 @@ def _make_section_label(text: str, parent: QWidget | None = None) -> QLabel:
 class AboutPage(BasePage):
     """Страница О программе с вкладками: О программе / Поддержка / Справка"""
 
+    open_premium_requested = pyqtSignal()
+    open_updates_requested = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(
             "О программе",
@@ -54,7 +57,6 @@ class AboutPage(BasePage):
             subtitle_key="page.about.subtitle",
         )
 
-        self._controller = AboutPageController()
         # UI refs (support tab)
         self._support_icon_label: QLabel | None = None
         self._support_discussions_card = None
@@ -66,12 +68,12 @@ class AboutPage(BasePage):
         self._help_tab_initialized = False
         self._kvn_tab_initialized = False
 
-        self._sub_is_premium = False
-        self._sub_days_left: int | None = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
+        self._pending_tab_key: str | None = None
 
-        self.enable_deferred_ui_build()
+        self._build_ui()
+        self.set_ui_language(self._ui_language)
 
     def bind_ui_state_store(self, store: MainWindowStateStore) -> None:
         if self._ui_state_store is store:
@@ -151,8 +153,19 @@ class AboutPage(BasePage):
 
         self.add_widget(self.stacked_widget)
 
+    def _apply_pending_tab_if_ready(self) -> None:
+        pending_tab_key = str(getattr(self, "_pending_tab_key", "") or "").strip().lower()
+        if not pending_tab_key:
+            return
+        if not self.is_page_ready():
+            return
+        self._pending_tab_key = None
+        index = AboutPageController.resolve_tab_index(pending_tab_key)
+        if index is not None:
+            self._switch_tab(index)
+
     def _switch_tab(self, index: int):
-        plan = self._controller.build_tab_switch_plan(
+        plan = AboutPageController.build_tab_switch_plan(
             index=index,
             support_initialized=self._support_tab_initialized,
             help_initialized=self._help_tab_initialized,
@@ -188,9 +201,15 @@ class AboutPage(BasePage):
 
     def switch_to_tab(self, key: str) -> None:
         """External API: switch to About/Support/Help tab by key."""
-        index = self._controller.resolve_tab_index(key)
-        if index is not None:
-            self._switch_tab(index)
+        index = AboutPageController.resolve_tab_index(key)
+        if index is None:
+            return
+        if not self.is_page_ready():
+            self._pending_tab_key = AboutPageController.TAB_KEYS[index]
+            self.run_when_page_ready(self._apply_pending_tab_if_ready)
+            return
+        self._pending_tab_key = None
+        self._switch_tab(index)
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -279,7 +298,7 @@ class AboutPage(BasePage):
             pass
 
         try:
-            self.update_subscription_status(self._sub_is_premium, self._sub_days_left)
+            self.update_subscription_status(*self._current_subscription_state())
         except Exception:
             pass
 
@@ -338,6 +357,7 @@ class AboutPage(BasePage):
         )
         self.update_btn.setIcon(qta.icon("fa5s.sync-alt", color=tokens.accent_hex))
         self.update_btn.setFixedHeight(36)
+        self.update_btn.clicked.connect(self.open_updates_requested.emit)
         version_layout.addWidget(self.update_btn)
 
         version_card.add_layout(version_layout)
@@ -360,7 +380,7 @@ class AboutPage(BasePage):
         device_icon.setFixedSize(24, 24)
         device_layout.addWidget(device_icon)
 
-        client_id = self._controller.get_client_id()
+        client_id = AboutPageController.get_client_id()
 
         device_text_layout = QVBoxLayout()
         device_text_layout.setSpacing(2)
@@ -428,6 +448,7 @@ class AboutPage(BasePage):
         )
         self.premium_btn.setIcon(qta.icon("fa5s.star", color="#ffc107"))
         self.premium_btn.setFixedHeight(36)
+        self.premium_btn.clicked.connect(self.open_premium_requested.emit)
         sub_btns.addWidget(self.premium_btn)
         sub_btns.addStretch()
         sub_layout.addLayout(sub_btns)
@@ -439,15 +460,12 @@ class AboutPage(BasePage):
 
     def _copy_client_id(self) -> None:
         cid = self.client_id_label.text().strip() if hasattr(self, "client_id_label") else ""
-        self._controller.copy_client_id(cid)
+        AboutPageController.copy_client_id(cid)
 
     def update_subscription_status(self, is_premium: bool, days: int | None = None):
         """Обновляет отображение статуса подписки"""
-        self._sub_is_premium = bool(is_premium)
-        self._sub_days_left = days
-
         tokens = get_theme_tokens()
-        plan = self._controller.build_subscription_status_plan(
+        plan = AboutPageController.build_subscription_status_plan(
             is_premium=is_premium,
             days=days,
             free_text=tr_catalog("page.about.subscription.free", language=self._ui_language, default="Free версия"),
@@ -466,6 +484,16 @@ class AboutPage(BasePage):
         )
         self.sub_status_icon.setPixmap(qta.icon(plan.icon_name, color=plan.icon_color).pixmap(18, 18))
         self.sub_status_label.setText(plan.label_text)
+
+    def _current_subscription_state(self) -> tuple[bool, int | None]:
+        store = self._ui_state_store
+        if store is not None:
+            try:
+                snapshot = store.snapshot()
+                return bool(snapshot.subscription_is_premium), snapshot.subscription_days_remaining
+            except Exception:
+                pass
+        return False, None
 
     # ─────────────────────────────────────────────────────────────────────────
     # Tab 1: Поддержка
@@ -547,19 +575,19 @@ class AboutPage(BasePage):
         layout.addStretch()
 
     def _open_support_discussions(self) -> None:
-        result = self._controller.open_support_discussions()
+        result = AboutPageController.open_support_discussions()
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть GitHub Discussions:\n{result.message}",
                             parent=self.window())
 
     def _open_telegram_support(self) -> None:
-        result = self._controller.open_telegram("zaprethelp")
+        result = AboutPageController.open_telegram("zaprethelp")
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
                             parent=self.window())
 
     def _open_discord(self) -> None:
-        result = self._controller.open_discord("https://discord.gg/kkcBDG2uws")
+        result = AboutPageController.open_discord("https://discord.gg/kkcBDG2uws")
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Discord:\n{result.message}",
                             parent=self.window())
@@ -742,13 +770,13 @@ class AboutPage(BasePage):
         layout.addWidget(motto_wrap)
 
     def _open_forum_for_beginners(self):
-        result = self._controller.open_telegram("bypassblock", post=1359)
+        result = AboutPageController.open_telegram("bypassblock", post=1359)
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
                             parent=self.window())
 
     def _open_help_folder(self):
-        result = self._controller.open_help_folder()
+        result = AboutPageController.open_help_folder()
         if (not result.ok) and InfoBar:
             if result.message == "Папка с инструкциями не найдена":
                 InfoBar.warning(title="Ошибка", content=result.message, parent=self.window())
@@ -757,7 +785,7 @@ class AboutPage(BasePage):
                                 parent=self.window())
 
     def _open_telegram_news(self):
-        result = self._controller.open_telegram("bypassblock")
+        result = AboutPageController.open_telegram("bypassblock")
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
                             parent=self.window())
@@ -870,25 +898,25 @@ class AboutPage(BasePage):
         layout.addStretch()
 
     def _open_kvn_channel(self):
-        result = self._controller.open_telegram("vpndiscordyooutube")
+        result = AboutPageController.open_telegram("vpndiscordyooutube")
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
                             parent=self.window())
 
     def _open_kvn_bot(self):
-        result = self._controller.open_telegram("zapretvpns_bot")
+        result = AboutPageController.open_telegram("zapretvpns_bot")
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
                             parent=self.window())
 
     def _open_kvn_bypass(self):
-        result = self._controller.open_telegram("bypassblock")
+        result = AboutPageController.open_telegram("bypassblock")
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть Telegram:\n{result.message}",
                             parent=self.window())
 
     def _open_kvn_github(self):
-        result = self._controller.open_github("https://github.com/youtubediscord/zapret-kvn")
+        result = AboutPageController.open_github("https://github.com/youtubediscord/zapret-kvn")
         if (not result.ok) and InfoBar:
             InfoBar.warning(title="Ошибка", content=f"Не удалось открыть GitHub:\n{result.message}",
                             parent=self.window())
@@ -928,10 +956,3 @@ class AboutPage(BasePage):
                 )
             except Exception:
                 pass
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # showEvent
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def showEvent(self, event):
-        super().showEvent(event)

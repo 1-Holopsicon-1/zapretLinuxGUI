@@ -83,8 +83,7 @@ class LogsPage(BasePage):
         
         self._thread = None
         self._worker = None
-        self._controller = LogsPageController()
-        self.current_log_file = self._controller.get_current_log_file()
+        self.current_log_file = LogsPageController.get_current_log_file()
         self._error_pattern = re.compile('|'.join(ERROR_PATTERNS))
         self._exclude_pattern = re.compile('|'.join(EXCLUDE_PATTERNS), re.IGNORECASE)
 
@@ -123,18 +122,35 @@ class LogsPage(BasePage):
         self._winws_status_timer = QTimer(self)
         self._winws_status_timer.timeout.connect(self._update_winws_status)
 
-        self._logs_tab_initialized = False
+        self._runtime_initialized = False
         self._send_tab_initialized = False
+        self._runtime_started = False
 
         # qtawesome animations (e.g. qta.Spin) are not QAbstractAnimation; track state ourselves.
         self._refresh_spin_active = False
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         try:
             self._apply_page_theme(force=True)
         except Exception:
             pass
+        self._run_runtime_init_once()
+
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
+            return
+        self._runtime_initialized = True
+
+        # Делаем первый refresh после построения UI, а не из activation,
+        # чтобы page activation не владел initial runtime-догрузкой.
+        QTimer.singleShot(0, lambda: self._refresh_logs_list(run_cleanup=False))
+        QTimer.singleShot(0, self._update_stats)
+
+        if not self._runtime_started:
+            self._runtime_started = True
+            self._start_tail_worker()
+            self._start_winws_output_worker()
+            # Таймер статуса должен жить отдельно от простого переключения вкладок.
+            self._winws_status_timer.start(3000)
 
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
@@ -396,9 +412,6 @@ class LogsPage(BasePage):
             self.tabs_pivot.setItemText("send", send_text)
         except Exception:
             pass
-
-        if self.is_deferred_ui_build_pending():
-            return
 
         self._retranslate_logs_tab()
         if self._send_tab_initialized:
@@ -950,7 +963,7 @@ class LogsPage(BasePage):
             return
 
         try:
-            exe_name = self._controller.resolve_winws_exe_name(self._get_launch_method())
+            exe_name = LogsPageController.resolve_winws_exe_name(self._get_launch_method())
         except Exception:
             exe_name = "winws.exe"
 
@@ -972,14 +985,14 @@ class LogsPage(BasePage):
             - "direct" для StrategyRunner
             - None если процесс не запущен
         """
-        return self._controller.get_running_runner_source(
+        return LogsPageController.get_running_runner_source(
             self._get_launch_method(),
             self._get_orchestra_runner(),
         )
 
     def _get_runner_pid(self, runner):
         """Возвращает PID для любого типа runner'а"""
-        return self._controller.get_runner_pid(runner)
+        return LogsPageController.get_runner_pid(runner)
 
     def _get_orchestra_log_path(self) -> str:
         """
@@ -989,7 +1002,7 @@ class LogsPage(BasePage):
         1. Текущий активный лог (если оркестратор запущен)
         2. Последний сохранённый лог из истории
         """
-        return self._controller.get_orchestra_log_path(self._get_orchestra_runner())
+        return LogsPageController.get_orchestra_log_path(self._get_orchestra_runner())
 
     def _update_orchestra_indicator(self):
         """Обновляет видимость индикатора режима оркестратора"""
@@ -998,14 +1011,14 @@ class LogsPage(BasePage):
 
     def _prepare_support_from_logs(self):
         try:
-            result = self._controller.prepare_support_bundle(
+            result = LogsPageController.prepare_support_bundle(
                 current_log_file=self.current_log_file,
                 orchestra_runner=self._get_orchestra_runner(),
             )
 
             if result.zip_path:
                 log(f"Подготовлен архив поддержки: {result.zip_path}", "INFO")
-            feedback = self._controller.build_support_feedback(result)
+            feedback = LogsPageController.build_support_feedback(result)
             self._send_status_text = feedback.status_text
             self._send_status_tone = feedback.status_tone
             self._render_send_status_label()
@@ -1019,7 +1032,7 @@ class LogsPage(BasePage):
                 )
         except Exception as e:
             log(f"Ошибка подготовки обращения из логов: {e}", "ERROR")
-            feedback = self._controller.build_support_error_feedback(str(e))
+            feedback = LogsPageController.build_support_error_feedback(str(e))
             self._send_status_text = feedback.status_text
             self._send_status_tone = feedback.status_tone
             self._render_send_status_label()
@@ -1030,22 +1043,8 @@ class LogsPage(BasePage):
                     parent=self.window(),
                 )
         
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        if not self._logs_tab_initialized:
-            self._logs_tab_initialized = True
-            # Делаем тяжелые операции после первого показа страницы, чтобы UI не "подвисал" при переходе.
-            QTimer.singleShot(0, lambda: self._refresh_logs_list(run_cleanup=False))
-            QTimer.singleShot(0, self._update_stats)
-        self._start_tail_worker()
-        self._start_winws_output_worker()
-        # Таймер для проверки статуса каждые 3 секунды
-        self._winws_status_timer.start(3000)
-
     def on_page_hidden(self) -> None:
-        self._stop_tail_worker()
-        self._stop_winws_output_worker()
-        self._winws_status_timer.stop()
+        pass
         
     def _refresh_logs_list(self, *, run_cleanup: bool = True):
         """Обновляет список доступных лог-файлов"""
@@ -1058,7 +1057,7 @@ class LogsPage(BasePage):
         self.log_combo.clear()
         
         try:
-            state = self._controller.list_logs(run_cleanup=run_cleanup)
+            state = LogsPageController.list_logs(run_cleanup=run_cleanup)
             if run_cleanup and state.cleanup_deleted > 0:
                 log(f"🗑️ Удалено старых логов: {state.cleanup_deleted} из {state.cleanup_total}", "INFO")
             if run_cleanup and state.cleanup_errors:
@@ -1117,7 +1116,7 @@ class LogsPage(BasePage):
     def _start_tail_worker(self):
         """Запускает worker для чтения лога"""
         self._stop_tail_worker()
-        plan = self._controller.build_tail_start_plan(current_log_file=self.current_log_file)
+        plan = LogsPageController.build_tail_start_plan(current_log_file=self.current_log_file)
         if not plan.should_start:
             return
 
@@ -1126,7 +1125,7 @@ class LogsPage(BasePage):
 
         try:
             self._thread = QThread(self)
-            self._worker = self._controller.create_log_tail_worker(plan.file_path)
+            self._worker = LogsPageController.create_log_tail_worker(plan.file_path)
             self._worker.moveToThread(self._thread)
 
             self._thread.started.connect(self._worker.run)
@@ -1149,7 +1148,7 @@ class LogsPage(BasePage):
         """Останавливает worker (неблокирующий по умолчанию)"""
         worker = getattr(self, "_worker", None)
         thread = getattr(self, "_thread", None)
-        stop_plan = self._controller.build_thread_stop_plan(
+        stop_plan = LogsPageController.build_thread_stop_plan(
             has_worker=worker is not None,
             thread_running=bool(thread and self._thread and self._thread.isRunning()) if thread is not None else False,
             blocking=blocking,
@@ -1195,7 +1194,7 @@ class LogsPage(BasePage):
         self._stop_winws_output_worker()
         self._refresh_winws_title()
 
-        plan = self._controller.build_winws_output_plan(
+        plan = LogsPageController.build_winws_output_plan(
             launch_method=self._get_launch_method(),
             orchestra_runner=self._get_orchestra_runner(),
             language=self._ui_language,
@@ -1207,7 +1206,7 @@ class LogsPage(BasePage):
 
         try:
             self._winws_thread = QThread(self)
-            self._winws_worker = self._controller.create_winws_output_worker(plan.process)
+            self._winws_worker = LogsPageController.create_winws_output_worker(plan.process)
             self._winws_worker.moveToThread(self._winws_thread)
 
             self._winws_thread.started.connect(self._winws_worker.run)
@@ -1222,7 +1221,7 @@ class LogsPage(BasePage):
     def _stop_winws_output_worker(self, blocking: bool = False):
         """Останавливает worker чтения вывода winws (неблокирующий по умолчанию)"""
         try:
-            stop_plan = self._controller.build_thread_stop_plan(
+            stop_plan = LogsPageController.build_thread_stop_plan(
                 has_worker=self._winws_worker is not None,
                 thread_running=bool(self._winws_thread and self._winws_thread.isRunning()),
                 blocking=blocking,
@@ -1404,15 +1403,15 @@ class LogsPage(BasePage):
     def _open_folder(self):
         """Открывает папку с логами"""
         try:
-            self._controller.open_logs_folder()
+            LogsPageController.open_logs_folder()
         except Exception as e:
             log(f"Ошибка открытия папки: {e}", "ERROR")
             
     def _update_stats(self):
         """Обновляет статистику"""
         try:
-            stats = self._controller.build_stats()
-            plan = self._controller.build_stats_text_plan(stats, language=self._ui_language)
+            stats = LogsPageController.build_stats()
+            plan = LogsPageController.build_stats_text_plan(stats, language=self._ui_language)
             self.stats_label.setText(plan.text)
         except Exception as e:
             self.stats_label.setText(f"Ошибка статистики: {e}")
@@ -1478,5 +1477,6 @@ class LogsPage(BasePage):
             
     def cleanup(self):
         """Очистка при закрытии - блокирующий режим"""
+        self._winws_status_timer.stop()
         self._stop_tail_worker(blocking=True)
         self._stop_winws_output_worker(blocking=True)

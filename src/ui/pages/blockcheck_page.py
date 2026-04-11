@@ -232,7 +232,6 @@ class BlockcheckPage(BasePage):
         self.setObjectName("BlockcheckPage")
 
         self._worker: BlockcheckWorker | None = None
-        self._controller = BlockcheckPageController()
         self._last_report = None
         self._run_log_file: str | None = None
         self._tab_widgets: list[QWidget] = []
@@ -242,6 +241,8 @@ class BlockcheckPage(BasePage):
         self.connection_page = None
         self.dns_check_page = None
         self._active_tab_index: int = 0
+        self._pending_tab_key: str | None = None
+        self._pending_diagnostics_start_focus = False
         self._tabs_pivot = None
         self._domains_section_label: QLabel | None = None
         self._tcp_section_label: QLabel | None = None
@@ -251,13 +252,22 @@ class BlockcheckPage(BasePage):
         self._actions_bar = None
         self._prepare_support_btn = None
         self._support_status_label = None
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         try:
             self.set_ui_language(self._ui_language)
         except Exception:
             pass
+
+    def _apply_pending_tab_if_ready(self) -> None:
+        pending_tab_key = str(getattr(self, "_pending_tab_key", "") or "").strip().lower()
+        if pending_tab_key:
+            if not self.is_page_ready():
+                return
+            self._pending_tab_key = None
+            self._switch_tab(self.TAB_ORDER.index(self._normalize_tab_key(pending_tab_key)))
+
+        if self.is_page_ready():
+            self._apply_pending_diagnostics_start_focus()
 
     # ------------------------------------------------------------------
     # UI construction
@@ -650,9 +660,20 @@ class BlockcheckPage(BasePage):
 
     def switch_to_tab(self, key: str) -> None:
         """External API: switch to one of BlockCheck tabs."""
-        self.ensure_deferred_ui_built()
         normalized = self._normalize_tab_key(key)
+        if not self.is_page_ready():
+            self._pending_tab_key = normalized
+            self.run_when_page_ready(self._apply_pending_tab_if_ready)
+            return
+        self._pending_tab_key = None
         self._switch_tab(self.TAB_ORDER.index(normalized))
+
+    def request_diagnostics_start_focus(self) -> None:
+        self._pending_diagnostics_start_focus = True
+        if not self.is_page_ready():
+            self.run_when_page_ready(self._apply_pending_diagnostics_start_focus)
+            return
+        self._apply_pending_diagnostics_start_focus()
 
     def _switch_tab(self, index: int) -> None:
         """Switch between BlockCheck, strategy scan and diagnostics tabs."""
@@ -688,20 +709,36 @@ class BlockcheckPage(BasePage):
         if self._dns_spoofing_tab_page is not None:
             self._dns_spoofing_tab_page.setVisible(tab_key == self.TAB_DNS_SPOOFING)
 
+        if tab_key == self.TAB_DIAGNOSTICS:
+            self._apply_pending_diagnostics_start_focus()
+
+    def _apply_pending_diagnostics_start_focus(self) -> None:
+        if not self._pending_diagnostics_start_focus:
+            return
+        self._ensure_diagnostics_tab()
+        page = getattr(self, "connection_page", None)
+        if page is None:
+            return
+        request_focus = getattr(page, "request_start_focus", None)
+        if not callable(request_focus):
+            return
+        self._pending_diagnostics_start_focus = False
+        request_focus()
+
     # ------------------------------------------------------------------
     # Start / Stop
     # ------------------------------------------------------------------
 
     def _start_run_log(self, mode: str, extra_domains: list[str]) -> None:
         """Create a dedicated history log for current blockcheck run."""
-        state = self._controller.start_run_log(mode, extra_domains)
+        state = BlockcheckPageController.start_run_log(mode, extra_domains)
         self._run_log_file = state.path
         if not state.created:
             logger.warning("Failed to create blockcheck run log")
 
     def _append_run_log(self, message: str) -> None:
         """Append line(s) to current blockcheck run log."""
-        self._controller.append_run_log(self._run_log_file, message)
+        BlockcheckPageController.append_run_log(self._run_log_file, message)
 
     def _on_start(self):
         if self._worker and self._worker.is_running:
@@ -955,7 +992,7 @@ class BlockcheckPage(BasePage):
         extra_domains = self._get_extra_domains()
 
         try:
-            feedback = self._controller.prepare_support(
+            feedback = BlockcheckPageController.prepare_support(
                 run_log_file=self._run_log_file,
                 mode_label=mode_label,
                 extra_domains=extra_domains,
@@ -1447,7 +1484,7 @@ class BlockcheckPage(BasePage):
     def _load_domain_chips(self):
         """Load persisted user domains and create chips."""
         try:
-            for domain in self._controller.load_user_domains():
+            for domain in BlockcheckPageController.load_user_domains():
                 self._add_chip(domain)
         except Exception:
             pass
@@ -1458,7 +1495,7 @@ class BlockcheckPage(BasePage):
         if not text:
             return
         try:
-            normalized = self._controller.add_user_domain(text)
+            normalized = BlockcheckPageController.add_user_domain(text)
             if normalized:
                 self._add_chip(normalized)
                 self._domain_input.clear()
@@ -1479,7 +1516,7 @@ class BlockcheckPage(BasePage):
     def _on_remove_domain(self, domain: str):
         """Remove a domain chip and delete from persistence."""
         try:
-            self._controller.remove_user_domain(domain)
+            BlockcheckPageController.remove_user_domain(domain)
         except Exception:
             pass
         # Remove chip widget
@@ -1536,9 +1573,6 @@ class BlockcheckPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-
-        if self.is_deferred_ui_build_pending():
-            return
 
         try:
             if self._tabs_pivot is not None:

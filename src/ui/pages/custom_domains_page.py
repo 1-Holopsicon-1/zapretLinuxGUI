@@ -52,23 +52,20 @@ class CustomDomainsPage(BasePage):
             title_key="page.custom_domains.title",
             subtitle_key="page.custom_domains.subtitle",
         )
-        self._controller = HostlistPageController()
-        self._initial_domains_load_requested = False
+        self._runtime_initialized = False
         self._actions_group = None
         self._actions_bar = None
         self.open_file_btn = None
         self.reset_btn = None
         self.clear_btn = None
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        if self._initial_domains_load_requested:
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
             return
-        self._initial_domains_load_requested = True
+        self._runtime_initialized = True
         QTimer.singleShot(0, self._load_domains)
 
     def _tr(self, key: str, default: str) -> str:
@@ -262,7 +259,7 @@ class CustomDomainsPage(BasePage):
     def _load_domains(self):
         """Загружает домены из файла"""
         try:
-            state = self._controller.load_custom_domains_text()
+            state = HostlistPageController.load_custom_domains_text()
             
             # Блокируем сигнал чтобы не срабатывало автосохранение
             self.text_edit.blockSignals(True)
@@ -295,7 +292,7 @@ class CustomDomainsPage(BasePage):
         """Сохраняет домены в файл"""
         try:
             text = self.text_edit.toPlainText()
-            state = self._controller.save_custom_domains_text(text)
+            state = HostlistPageController.save_custom_domains_text(text)
             
             # Обновляем UI - заменяем URL на домены
             new_text = state.normalized_text
@@ -320,7 +317,7 @@ class CustomDomainsPage(BasePage):
             
     def _update_status(self):
         """Обновляет статус"""
-        plan = self._controller.build_custom_domains_status_plan(self.text_edit.toPlainText())
+        plan = HostlistPageController.build_custom_domains_status_plan(self.text_edit.toPlainText())
         self.status_label.setText(
             self._tr(
                 "page.custom_domains.status.stats",
@@ -330,7 +327,7 @@ class CustomDomainsPage(BasePage):
         
     def _add_domain(self):
         """Добавляет домен"""
-        plan = self._controller.build_add_custom_domain_plan(
+        plan = HostlistPageController.build_add_custom_domain_plan(
             raw_text=self.domain_input.text().strip(),
             current_text=self.text_edit.toPlainText(),
         )
@@ -398,7 +395,7 @@ class CustomDomainsPage(BasePage):
     def _reset_file(self):
         """Очищает other.user.txt и пересобирает other.txt из базы."""
         try:
-            if self._controller.reset_domains_file():
+            if HostlistPageController.reset_domains_file():
                 self._load_domains()
                 self.status_label.setText(
                     self.status_label.text()
@@ -430,7 +427,7 @@ class CustomDomainsPage(BasePage):
         try:
             # Сначала сохраняем
             self._save_domains()
-            self._controller.open_domains_user_file()
+            HostlistPageController.open_domains_user_file()
                 
         except Exception as e:
             log(f"Ошибка открытия файла: {e}", "ERROR")

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 from ui.pages.base_page import BasePage
-from .direct_control_page_controller import Zapret1DirectControlPageController
+from ui.control_page_controller import ControlPageController
 from ui.compat_widgets import ActionButton, PrimaryActionButton, PulsingDot, SettingsCard, set_tooltip
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
@@ -62,26 +62,23 @@ class Zapret1DirectControlPage(BasePage):
             subtitle_key="page.z1_control.subtitle",
         )
         self.parent_app = parent
-        self._controller = Zapret1DirectControlPageController()
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._last_known_dpi_running = False
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._program_settings_runtime_attached = False
+        self._preset_name_dirty = True
+        self._build_ui()
+        self._attach_program_settings_runtime()
         try:
-            self._sync_program_settings()
-        except Exception:
-            pass
-        try:
-            plan = self._controller.build_optimistic_startup_plan(language=self._ui_language)
-            if plan.preset_name_text:
-                self.preset_name_label.setText(plan.preset_name_text)
-                set_tooltip(self.preset_name_label, plan.preset_name_tooltip)
-            if plan.should_mark_running:
+            preset_name_text, preset_name_tooltip = self._load_preset_name()
+            if preset_name_text:
+                self.preset_name_label.setText(preset_name_text)
+                set_tooltip(self.preset_name_label, preset_name_tooltip)
+            if self._is_direct_zapret1_launch_active():
                 self.update_status("running")
             else:
                 self.update_status("stopped")
+            self._preset_name_dirty = False
         except Exception:
             pass
 
@@ -94,19 +91,15 @@ class Zapret1DirectControlPage(BasePage):
     def _stop_and_exit(self) -> None:
         stop_and_exit(self)
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        plan = self._controller.build_activation_plan()
-        if plan.sync_program_settings:
-            try:
-                self._sync_program_settings()
-            except Exception:
-                pass
-        if plan.refresh_preset_name:
-            try:
-                self._refresh_preset_name()
-            except Exception:
-                pass
+    def _apply_pending_preset_name_refresh(self) -> None:
+        if not self._preset_name_dirty:
+            return
+        if not self.is_page_ready():
+            return
+        try:
+            self._refresh_preset_name()
+        except Exception:
+            pass
 
     def _build_ui(self):
         # ── Статус работы ──────────────────────────────────────────────────
@@ -273,7 +266,7 @@ class Zapret1DirectControlPage(BasePage):
 
         self.add_widget(program_settings_card)
 
-        self._sync_program_settings()
+        self._attach_program_settings_runtime()
 
     def _set_toggle_checked(self, toggle, checked: bool) -> None:
         try:
@@ -297,13 +290,34 @@ class Zapret1DirectControlPage(BasePage):
         except Exception:
             pass
 
+    def _attach_program_settings_runtime(self) -> None:
+        if self._program_settings_runtime_attached:
+            return
+        self._program_settings_runtime_attached = True
+        self._get_program_settings_runtime_service().subscribe(
+            self._apply_program_settings_snapshot,
+            emit_initial=True,
+        )
+
+    def _apply_program_settings_snapshot(self, snapshot) -> None:
+        self._set_toggle_checked(self.auto_dpi_toggle, getattr(snapshot, "auto_dpi_enabled", False))
+
     def _sync_program_settings(self) -> None:
-        plan = self._controller.load_program_settings()
-        self._set_toggle_checked(self.auto_dpi_toggle, plan.auto_dpi_enabled)
+        snapshot = self._get_program_settings_runtime_service().refresh()
+        self._apply_program_settings_snapshot(snapshot)
+
+    def _get_program_settings_runtime_service(self):
+        app_context = getattr(self.window(), "app_context", None)
+        service = getattr(app_context, "program_settings_runtime_service", None)
+        if service is None:
+            from core.services import get_program_settings_runtime_service
+
+            service = get_program_settings_runtime_service()
+        return service
 
     def _on_auto_dpi_toggled(self, enabled: bool) -> None:
         try:
-            plan = self._controller.save_auto_dpi(enabled)
+            plan = ControlPageController.save_auto_dpi(enabled)
             if InfoBar:
                 InfoBar.success(title=plan.title, content=plan.message, parent=self.window())
         finally:
@@ -316,13 +330,45 @@ class Zapret1DirectControlPage(BasePage):
         except Exception:
             pass
 
+    def _load_preset_name(self) -> tuple[str, str]:
+        try:
+            payload = self._get_direct_ui_snapshot_service().load_basic_ui_payload("direct_zapret1", refresh=False)
+            active_name = str(getattr(payload, "selected_preset_name", "") or "").strip()
+            if active_name:
+                return active_name, active_name
+        except Exception:
+            pass
+
+        return (
+            tr_catalog("page.z1_control.preset.not_selected", language=self._ui_language, default="Не выбран"),
+            "",
+        )
+
+    def _get_direct_ui_snapshot_service(self):
+        app_context = getattr(self.window(), "app_context", None)
+        service = getattr(app_context, "direct_ui_snapshot_service", None)
+        if service is None:
+            from core.services import get_direct_ui_snapshot_service
+
+            service = get_direct_ui_snapshot_service()
+        return service
+
+    @staticmethod
+    def _is_direct_zapret1_launch_active() -> bool:
+        try:
+            from strategy_menu import get_strategy_launch_method
+
+            return str(get_strategy_launch_method() or "").strip().lower() == "direct_zapret1"
+        except Exception:
+            return False
+
     def _refresh_preset_name(self) -> None:
-        plan = self._controller.build_preset_name_plan(language=self._ui_language)
-        self.preset_name_label.setText(plan.text)
-        set_tooltip(self.preset_name_label, plan.tooltip)
+        text, tooltip = self._load_preset_name()
+        self.preset_name_label.setText(text)
+        set_tooltip(self.preset_name_label, tooltip)
+        self._preset_name_dirty = False
 
     def _open_strategies_page(self) -> None:
-        self._controller.prewarm_direct_payload()
         self.navigate_to_strategies.emit()
 
     def set_loading(self, loading: bool, text: str = ""):
@@ -357,16 +403,19 @@ class Zapret1DirectControlPage(BasePage):
         )
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
-        plan = self._controller.build_ui_state_change_plan(
-            state=state,
-            changed_fields=changed_fields,
-            page_visible=self.isVisible(),
+        changed = set(changed_fields or ())
+        if "active_preset_revision" in changed:
+            self._preset_name_dirty = True
+            if self.isVisible():
+                self._refresh_preset_name()
+            else:
+                self.run_when_page_ready(self._apply_pending_preset_name_refresh)
+        self.set_loading(bool(state.dpi_busy), str(state.dpi_busy_text or ""))
+        self.update_status(
+            state.dpi_phase or ("running" if state.dpi_running else "stopped"),
+            str(state.dpi_last_error or ""),
         )
-        if plan.refresh_preset_name_now:
-            self._refresh_preset_name()
-        self.set_loading(plan.loading, plan.loading_text)
-        self.update_status(plan.update_status_state, plan.update_status_error)
-        self.update_strategy(plan.strategy_summary)
+        self.update_strategy(str(state.current_strategy_summary or ""))
 
     def _get_current_dpi_runtime_state(self) -> tuple[str, str]:
         """Берёт текущую фазу DPI из общего store, а не из видимости кнопок."""
@@ -374,46 +423,109 @@ class Zapret1DirectControlPage(BasePage):
         if store is not None:
             try:
                 snapshot = store.snapshot()
-                plan = self._controller.resolve_runtime_state(
+                plan = ControlPageController.resolve_runtime_state(
                     snapshot_state=snapshot,
                     last_known_dpi_running=self._last_known_dpi_running,
                 )
                 return plan.phase, plan.last_error
             except Exception:
                 pass
-        plan = self._controller.resolve_runtime_state(
+        plan = ControlPageController.resolve_runtime_state(
             snapshot_state=None,
             last_known_dpi_running=bool(getattr(self, "_last_known_dpi_running", False)),
         )
         return plan.phase, plan.last_error
 
     def update_status(self, state: str | bool, last_error: str = ""):
-        plan = self._controller.build_status_plan(
-            state=state,
-            last_error=last_error,
-            language=self._ui_language,
-        )
-        self._last_known_dpi_running = plan.phase == "running"
-        self.status_title.setText(plan.title)
-        self.status_desc.setText(plan.description)
-        self.status_dot.set_color(plan.dot_color)
-        if plan.pulsing:
+        phase = str(state or "").strip().lower()
+        if phase not in {"autostart_pending", "starting", "running", "stopping", "failed", "stopped"}:
+            phase = "running" if bool(state) else "stopped"
+
+        if phase == "running":
+            title = tr_catalog("page.z1_control.status.running", language=self._ui_language, default="Zapret 1 работает")
+            description = tr_catalog(
+                "page.z1_control.status.bypass_active",
+                language=self._ui_language,
+                default="Обход блокировок активен",
+            )
+            dot_color = "#6ccb5f"
+            pulsing = True
+            show_start = False
+            show_stop_only = True
+            show_stop_and_exit = True
+        elif phase == "autostart_pending":
+            title = "Автозапуск Zapret 1 запланирован"
+            description = "Подготавливаем стартовый запуск выбранного пресета"
+            dot_color = "#f5a623"
+            pulsing = True
+            show_start = False
+            show_stop_only = False
+            show_stop_and_exit = False
+        elif phase == "starting":
+            title = "Zapret 1 запускается"
+            description = "Ждём подтверждение процесса winws.exe"
+            dot_color = "#f5a623"
+            pulsing = True
+            show_start = False
+            show_stop_only = False
+            show_stop_and_exit = False
+        elif phase == "stopping":
+            title = "Zapret 1 останавливается"
+            description = "Завершаем winws.exe и освобождаем WinDivert"
+            dot_color = "#f5a623"
+            pulsing = True
+            show_start = False
+            show_stop_only = False
+            show_stop_and_exit = False
+        elif phase == "failed":
+            title = "Ошибка запуска Zapret 1"
+            description = ControlPageController.short_dpi_error(last_error) or "Процесс не подтвердился или завершился сразу"
+            dot_color = "#ff6b6b"
+            pulsing = False
+            show_start = True
+            show_stop_only = False
+            show_stop_and_exit = False
+        else:
+            phase = "stopped"
+            title = tr_catalog("page.z1_control.status.stopped", language=self._ui_language, default="Zapret 1 остановлен")
+            description = tr_catalog(
+                "page.z1_control.status.press_start",
+                language=self._ui_language,
+                default="Нажмите «Запустить» для активации",
+            )
+            dot_color = "#ff6b6b"
+            pulsing = False
+            show_start = True
+            show_stop_only = False
+            show_stop_and_exit = False
+
+        self._last_known_dpi_running = phase == "running"
+        self.status_title.setText(title)
+        self.status_desc.setText(description)
+        self.status_dot.set_color(dot_color)
+        if pulsing:
             self.status_dot.start_pulse()
         else:
             self.status_dot.stop_pulse()
-        self.start_btn.setVisible(plan.show_start)
-        self.stop_winws_btn.setVisible(plan.show_stop_only)
-        self.stop_and_exit_btn.setVisible(plan.show_stop_and_exit)
+        self.start_btn.setVisible(show_start)
+        self.stop_winws_btn.setVisible(show_stop_only)
+        self.stop_and_exit_btn.setVisible(show_stop_and_exit)
 
     def update_strategy(self, name: str):
-        plan = self._controller.build_strategy_update_plan(name=name)
-        if plan.refresh_preset_name:
-            self._refresh_preset_name()
+        _ = name
+        if not self.isVisible():
+            self._preset_name_dirty = True
+            self.run_when_page_ready(self._apply_pending_preset_name_refresh)
+            return
+        self._refresh_preset_name()
 
     def update_current_strategy(self, name: str):
-        plan = self._controller.build_strategy_update_plan(name=name)
-        if plan.refresh_preset_name:
-            self._refresh_preset_name()
+        _ = name
+        if not self.isVisible():
+            self._preset_name_dirty = True
+            self.run_when_page_ready(self._apply_pending_preset_name_refresh)
+            return
+        self._refresh_preset_name()
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)

@@ -76,9 +76,10 @@ class ConnectionPageController:
             return "youtube"
         return "all"
 
-    def build_start_plan(self, *, selection: str) -> ConnectionTestStartPlan:
+    @staticmethod
+    def build_start_plan(*, selection: str) -> ConnectionTestStartPlan:
         return ConnectionTestStartPlan(
-            test_type=self.resolve_test_type(selection),
+            test_type=ConnectionPageController.resolve_test_type(selection),
             start_lines=(
                 f"🚀 Запуск тестирования: {selection}",
                 "=" * 50,

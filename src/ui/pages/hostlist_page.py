@@ -1,11 +1,7 @@
 # ui/pages/hostlist_page.py
 """Объединённая страница «Листы»: обзор hostlist / ipset + редакторы доменов и IP."""
 
-import ipaddress
 import os
-import re
-from typing import Optional
-from urllib.parse import urlparse
 
 import qtawesome as qta
 from PyQt6.QtCore import QSize, QTimer, pyqtSignal
@@ -90,7 +86,7 @@ class HostlistPage(BasePage):
             title_key="page.hostlist.title",
             subtitle_key="page.hostlist.subtitle",
         )
-        self._info_loaded_once = False
+        self._runtime_initialized = False
         self._domains_loaded = False
         self._ips_loaded = False
         self._accent_icon_lbls: list[tuple] = []
@@ -123,9 +119,10 @@ class HostlistPage(BasePage):
         self._ipru_status_timer.setSingleShot(True)
         self._ipru_status_timer.timeout.connect(self._ipru_update_status)
 
-        self._controller = HostlistPageController()
 
-        self.enable_deferred_ui_build()
+        self._build_ui()
+        self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         text = tr_catalog(key, language=self._ui_language, default=default)
@@ -136,15 +133,47 @@ class HostlistPage(BasePage):
                 return text
         return text
 
+    def _apply_hostlist_action_result(self, result) -> None:
+        log(result.log_message, result.log_level)
+
+        if getattr(result, "invalidate_excl_base_cache", False):
+            self._excl_base_set_cache = None
+
+        if getattr(result, "reload_info", False):
+            self._load_info()
+
+        if getattr(result, "reload_domains", False):
+            self._load_domains()
+            if getattr(result, "append_domains_status_suffix", "") and hasattr(self, "_d_status"):
+                self._d_status.setText(self._d_status.text() + result.append_domains_status_suffix)
+
+        if getattr(result, "reload_exclusions", False):
+            self._excl_update_status()
+            if getattr(result, "append_exclusions_status_suffix", "") and hasattr(self, "_excl_status"):
+                self._excl_status.setText(self._excl_status.text() + result.append_exclusions_status_suffix)
+
+        level = getattr(result, "infobar_level", None)
+        if not level or not InfoBar:
+            return
+
+        if level == "success":
+            InfoBar.success(title=result.infobar_title, content=result.infobar_content, parent=self.window())
+        elif level == "warning":
+            InfoBar.warning(title=result.infobar_title, content=result.infobar_content, parent=self.window())
+        elif level == "error":
+            InfoBar.error(title=result.infobar_title, content=result.infobar_content, parent=self.window())
+        else:
+            InfoBar.info(title=result.infobar_title, content=result.infobar_content, parent=self.window())
+
     # ──────────────────────────────────────────────────────────────────────────
-    # Qt event overrides
+    # Lifecycle
     # ──────────────────────────────────────────────────────────────────────────
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        if not self._info_loaded_once:
-            self._info_loaded_once = True
-            QTimer.singleShot(0, self._load_info)
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
+            return
+        self._runtime_initialized = True
+        QTimer.singleShot(0, self._load_info)
 
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -613,39 +642,16 @@ class HostlistPage(BasePage):
     # ──────────────────────────────────────────────────────────────────────────
 
     def _open_lists_folder(self):
-        try:
-            self._controller.open_lists_folder()
-        except Exception as e:
-            log(f"Ошибка открытия папки: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.error.open_folder", "Не удалось открыть папку:\n{error}", error=e),
-                    parent=self.window(),
-                )
+        result = HostlistPageController.open_lists_folder_action()
+        self._apply_hostlist_action_result(result)
 
     def _rebuild_hostlists(self):
-        try:
-            self._controller.rebuild_hostlists()
-            if InfoBar:
-                InfoBar.success(
-                    title=self._tr("page.hostlist.infobar.done", "Готово"),
-                    content=self._tr("page.hostlist.infobar.hostlists_rebuilt", "Хостлисты обновлены"),
-                    parent=self.window(),
-                )
-            self._load_info()
-        except Exception as e:
-            log(f"Ошибка перестроения: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.error.rebuild", "Не удалось перестроить:\n{error}", error=e),
-                    parent=self.window(),
-                )
+        result = HostlistPageController.rebuild_hostlists_action()
+        self._apply_hostlist_action_result(result)
 
     def _load_info(self):
         try:
-            state = self._controller.load_folder_info()
+            state = HostlistPageController.load_folder_info()
             if not state.folder_exists:
                 not_found = self._tr("page.hostlist.info.folder_not_found", "Папка листов не найдена")
                 self.hostlist_info_label.setText(not_found)
@@ -684,13 +690,13 @@ class HostlistPage(BasePage):
 
     def _load_domains(self):
         try:
-            state = self._controller.load_domains_entries()
-            domains = state.entries
+            state = HostlistPageController.load_custom_domains_text()
+            domains_text = state.text
             self._d_editor.blockSignals(True)
-            self._d_editor.setPlainText("\n".join(domains))
+            self._d_editor.setPlainText(domains_text)
             self._d_editor.blockSignals(False)
             self._domains_update_status()
-            log(f"Загружено {len(domains)} строк из other.user.txt", "INFO")
+            log(f"Загружено {state.lines_count} строк из other.user.txt", "INFO")
         except Exception as e:
             log(f"Ошибка загрузки доменов: {e}", "ERROR")
             if hasattr(self, "_d_status"):
@@ -712,19 +718,19 @@ class HostlistPage(BasePage):
     def _domains_save(self):
         try:
             text = self._d_editor.toPlainText()
-            domains: list[str] = []
-            for line in text.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("#"):
-                    domains.append(line)
-                    continue
-                domain = self._extract_domain(line)
-                if domain and domain not in domains:
-                    domains.append(domain)
-            self._controller.save_domains_entries(domains)
-            log(f"Сохранено {len(domains)} строк в other.user.txt", "SUCCESS")
+            state = HostlistPageController.save_custom_domains_text(text)
+            normalized_text = state.normalized_text
+            if normalized_text != text:
+                cursor = self._d_editor.textCursor()
+                pos = cursor.position()
+                self._d_editor.blockSignals(True)
+                self._d_editor.setPlainText(normalized_text)
+                cursor = self._d_editor.textCursor()
+                cursor.setPosition(min(pos, len(normalized_text)))
+                self._d_editor.setTextCursor(cursor)
+                self._d_editor.blockSignals(False)
+                self._domains_update_status()
+            log(f"Сохранено {state.saved_count} строк в other.user.txt", "SUCCESS")
             self.domains_changed.emit()
         except Exception as e:
             log(f"Ошибка сохранения доменов: {e}", "ERROR")
@@ -733,56 +739,38 @@ class HostlistPage(BasePage):
         if not hasattr(self, "_d_status") or not hasattr(self, "_d_editor"):
             return
         text = self._d_editor.toPlainText()
-        lines = [ln.strip() for ln in text.split("\n") if ln.strip() and not ln.strip().startswith("#")]
+        plan = HostlistPageController.build_custom_domains_status_plan(text)
         self._d_status.setText(
-            self._tr("page.hostlist.status.domains_count", "📊 Доменов: {count}", count=len(lines))
+            self._tr(
+                "page.hostlist.status.domains_full_count",
+                "📊 Доменов: {total} (база: {base}, пользовательские: {user})",
+                total=plan.total_count,
+                base=plan.base_count,
+                user=plan.user_count,
+            )
         )
 
     def _domains_add(self):
         text = self._d_input.text().strip() if hasattr(self._d_input, "text") else ""
         if not text:
             return
-        domain = self._extract_domain(text)
-        if not domain:
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr(
-                        "page.hostlist.domains.error.invalid_domain",
-                        "Не удалось распознать домен:\n{value}\n\nВведите корректный домен (например: example.com)",
-                        value=text,
-                    ),
-                    parent=self.window(),
-                )
-            return
         current = self._d_editor.toPlainText()
-        existing = [ln.strip().lower() for ln in current.split("\n") if ln.strip() and not ln.strip().startswith("#")]
-        if domain.lower() in existing:
-            if InfoBar:
-                InfoBar.info(
-                    title=self._tr("page.hostlist.infobar.info", "Информация"),
-                    content=self._tr("page.hostlist.domains.info.already_added", "Домен уже добавлен:\n{domain}", domain=domain),
-                    parent=self.window(),
-                )
+        plan = HostlistPageController.build_add_custom_domain_plan(raw_text=text, current_text=current)
+        if plan.level == "warning" and InfoBar:
+            InfoBar.warning(title=plan.title or self._tr("common.error.title", "Ошибка"), content=plan.content, parent=self.window())
             return
-        if current and not current.endswith("\n"):
-            current += "\n"
-        self._d_editor.setPlainText(current + domain)
-        if hasattr(self._d_input, "clear"):
+        if plan.level == "info" and InfoBar:
+            InfoBar.info(title=plan.title or self._tr("page.hostlist.infobar.info", "Информация"), content=plan.content, parent=self.window())
+            return
+        if plan.new_text is not None:
+            self._d_editor.setPlainText(plan.new_text)
+        if plan.clear_input and hasattr(self._d_input, "clear"):
             self._d_input.clear()
 
     def _domains_open_file(self):
-        try:
-            self._domains_save()
-            self._controller.open_domains_user_file()
-        except Exception as e:
-            log(f"Ошибка открытия файла: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.error.open_file", "Не удалось открыть:\n{error}", error=e),
-                    parent=self.window(),
-                )
+        self._domains_save()
+        result = HostlistPageController.open_domains_user_file_action()
+        self._apply_hostlist_action_result(result)
 
     def _domains_confirm_reset_file(self):
         if MessageBox:
@@ -796,28 +784,8 @@ class HostlistPage(BasePage):
         self._domains_reset_file()
 
     def _domains_reset_file(self):
-        try:
-            if self._controller.reset_domains_file():
-                self._load_domains()
-                if hasattr(self, "_d_status"):
-                    self._d_status.setText(
-                        self._d_status.text() + self._tr("page.hostlist.status.reset_suffix", " • ✅ Сброшено")
-                    )
-            else:
-                if InfoBar:
-                    InfoBar.warning(
-                        title=self._tr("common.error.title", "Ошибка"),
-                        content=self._tr("page.hostlist.domains.error.reset_failed", "Не удалось сбросить my hostlist"),
-                        parent=self.window(),
-                    )
-        except Exception as e:
-            log(f"Ошибка сброса hostlist: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.domains.error.reset_exception", "Не удалось сбросить:\n{error}", error=e),
-                    parent=self.window(),
-                )
+        result = HostlistPageController.reset_domains_file_action()
+        self._apply_hostlist_action_result(result)
 
     def _domains_confirm_clear_all(self):
         if MessageBox:
@@ -834,56 +802,19 @@ class HostlistPage(BasePage):
         self._d_editor.setPlainText("")
         self._domains_save()
 
-    @staticmethod
-    def _extract_domain(text: str) -> Optional[str]:
-        text = text.strip()
-        marker = ""
-        if text.startswith("^"):
-            marker = "^"
-            text = text[1:].strip()
-            if not text:
-                return None
-        if text.startswith("."):
-            text = text[1:]
-        if "://" in text or text.startswith("www."):
-            if not text.startswith(("http://", "https://")):
-                text = "https://" + text
-            try:
-                parsed = urlparse(text)
-                domain = parsed.netloc or parsed.path.split("/")[0]
-                if domain.startswith("www."):
-                    domain = domain[4:]
-                domain = domain.split(":")[0].lower()
-                if domain.startswith("."):
-                    domain = domain[1:]
-                return f"{marker}{domain}" if marker else domain
-            except Exception:
-                pass
-        domain = text.split("/")[0].split(":")[0].lower()
-        if domain.startswith("www."):
-            domain = domain[4:]
-        if domain.startswith("."):
-            domain = domain[1:]
-        if re.match(r"^[a-z]{2,10}$", domain):
-            return f"{marker}{domain}" if marker else domain
-        if "." in domain and len(domain) > 3 and re.match(r"^[a-z0-9][a-z0-9\-\.]*[a-z0-9]$", domain):
-            return f"{marker}{domain}" if marker else domain
-        return None
-
     # ──────────────────────────────────────────────────────────────────────────
     # IPs editor logic
     # ──────────────────────────────────────────────────────────────────────────
 
     def _load_ips(self):
         try:
-            state = self._controller.load_ipset_all_entries()
+            state = HostlistPageController.load_custom_ipset_text()
             self._ip_base_set_cache = state.base_set
-            entries = state.entries
             self._i_editor.blockSignals(True)
-            self._i_editor.setPlainText("\n".join(entries))
+            self._i_editor.setPlainText(state.text)
             self._i_editor.blockSignals(False)
             self._ips_update_status()
-            log(f"Загружено {len(entries)} строк из ipset-all.user.txt", "INFO")
+            log(f"Загружено {state.lines_count} строк из ipset-all.user.txt", "INFO")
         except Exception as e:
             log(f"Ошибка загрузки ipset-all.user.txt: {e}", "ERROR")
             if hasattr(self, "_i_status"):
@@ -905,42 +836,19 @@ class HostlistPage(BasePage):
     def _ips_save(self):
         try:
             text = self._i_editor.toPlainText()
-            entries: list[str] = []
-            invalid: list[str] = []
-            for line in text.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("#"):
-                    entries.append(line)
-                    continue
-                for item in re.split(r"[\s,;]+", line):
-                    item = item.strip()
-                    if not item:
-                        continue
-                    norm = self._normalize_ip(item)
-                    if norm:
-                        if norm not in entries:
-                            entries.append(norm)
-                    else:
-                        invalid.append(item)
-            if not self._controller.save_ipset_all_entries(entries):
-                log("Не удалось быстро синхронизировать ipset-all после сохранения", "WARNING")
-
-            # Show/hide error label
-            if hasattr(self, "_i_error_label"):
-                if invalid:
-                    self._i_error_label.setText(
-                        self._tr(
-                            "page.hostlist.ips.error.invalid_format",
-                            "❌ Неверный формат: {items}",
-                            items=", ".join(invalid[:5]),
-                        )
-                    )
-                    self._i_error_label.show()
-                else:
-                    self._i_error_label.hide()
-            log(f"Сохранено {len(entries)} строк в ipset-all.user.txt", "SUCCESS")
+            state = HostlistPageController.save_custom_ipset_text(text)
+            normalized_text = state.normalized_text
+            if normalized_text != text:
+                cursor = self._i_editor.textCursor()
+                pos = cursor.position()
+                self._i_editor.blockSignals(True)
+                self._i_editor.setPlainText(normalized_text)
+                cursor = self._i_editor.textCursor()
+                cursor.setPosition(min(pos, len(normalized_text)))
+                self._i_editor.setTextCursor(cursor)
+                self._i_editor.blockSignals(False)
+            self._ips_update_status()
+            log(f"Сохранено {state.saved_count} строк в ipset-all.user.txt", "SUCCESS")
             self.ipset_changed.emit()
         except Exception as e:
             log(f"Ошибка сохранения ipset-all.user.txt: {e}", "ERROR")
@@ -949,90 +857,51 @@ class HostlistPage(BasePage):
         if not hasattr(self, "_i_status") or not hasattr(self, "_i_editor"):
             return
         text = self._i_editor.toPlainText()
-        lines = [ln.strip() for ln in text.split("\n") if ln.strip() and not ln.strip().startswith("#")]
-
-        base_set = self._get_base_ips_set()
-        valid_entries: set[str] = set()
-
-        for line in lines:
-            for item in re.split(r"[\s,;]+", line):
-                item = item.strip()
-                if not item:
-                    continue
-                norm = self._normalize_ip(item)
-                if norm:
-                    valid_entries.add(norm)
-
-        user_count = len({ip for ip in valid_entries if ip not in base_set})
-        base_count = len(base_set)
-        total_count = len(base_set.union(valid_entries))
+        plan = HostlistPageController.build_custom_ipset_status_plan(text)
 
         self._i_status.setText(
             self._tr(
                 "page.hostlist.status.entries_count",
                 "📊 Записей: {total} (база: {base}, пользовательские: {user})",
-                total=total_count,
-                base=base_count,
-                user=user_count,
+                total=plan.total_count,
+                base=plan.base_count,
+                user=plan.user_count,
             )
         )
-
-    def _get_base_ips_set(self) -> set[str]:
-        if self._ip_base_set_cache is not None:
-            return self._ip_base_set_cache
-
-        try:
-            from utils.ipsets_manager import get_ipset_all_base_set
-
-            self._ip_base_set_cache = get_ipset_all_base_set()
-        except Exception:
-            self._ip_base_set_cache = set()
-        return self._ip_base_set_cache
+        if hasattr(self, "_i_error_label"):
+            if plan.invalid_lines:
+                self._i_error_label.setText(
+                    self._tr(
+                        "page.hostlist.ips.error.invalid_format",
+                        "❌ Неверный формат: {items}",
+                        items=", ".join(item for _, item in plan.invalid_lines[:5]),
+                    )
+                )
+                self._i_error_label.show()
+            else:
+                self._i_error_label.hide()
 
     def _ips_add(self):
         text = self._i_input.text().strip() if hasattr(self._i_input, "text") else ""
         if not text:
             return
-        norm = self._normalize_ip(text)
-        if not norm:
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr(
-                        "page.hostlist.ips.error.invalid_ip",
-                        "Не удалось распознать IP или подсеть.\nПримеры: 1.2.3.4 или 10.0.0.0/8",
-                    ),
-                    parent=self.window(),
-                )
-            return
         current = self._i_editor.toPlainText()
-        existing = [ln.strip().lower() for ln in current.split("\n") if ln.strip() and not ln.strip().startswith("#")]
-        if norm.lower() in existing:
-            if InfoBar:
-                InfoBar.info(
-                    title=self._tr("page.hostlist.infobar.info", "Информация"),
-                    content=self._tr("page.hostlist.ips.info.already_exists", "Запись уже есть:\n{entry}", entry=norm),
-                    parent=self.window(),
-                )
+        plan = HostlistPageController.build_add_custom_ipset_plan(raw_text=text, current_text=current)
+        if plan.level == "warning" and InfoBar:
+            InfoBar.warning(title=plan.title or self._tr("common.error.title", "Ошибка"), content=plan.content, parent=self.window())
             return
-        if current and not current.endswith("\n"):
-            current += "\n"
-        self._i_editor.setPlainText(current + norm)
-        if hasattr(self._i_input, "clear"):
+        if plan.level == "info" and InfoBar:
+            InfoBar.info(title=plan.title or self._tr("page.hostlist.infobar.info", "Информация"), content=plan.content, parent=self.window())
+            return
+        if plan.new_text is not None:
+            self._i_editor.setPlainText(plan.new_text)
+        if plan.clear_input and hasattr(self._i_input, "clear"):
             self._i_input.clear()
 
     def _ips_open_file(self):
-        try:
-            self._ips_save()
-            self._controller.open_ipset_all_user_file()
-        except Exception as e:
-            log(f"Ошибка открытия ipset-all.user.txt: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.error.open_file", "Не удалось открыть:\n{error}", error=e),
-                    parent=self.window(),
-                )
+        self._ips_save()
+        result = HostlistPageController.open_ipset_all_user_file_action()
+        self._apply_hostlist_action_result(result)
 
     def _ips_clear_all(self):
         text = self._i_editor.toPlainText().strip()
@@ -1305,14 +1174,13 @@ class HostlistPage(BasePage):
 
     def _load_exclusions(self):
         try:
-            state = self._controller.load_netrogat_entries()
+            state = HostlistPageController.load_custom_netrogat_text()
             self._excl_base_set_cache = state.base_set
-            domains = state.entries
             self._excl_editor.blockSignals(True)
-            self._excl_editor.setPlainText("\n".join(domains))
+            self._excl_editor.setPlainText(state.text)
             self._excl_editor.blockSignals(False)
             self._excl_update_status()
-            log(f"Загружено {len(domains)} строк из netrogat.user.txt", "INFO")
+            log(f"Загружено {state.lines_count} строк из netrogat.user.txt", "INFO")
         except Exception as e:
             log(f"Ошибка загрузки netrogat: {e}", "ERROR")
             if hasattr(self, "_excl_status"):
@@ -1324,15 +1192,14 @@ class HostlistPage(BasePage):
 
     def _load_ipru_exclusions(self):
         try:
-            state = self._controller.load_ipset_ru_entries()
+            state = HostlistPageController.load_custom_ipru_text()
             self._ipru_base_set_cache = state.base_set
-            entries = state.entries
 
             self._ipru_editor.blockSignals(True)
-            self._ipru_editor.setPlainText("\n".join(entries))
+            self._ipru_editor.setPlainText(state.text)
             self._ipru_editor.blockSignals(False)
             self._ipru_update_status()
-            log(f"Загружено {len(entries)} строк из ipset-ru.user.txt", "INFO")
+            log(f"Загружено {state.lines_count} строк из ipset-ru.user.txt", "INFO")
         except Exception as e:
             log(f"Ошибка загрузки ipset-ru.user.txt: {e}", "ERROR")
             if hasattr(self, "_ipru_status"):
@@ -1353,29 +1220,10 @@ class HostlistPage(BasePage):
 
     def _excl_save(self):
         try:
-            from utils.netrogat_manager import save_netrogat, _normalize_domain
-            from ui.pages.netrogat_page import split_domains
             text = self._excl_editor.toPlainText()
-            domains: list[str] = []
-            normalized_lines: list[str] = []
-            for line in text.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("#"):
-                    domains.append(line)
-                    normalized_lines.append(line)
-                    continue
-                for item in split_domains(line):
-                    norm = _normalize_domain(item)
-                    if norm:
-                        if norm not in domains:
-                            domains.append(norm)
-                            normalized_lines.append(norm)
-                    else:
-                        normalized_lines.append(item)
-            if self._controller.save_netrogat_entries(domains):
-                new_text = "\n".join(normalized_lines)
+            state = HostlistPageController.save_custom_netrogat_text(text)
+            if state.success:
+                new_text = state.normalized_text
                 if new_text != text:
                     cursor = self._excl_editor.textCursor()
                     pos = cursor.position()
@@ -1392,152 +1240,46 @@ class HostlistPage(BasePage):
         if not hasattr(self, "_excl_status") or not hasattr(self, "_excl_editor"):
             return
 
-        try:
-            from ui.pages.netrogat_page import split_domains
-            from utils.netrogat_manager import _normalize_domain
-        except Exception:
-            return
-
         text = self._excl_editor.toPlainText()
-        lines = [ln.strip() for ln in text.split("\n") if ln.strip() and not ln.strip().startswith("#")]
-
-        base_set = self._get_excl_base_set()
-        valid_entries: set[str] = set()
-
-        for line in lines:
-            for item in split_domains(line):
-                norm = _normalize_domain(item)
-                if norm:
-                    valid_entries.add(norm)
-
-        user_count = len({d for d in valid_entries if d not in base_set})
-        base_count = len(base_set)
-        total_count = len(base_set.union(valid_entries))
+        plan = HostlistPageController.build_custom_netrogat_status_plan(text)
         self._excl_status.setText(
             self._tr(
                 "page.hostlist.status.domains_full_count",
                 "📊 Доменов: {total} (база: {base}, пользовательские: {user})",
-                total=total_count,
-                base=base_count,
-                user=user_count,
+                total=plan.total_count,
+                base=plan.base_count,
+                user=plan.user_count,
             )
         )
 
-    def _get_excl_base_set(self) -> set[str]:
-        if self._excl_base_set_cache is not None:
-            return self._excl_base_set_cache
-
-        try:
-            from utils.netrogat_manager import get_netrogat_base_set
-
-            self._excl_base_set_cache = get_netrogat_base_set()
-        except Exception:
-            self._excl_base_set_cache = set()
-        return self._excl_base_set_cache
-
     def _excl_add(self):
-        try:
-            from utils.netrogat_manager import _normalize_domain
-            from ui.pages.netrogat_page import split_domains
-        except ImportError:
-            return
         raw = self._excl_input.text().strip() if hasattr(self._excl_input, "text") else ""
         if not raw:
             return
-        parts = split_domains(raw)
-        if not parts:
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.exclusions.error.invalid_domain", "Не удалось распознать домен."),
-                    parent=self.window(),
-                )
-            return
         current = self._excl_editor.toPlainText()
-        current_domains = [ln.strip().lower() for ln in current.split("\n") if ln.strip() and not ln.strip().startswith("#")]
-        added: list[str] = []
-        skipped: list[str] = []
-        invalid: list[str] = []
-        for part in parts:
-            if part.startswith("#"):
-                continue
-            norm = _normalize_domain(part)
-            if not norm:
-                invalid.append(part)
-                continue
-            if norm.lower() in current_domains or norm.lower() in [a.lower() for a in added]:
-                skipped.append(norm)
-                continue
-            added.append(norm)
-        if not added and not skipped and invalid:
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.exclusions.error.invalid_domains", "Не удалось распознать домены."),
-                    parent=self.window(),
-                )
+        plan = HostlistPageController.build_add_custom_netrogat_plan(raw_text=raw, current_text=current)
+        if plan.level == "warning" and InfoBar:
+            InfoBar.warning(title=plan.title or self._tr("common.error.title", "Ошибка"), content=plan.content, parent=self.window())
             return
-        if not added and skipped:
-            if InfoBar:
-                if len(skipped) == 1:
-                    InfoBar.info(
-                        title=self._tr("page.hostlist.infobar.info", "Информация"),
-                        content=self._tr("page.hostlist.exclusions.info.domain_exists", "Домен уже есть: {domain}", domain=skipped[0]),
-                        parent=self.window(),
-                    )
-                else:
-                    InfoBar.info(
-                        title=self._tr("page.hostlist.infobar.info", "Информация"),
-                        content=self._tr("page.hostlist.exclusions.info.all_domains_exist", "Все домены уже есть ({count})", count=len(skipped)),
-                        parent=self.window(),
-                    )
+        if plan.level == "info" and InfoBar:
+            InfoBar.info(title=plan.title or self._tr("page.hostlist.infobar.info", "Информация"), content=plan.content, parent=self.window())
             return
-        if current and not current.endswith("\n"):
-            current += "\n"
-        current += "\n".join(added)
-        self._excl_editor.setPlainText(current)
-        if hasattr(self._excl_input, "clear"):
+        if plan.new_text is not None:
+            self._excl_editor.setPlainText(plan.new_text)
+        if plan.clear_input and hasattr(self._excl_input, "clear"):
             self._excl_input.clear()
-        if skipped and InfoBar:
-            InfoBar.success(
-                title=self._tr("page.hostlist.infobar.added", "Добавлено"),
-                content=self._tr(
-                    "page.hostlist.exclusions.info.added_with_skipped",
-                    "Добавлено доменов. Пропущено уже существующих: {count}",
-                    count=len(skipped),
-                ),
-                parent=self.window(),
-            )
+        if plan.level == "success" and InfoBar:
+            InfoBar.success(title=plan.title or self._tr("page.hostlist.infobar.added", "Добавлено"), content=plan.content, parent=self.window())
 
     def _excl_open_file(self):
-        try:
-            self._excl_save()
-            self._controller.open_netrogat_user_file()
-        except Exception as e:
-            log(f"Ошибка открытия netrogat.user.txt: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.error.open_file", "Не удалось открыть:\n{error}", error=e),
-                    parent=self.window(),
-                )
+        self._excl_save()
+        result = HostlistPageController.open_netrogat_user_file_action()
+        self._apply_hostlist_action_result(result)
 
     def _excl_open_final_file(self):
-        try:
-            self._excl_save()
-            self._controller.open_netrogat_final_file()
-        except Exception as e:
-            log(f"Ошибка открытия итогового netrogat.txt: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr(
-                        "page.hostlist.error.open_final_file",
-                        "Не удалось открыть итоговый файл: {error}",
-                        error=e,
-                    ),
-                    parent=self.window(),
-                )
+        self._excl_save()
+        result = HostlistPageController.open_netrogat_final_file_action()
+        self._apply_hostlist_action_result(result)
 
     def _excl_clear_all(self):
         text = self._excl_editor.toPlainText().strip()
@@ -1556,31 +1298,8 @@ class HostlistPage(BasePage):
 
     def _excl_add_missing_defaults(self):
         self._excl_save()
-        added = self._controller.add_missing_netrogat_defaults()
-        self._excl_base_set_cache = None
-        if added == 0:
-            if InfoBar:
-                InfoBar.success(
-                    title=self._tr("page.hostlist.infobar.done", "Готово"),
-                    content=self._tr(
-                        "page.hostlist.exclusions.info.defaults_already_present",
-                        "Системная база уже содержит все домены по умолчанию.",
-                    ),
-                    parent=self.window(),
-                )
-            return
-
-        self._excl_update_status()
-        if InfoBar:
-            InfoBar.success(
-                title=self._tr("page.hostlist.infobar.done", "Готово"),
-                content=self._tr(
-                    "page.hostlist.exclusions.info.defaults_restored",
-                    "Восстановлено доменов в системной базе: {count}",
-                    count=added,
-                ),
-                parent=self.window(),
-            )
+        result = HostlistPageController.add_missing_netrogat_defaults_action()
+        self._apply_hostlist_action_result(result)
 
     def _ipru_on_text_changed(self):
         self._ipru_save_timer.start(500)
@@ -1596,44 +1315,19 @@ class HostlistPage(BasePage):
     def _ipru_save(self):
         try:
             text = self._ipru_editor.toPlainText()
-            entries: list[str] = []
-            invalid: list[str] = []
-
-            for line in text.split("\n"):
-                line = line.strip()
-                if not line:
-                    continue
-                if line.startswith("#"):
-                    entries.append(line)
-                    continue
-                for item in re.split(r"[\s,;]+", line):
-                    item = item.strip()
-                    if not item:
-                        continue
-                    norm = self._normalize_ip(item)
-                    if norm:
-                        if norm not in entries:
-                            entries.append(norm)
-                    else:
-                        invalid.append(item)
-
-            if not self._controller.save_ipset_ru_entries(entries):
-                log("Не удалось быстро синхронизировать ipset-ru после сохранения", "WARNING")
-
-            if hasattr(self, "_ipru_error_label"):
-                if invalid:
-                    self._ipru_error_label.setText(
-                        self._tr(
-                            "page.hostlist.ips.error.invalid_format",
-                            "❌ Неверный формат: {items}",
-                            items=", ".join(invalid[:5]),
-                        )
-                    )
-                    self._ipru_error_label.show()
-                else:
-                    self._ipru_error_label.hide()
-
-            log(f"Сохранено {len(entries)} строк в ipset-ru.user.txt", "SUCCESS")
+            state = HostlistPageController.save_custom_ipru_text(text)
+            normalized_text = state.normalized_text
+            if normalized_text != text:
+                cursor = self._ipru_editor.textCursor()
+                pos = cursor.position()
+                self._ipru_editor.blockSignals(True)
+                self._ipru_editor.setPlainText(normalized_text)
+                cursor = self._ipru_editor.textCursor()
+                cursor.setPosition(min(pos, len(normalized_text)))
+                self._ipru_editor.setTextCursor(cursor)
+                self._ipru_editor.blockSignals(False)
+            self._ipru_update_status()
+            log(f"Сохранено {state.saved_count} строк в ipset-ru.user.txt", "SUCCESS")
         except Exception as e:
             log(f"Ошибка сохранения ipset-ru.user.txt: {e}", "ERROR")
 
@@ -1642,44 +1336,28 @@ class HostlistPage(BasePage):
             return
 
         text = self._ipru_editor.toPlainText()
-        lines = [ln.strip() for ln in text.split("\n") if ln.strip() and not ln.strip().startswith("#")]
-
-        base_set = self._get_ipru_base_set()
-        valid_entries: set[str] = set()
-
-        for line in lines:
-            for item in re.split(r"[\s,;]+", line):
-                item = item.strip()
-                if not item:
-                    continue
-                norm = self._normalize_ip(item)
-                if norm:
-                    valid_entries.add(norm)
-
-        user_count = len({ip for ip in valid_entries if ip not in base_set})
-        base_count = len(base_set)
-        total_count = len(base_set.union(valid_entries))
+        plan = HostlistPageController.build_custom_ipru_status_plan(text)
         self._ipru_status.setText(
             self._tr(
                 "page.hostlist.status.ipru_count",
                 "📊 IP-исключений: {total} (база: {base}, пользовательские: {user})",
-                total=total_count,
-                base=base_count,
-                user=user_count,
+                total=plan.total_count,
+                base=plan.base_count,
+                user=plan.user_count,
             )
         )
-
-    def _get_ipru_base_set(self) -> set[str]:
-        if self._ipru_base_set_cache is not None:
-            return self._ipru_base_set_cache
-
-        try:
-            from utils.ipsets_manager import get_ipset_ru_base_set
-
-            self._ipru_base_set_cache = get_ipset_ru_base_set()
-        except Exception:
-            self._ipru_base_set_cache = set()
-        return self._ipru_base_set_cache
+        if hasattr(self, "_ipru_error_label"):
+            if plan.invalid_lines:
+                self._ipru_error_label.setText(
+                    self._tr(
+                        "page.hostlist.ips.error.invalid_format",
+                        "❌ Неверный формат: {items}",
+                        items=", ".join(item for _, item in plan.invalid_lines[:5]),
+                    )
+                )
+                self._ipru_error_label.show()
+            else:
+                self._ipru_error_label.hide()
 
     def _ipru_add(self):
         raw = self._ipru_input.text().strip() if hasattr(self._ipru_input, "text") else ""
@@ -1687,97 +1365,30 @@ class HostlistPage(BasePage):
             return
 
         current = self._ipru_editor.toPlainText()
-        existing = [ln.strip().lower() for ln in current.split("\n") if ln.strip() and not ln.strip().startswith("#")]
-
-        added: list[str] = []
-        invalid: list[str] = []
-        skipped: list[str] = []
-        for part in re.split(r"[\s,;]+", raw):
-            part = part.strip()
-            if not part:
-                continue
-            norm = self._normalize_ip(part)
-            if not norm:
-                invalid.append(part)
-                continue
-            if norm.lower() in existing or norm.lower() in [a.lower() for a in added]:
-                skipped.append(norm)
-                continue
-            added.append(norm)
-
-        if not added and invalid and InfoBar:
-            InfoBar.warning(
-                title=self._tr("common.error.title", "Ошибка"),
-                content=self._tr(
-                    "page.hostlist.ips.error.invalid_ip",
-                    "Не удалось распознать IP или подсеть.\nПримеры: 1.2.3.4 или 10.0.0.0/8",
-                ),
-                parent=self.window(),
-            )
+        plan = HostlistPageController.build_add_custom_ipru_plan(raw_text=raw, current_text=current)
+        if plan.level == "warning" and InfoBar:
+            InfoBar.warning(title=plan.title or self._tr("common.error.title", "Ошибка"), content=plan.content, parent=self.window())
             return
-
-        if not added and skipped and InfoBar:
-            if len(skipped) == 1:
-                InfoBar.info(
-                    title=self._tr("page.hostlist.infobar.info", "Информация"),
-                    content=self._tr("page.hostlist.ips.info.already_exists", "Запись уже есть:\n{entry}", entry=skipped[0]),
-                    parent=self.window(),
-                )
-            else:
-                InfoBar.info(
-                    title=self._tr("page.hostlist.infobar.info", "Информация"),
-                    content=self._tr("page.hostlist.ips.info.all_entries_exist", "Все записи уже есть ({count})", count=len(skipped)),
-                    parent=self.window(),
-                )
+        if plan.level == "info" and InfoBar:
+            InfoBar.info(title=plan.title or self._tr("page.hostlist.infobar.info", "Информация"), content=plan.content, parent=self.window())
             return
-
-        if current and not current.endswith("\n"):
-            current += "\n"
-        current += "\n".join(added)
-        self._ipru_editor.setPlainText(current)
-        if hasattr(self._ipru_input, "clear"):
+        if plan.new_text is not None:
+            self._ipru_editor.setPlainText(plan.new_text)
+        if plan.clear_input and hasattr(self._ipru_input, "clear"):
             self._ipru_input.clear()
 
-        if skipped and InfoBar:
-            InfoBar.success(
-                title=self._tr("page.hostlist.infobar.added", "Добавлено"),
-                content=self._tr(
-                    "page.hostlist.ips.info.added_with_skipped",
-                    "Добавлено IP-исключений. Пропущено уже существующих: {count}",
-                    count=len(skipped),
-                ),
-                parent=self.window(),
-            )
+        if plan.level == "success" and InfoBar:
+            InfoBar.success(title=plan.title or self._tr("page.hostlist.infobar.added", "Добавлено"), content=plan.content, parent=self.window())
 
     def _ipru_open_file(self):
-        try:
-            self._ipru_save()
-            self._controller.open_ipset_ru_user_file()
-        except Exception as e:
-            log(f"Ошибка открытия ipset-ru.user.txt: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr("page.hostlist.error.open_file", "Не удалось открыть:\n{error}", error=e),
-                    parent=self.window(),
-                )
+        self._ipru_save()
+        result = HostlistPageController.open_ipset_ru_user_file_action()
+        self._apply_hostlist_action_result(result)
 
     def _ipru_open_final_file(self):
-        try:
-            self._ipru_save()
-            self._controller.open_ipset_ru_final_file()
-        except Exception as e:
-            log(f"Ошибка открытия итогового ipset-ru.txt: {e}", "ERROR")
-            if InfoBar:
-                InfoBar.warning(
-                    title=self._tr("common.error.title", "Ошибка"),
-                    content=self._tr(
-                        "page.hostlist.error.open_final_file",
-                        "Не удалось открыть итоговый файл: {error}",
-                        error=e,
-                    ),
-                    parent=self.window(),
-                )
+        self._ipru_save()
+        result = HostlistPageController.open_ipset_ru_final_file_action()
+        self._apply_hostlist_action_result(result)
 
     def _ipru_clear_all(self):
         text = self._ipru_editor.toPlainText().strip()
@@ -1796,8 +1407,6 @@ class HostlistPage(BasePage):
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
-        if self.is_deferred_ui_build_pending():
-            return
 
         if self.pivot is not None:
             self.pivot.setItemText("hostlist", self._tr("page.hostlist.tab.hostlist", "Hostlist"))
@@ -2071,27 +1680,3 @@ class HostlistPage(BasePage):
         self._ips_update_status()
         self._excl_update_status()
         self._ipru_update_status()
-
-    @staticmethod
-    def _normalize_ip(text: str) -> Optional[str]:
-        line = text.strip()
-        if not line or line.startswith("#"):
-            return None
-        if "://" in line:
-            try:
-                parsed = urlparse(line)
-                host = parsed.netloc or parsed.path.split("/")[0]
-                line = host.split(":")[0]
-            except Exception:
-                pass
-        if "-" in line:
-            return None
-        if "/" in line:
-            try:
-                return ipaddress.ip_network(line, strict=False).with_prefixlen
-            except Exception:
-                return None
-        try:
-            return str(ipaddress.ip_address(line))
-        except Exception:
-            return None

@@ -612,22 +612,27 @@ class PresetSubpageBase(BasePage):
 
     def _current_selected_name(self) -> str:
         try:
-            from core.services import get_direct_flow_coordinator
-
             method = self._direct_launch_method()
-            selected = get_direct_flow_coordinator().get_selected_source_manifest(method)
+            selected = self._get_direct_flow_coordinator().get_selected_source_manifest(method)
             return (selected.name if selected is not None else "").strip()
         except Exception:
             return ""
 
     def _current_selected_file_name(self) -> str:
         try:
-            from core.services import get_direct_flow_coordinator
-
             method = self._direct_launch_method()
-            return (get_direct_flow_coordinator().get_selected_source_file_name(method) or "").strip()
+            return (self._get_direct_flow_coordinator().get_selected_source_file_name(method) or "").strip()
         except Exception:
             return ""
+
+    def _get_direct_flow_coordinator(self):
+        app_context = getattr(self.window(), "app_context", None)
+        coordinator = getattr(app_context, "direct_flow_coordinator", None)
+        if coordinator is None:
+            from core.services import get_direct_flow_coordinator
+
+            coordinator = get_direct_flow_coordinator()
+        return coordinator
 
     def _activate_selected_preset(self) -> bool:
         try:

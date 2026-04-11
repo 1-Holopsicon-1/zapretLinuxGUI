@@ -151,7 +151,20 @@ class PremiumActionResult:
     message: str
 
 
+@dataclass(slots=True)
+class PremiumPageInitPlan:
+    ensure_checker_once: bool
+    init_server_status_plan: PremiumServerStatusPlan
+
+
 class PremiumPageController:
+    @staticmethod
+    def build_page_init_plan(*, runtime_initialized: bool) -> PremiumPageInitPlan:
+        return PremiumPageInitPlan(
+            ensure_checker_once=not bool(runtime_initialized),
+            init_server_status_plan=PremiumPageController.build_server_status_plan(mode="idle"),
+        )
+
     @staticmethod
     def resolve_checker_bundle() -> PremiumCheckerInitResult:
         try:
@@ -271,7 +284,8 @@ class PremiumPageController:
             success=success,
         )
 
-    def build_status_check_plan(self, result, *, linked_hint: str, unlinked_hint: str, error_text: str = "") -> PremiumStatusCheckPlan:
+    @staticmethod
+    def build_status_check_plan(result, *, linked_hint: str, unlinked_hint: str, error_text: str = "") -> PremiumStatusCheckPlan:
         if result is None or not isinstance(result, dict):
             return PremiumStatusCheckPlan(
                 valid=False,
@@ -413,7 +427,8 @@ class PremiumPageController:
             days_plan=PremiumDaysPlan(kind="none", value=0),
         )
 
-    def build_pair_code_start_plan(self) -> PremiumPairCodeStartPlan:
+    @staticmethod
+    def build_pair_code_start_plan() -> PremiumPairCodeStartPlan:
         return PremiumPairCodeStartPlan(
             activation_in_progress=True,
             stop_autopoll=True,
@@ -421,13 +436,14 @@ class PremiumPageController:
             activate_enabled=False,
             activate_text_key="page.premium.button.create_code.loading",
             activate_text_default="Создание...",
-            activation_status_plan=self.build_activation_status_plan(
+            activation_status_plan=PremiumPageController.build_activation_status_plan(
                 text_key="page.premium.activation.progress.creating_code",
                 text_default="🔄 Создаю код...",
             ),
         )
 
-    def build_pair_code_result_plan(self, result) -> PremiumPairCodeResultPlan:
+    @staticmethod
+    def build_pair_code_result_plan(result) -> PremiumPairCodeResultPlan:
         try:
             success, message, code = result
         except Exception:
@@ -442,7 +458,7 @@ class PremiumPageController:
                 clear_key_input=False,
                 key_input_text=str(code or ""),
                 copy_to_clipboard=bool(code),
-                activation_status_plan=self.build_activation_status_plan(
+                activation_status_plan=PremiumPageController.build_activation_status_plan(
                     text_key="page.premium.activation.success.code_created",
                     text_default="✅ Код создан и скопирован. Отправьте его боту в Telegram.",
                 ),
@@ -459,7 +475,7 @@ class PremiumPageController:
             clear_key_input=True,
             key_input_text="",
             copy_to_clipboard=False,
-            activation_status_plan=self.build_activation_status_plan(
+            activation_status_plan=PremiumPageController.build_activation_status_plan(
                 text=f"❌ {message}",
             ),
             update_device_info=True,
@@ -467,7 +483,8 @@ class PremiumPageController:
             stop_autopoll=True,
         )
 
-    def build_pair_code_error_plan(self, error: str) -> PremiumPairCodeResultPlan:
+    @staticmethod
+    def build_pair_code_error_plan(error: str) -> PremiumPairCodeResultPlan:
         return PremiumPairCodeResultPlan(
             activation_in_progress=False,
             activate_enabled=True,
@@ -476,7 +493,7 @@ class PremiumPageController:
             clear_key_input=True,
             key_input_text="",
             copy_to_clipboard=False,
-            activation_status_plan=self.build_activation_status_plan(
+            activation_status_plan=PremiumPageController.build_activation_status_plan(
                 text_key="page.premium.activation.error.generic",
                 text_default="❌ Ошибка: {error}",
                 text_kwargs={"error": error},
@@ -486,14 +503,15 @@ class PremiumPageController:
             stop_autopoll=True,
         )
 
-    def build_connection_test_start_plan(self, *, checker_ready: bool) -> PremiumConnectionTestPlan:
+    @staticmethod
+    def build_connection_test_start_plan(*, checker_ready: bool) -> PremiumConnectionTestPlan:
         if not checker_ready:
             return PremiumConnectionTestPlan(
                 connection_in_progress=False,
                 test_enabled=True,
                 test_text_key="page.premium.button.test_connection",
                 test_text_default="Проверить соединение",
-                server_status_plan=self.build_server_status_plan(
+                server_status_plan=PremiumPageController.build_server_status_plan(
                     mode="init_error",
                     message="",
                     success=False,
@@ -505,14 +523,15 @@ class PremiumPageController:
             test_enabled=False,
             test_text_key="page.premium.button.test_connection.loading",
             test_text_default="Проверка...",
-            server_status_plan=self.build_server_status_plan(
+            server_status_plan=PremiumPageController.build_server_status_plan(
                 mode="checking",
                 message="",
                 success=None,
             ),
         )
 
-    def build_connection_test_result_plan(self, result) -> PremiumConnectionTestPlan:
+    @staticmethod
+    def build_connection_test_result_plan(result) -> PremiumConnectionTestPlan:
         try:
             success, message = result
         except Exception:
@@ -523,20 +542,21 @@ class PremiumPageController:
             test_enabled=True,
             test_text_key="page.premium.button.test_connection",
             test_text_default="Проверить соединение",
-            server_status_plan=self.build_server_status_plan(
+            server_status_plan=PremiumPageController.build_server_status_plan(
                 mode="result",
                 message=str(message or ""),
                 success=bool(success),
             ),
         )
 
-    def build_connection_test_error_plan(self, error: str) -> PremiumConnectionTestPlan:
+    @staticmethod
+    def build_connection_test_error_plan(error: str) -> PremiumConnectionTestPlan:
         return PremiumConnectionTestPlan(
             connection_in_progress=False,
             test_enabled=True,
             test_text_key="page.premium.button.test_connection",
             test_text_default="Проверить соединение",
-            server_status_plan=self.build_server_status_plan(
+            server_status_plan=PremiumPageController.build_server_status_plan(
                 mode="error",
                 message=str(error or ""),
                 success=False,
@@ -561,10 +581,11 @@ class PremiumPageController:
             except Exception:
                 pass
 
-    def build_reset_plan(self) -> PremiumResetPlan:
+    @staticmethod
+    def build_reset_plan() -> PremiumResetPlan:
         return PremiumResetPlan(
             clear_pair_input=True,
-            activation_status_plan=self.build_activation_status_plan(text=""),
+            activation_status_plan=PremiumPageController.build_activation_status_plan(text=""),
             badge_plan=PremiumStatusBadgePlan(
                 status="expired",
                 text_key="page.premium.status.reset.title",
@@ -625,8 +646,8 @@ class PremiumPageController:
             "last_check": last_check,
         }
 
+    @staticmethod
     def build_device_info_plan(
-        self,
         *,
         device_id: str,
         device_token,

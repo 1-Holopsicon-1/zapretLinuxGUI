@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from ui.pages.zapret2.strategy_detail_page import StrategyDetailPage
 from ui.text_catalog import tr as tr_catalog
 

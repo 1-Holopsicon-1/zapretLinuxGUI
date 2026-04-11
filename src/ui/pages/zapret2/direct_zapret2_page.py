@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 import qtawesome as qta
 
+from core.runtime.direct_ui_snapshot_service import DirectBasicUiSnapshotWorker
 from ui.pages.base_page import BasePage
 from ui.compat_widgets import QuickActionsBar, RefreshButton
 from ui.main_window_state import AppUiState, MainWindowStateStore
@@ -74,23 +75,29 @@ class Zapret2StrategiesPageNew(BasePage):
         self.target_selections = {}
         self._targets_list = None
         self._built = False
-        self._strategy_set_snapshot = None
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
-        self._basic_payload_cache = None
         self._preset_refresh_pending = False
         self._list_structure_signature = None
         self._empty_state_label = None
+        self._content_host = None
+        self._content_host_layout = None
+        self._loading_label = None
         self._request_btn = None
+        self._reload_btn = None
         self._expand_btn = None
         self._collapse_btn = None
         self._info_btn = None
         self._toolbar_actions_bar = None
+        self._basic_payload_worker = None
+        self._basic_payload_request_id = 0
+        self._payload_load_started_at = None
         self._render_probe_build_started_at = None
         self._render_probe_build_finished_at = None
         self._render_probe_first_paint_logged = False
         self._render_probe_idle_logged = False
         self._suppress_next_preset_refresh = False
+        self._runtime_initialized = False
 
         # Совместимость со старым кодом
         self.content_layout = self.layout
@@ -109,7 +116,21 @@ class Zapret2StrategiesPageNew(BasePage):
         self.current_strategy_label = BodyLabel(
             tr_catalog("page.z2_direct.current.not_selected", language=self._ui_language, default="Не выбрана")
         )
-        self.enable_deferred_ui_build(build=self._build_content)
+        self._build_content()
+        self._after_ui_built()
+
+    def _after_ui_built(self) -> None:
+        self._run_runtime_init_once()
+
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
+            return
+        self._runtime_initialized = True
+        self._request_payload_refresh(
+            refresh=False,
+            startup_scope="ZAPRET2_DIRECT",
+            reason="init.initial",
+        )
 
     def _rebuild_breadcrumb(self) -> None:
         """Restore full breadcrumb path (BreadcrumbBar deletes items on back-click)."""
@@ -140,25 +161,11 @@ class Zapret2StrategiesPageNew(BasePage):
         _ = first_show
         self._rebuild_breadcrumb()  # Fix state if user navigated away via breadcrumb
 
-        # Если режим direct_zapret2 (basic/advanced) переключился в другом месте,
-        # перестраиваем список при следующем показе страницы.
-        try:
-            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
-            current_set = get_direct_zapret2_ui_mode()
-        except Exception:
-            current_set = None
-
-        if self._built and current_set != getattr(self, "_strategy_set_snapshot", None):
-            try:
-                self.refresh_from_preset_switch()
-                return
-            except Exception:
-                pass
-
         if self._built and self._preset_refresh_pending:
             self._preset_refresh_pending = False
             try:
                 self.refresh_from_preset_switch()
+                return
             except Exception:
                 pass
 
@@ -188,7 +195,11 @@ class Zapret2StrategiesPageNew(BasePage):
         return super().eventFilter(obj, event)
 
     def _build_content(self):
-        """Строит содержимое страницы"""
+        """Строит только лёгкий shell страницы.
+
+        Тяжёлый payload списка target'ов приходит отдельным snapshot-запросом
+        вне момента сборки shell, чтобы первый показ страницы оставался быстрым.
+        """
         _t_total = _time.perf_counter()
         try:
             if self._built:
@@ -197,19 +208,6 @@ class Zapret2StrategiesPageNew(BasePage):
             self._render_probe_build_finished_at = None
             self._render_probe_first_paint_logged = False
             self._render_probe_idle_logged = False
-
-            _t_payload = _time.perf_counter()
-            payload = self._get_basic_payload(
-                refresh=self._basic_payload_cache is None,
-                startup_scope="ZAPRET2_DIRECT",
-            )
-            target_views = list(payload.target_views or ())
-            target_items = payload.target_items or {}
-            self.target_selections = payload.strategy_selections or {}
-            strategy_names_by_target = payload.strategy_names_by_target or {}
-            filter_modes = payload.filter_modes or {}
-            self._list_structure_signature = self._build_list_structure_signature(payload)
-            _log_startup_z2_direct_metric("_build_content.payload", (_time.perf_counter() - _t_payload) * 1000)
 
             # Панель быстрых действий: только stock fluent-кнопки без описаний.
             _t_toolbar = _time.perf_counter()
@@ -292,46 +290,26 @@ class Zapret2StrategiesPageNew(BasePage):
             self.content_layout.addWidget(self._toolbar_actions_bar)
             _log_startup_z2_direct_metric("_build_content.toolbar", (_time.perf_counter() - _t_toolbar) * 1000)
 
-            if not target_items:
-                self._empty_state_label = BodyLabel(self._build_empty_state_text())
-                self._empty_state_label.setWordWrap(True)
-                self.content_layout.addWidget(self._empty_state_label)
-                self._built = True
-                log("Zapret2StrategiesPageNew: target'ы не найдены, показано empty state", "INFO")
-                _log_startup_z2_direct_metric("_build_content.total", (_time.perf_counter() - _t_total) * 1000)
-                self._render_probe_build_finished_at = _time.perf_counter()
-                QTimer.singleShot(0, self._log_render_probe_idle)
-                return
+            self._content_host = QWidget(self.content)
+            self._content_host_layout = QVBoxLayout(self._content_host)
+            self._content_host_layout.setContentsMargins(0, 0, 0, 0)
+            self._content_host_layout.setSpacing(8)
 
-            # Выборы уже загружены в начале _build_content()
-
-            # Список target'ов (без правой панели - теперь отдельная страница)
-            _t_targets = _time.perf_counter()
-            self._targets_list = PresetTargetsList(
-                self,
-                startup_scope="ZAPRET2_DIRECT",
+            self._loading_label = BodyLabel(
+                tr_catalog(
+                    "page.z2_direct.loading",
+                    language=self._ui_language,
+                    default="Загрузка категорий и target'ов...",
+                )
             )
-            self._targets_list.strategy_selected.connect(self._on_target_clicked)
-            self._targets_list.selections_changed.connect(self._on_selections_changed)
+            self._loading_label.setWordWrap(True)
+            self._loading_label.hide()
+            self._content_host_layout.addWidget(self._loading_label)
 
-            # Строим список из PresetTargetView[]; metadata используется только для enrich UI.
-            self._targets_list.build_from_target_views(
-                target_views,
-                metadata=target_items,
-                selections=self.target_selections,
-                strategy_names_by_target=strategy_names_by_target,
-                filter_modes=filter_modes,
-            )
-
-            self.content_layout.addWidget(self._targets_list, 1)
-            _log_startup_z2_direct_metric("_build_content.targets_list", (_time.perf_counter() - _t_targets) * 1000)
-
-            # Запоминаем текущий UI-режим direct_zapret2, чтобы понимать,
-            # нужно ли перестраивать страницу после возврата.
-            self._update_strategy_set_snapshot()
+            self.content_layout.addWidget(self._content_host, 1)
 
             self._built = True
-            log("Zapret2StrategiesPageNew построена", "INFO")
+            log("Zapret2StrategiesPageNew: shell построен", "INFO")
             _log_startup_z2_direct_metric("_build_content.total", (_time.perf_counter() - _t_total) * 1000)
             self._render_probe_build_finished_at = _time.perf_counter()
             QTimer.singleShot(0, self._log_render_probe_idle)
@@ -369,14 +347,6 @@ class Zapret2StrategiesPageNew(BasePage):
             )
         return (selected_preset_file_name, tuple(signature_rows))
 
-    def _update_strategy_set_snapshot(self) -> None:
-        try:
-            from strategy_menu.ui_prefs_store import get_direct_zapret2_ui_mode
-
-            self._strategy_set_snapshot = get_direct_zapret2_ui_mode()
-        except Exception:
-            self._strategy_set_snapshot = None
-
     def _apply_payload_to_existing_list(self, payload, *, reason: str) -> bool:
         """Обновляет уже построенный список без полной перестройки страницы."""
         if self._targets_list is None:
@@ -391,7 +361,6 @@ class Zapret2StrategiesPageNew(BasePage):
         self._targets_list.set_filter_modes(filter_modes, target_keys=target_items.keys())
 
         self._list_structure_signature = self._build_list_structure_signature(payload)
-        self._update_strategy_set_snapshot()
         self._update_current_strategies_display()
         log(f"Список стратегий обновлен без полной перестройки ({reason})", "DEBUG")
         return True
@@ -401,6 +370,135 @@ class Zapret2StrategiesPageNew(BasePage):
         if self._targets_list is None:
             return True
         return self._build_list_structure_signature(payload) != self._list_structure_signature
+
+    def _set_payload_loading(self, loading: bool) -> None:
+        try:
+            if self._reload_btn is not None:
+                self._reload_btn.set_loading(bool(loading))
+        except Exception:
+            pass
+
+        if self._loading_label is None:
+            return
+
+        should_show_placeholder = bool(loading) and self._targets_list is None and self._empty_state_label is None
+        self._loading_label.setVisible(should_show_placeholder)
+
+    def _clear_dynamic_payload_widgets(self) -> None:
+        host_layout = self._content_host_layout
+        if host_layout is None:
+            return
+
+        while host_layout.count() > 1:
+            item = host_layout.takeAt(1)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
+
+        self._targets_list = None
+        self._empty_state_label = None
+        self._list_structure_signature = None
+
+    def _build_targets_list_widget(self, payload) -> None:
+        target_items = payload.target_items or {}
+        target_views = list(payload.target_views or ())
+        strategy_names_by_target = payload.strategy_names_by_target or {}
+        filter_modes = payload.filter_modes or {}
+        self.target_selections = payload.strategy_selections or {}
+
+        if not target_items:
+            self._empty_state_label = BodyLabel(self._build_empty_state_text())
+            self._empty_state_label.setWordWrap(True)
+            self._content_host_layout.addWidget(self._empty_state_label)
+            log("Zapret2StrategiesPageNew: target'ы не найдены, показано empty state", "INFO")
+            return
+
+        self._targets_list = PresetTargetsList(
+            self,
+            startup_scope="ZAPRET2_DIRECT",
+        )
+        self._targets_list.strategy_selected.connect(self._on_target_clicked)
+        self._targets_list.selections_changed.connect(self._on_selections_changed)
+        self._targets_list.build_from_target_views(
+            target_views,
+            metadata=target_items,
+            selections=self.target_selections,
+            strategy_names_by_target=strategy_names_by_target,
+            filter_modes=filter_modes,
+        )
+        self._content_host_layout.addWidget(self._targets_list, 1)
+
+    def _apply_payload_snapshot(self, payload, *, reason: str) -> None:
+        if self._payload_requires_rebuild(payload):
+            _t_targets = _time.perf_counter()
+            self._clear_dynamic_payload_widgets()
+            self._build_targets_list_widget(payload)
+            _log_startup_z2_direct_metric("_build_content.targets_list", (_time.perf_counter() - _t_targets) * 1000)
+        else:
+            self._apply_payload_to_existing_list(payload, reason=reason)
+            return
+
+        self._list_structure_signature = self._build_list_structure_signature(payload)
+        self._update_current_strategies_display()
+        log(f"Список стратегий применен из runtime snapshot ({reason})", "DEBUG")
+
+    def _request_payload_refresh(
+        self,
+        *,
+        refresh: bool,
+        reason: str,
+        startup_scope: str | None = None,
+    ) -> None:
+        if not self.isVisible():
+            self._preset_refresh_pending = True
+            return
+
+        token = self.issue_page_load_token(reason=reason)
+        self._basic_payload_request_id += 1
+        request_id = self._basic_payload_request_id
+        self._payload_load_started_at = _time.perf_counter()
+        self._set_payload_loading(True)
+
+        worker = DirectBasicUiSnapshotWorker(
+            request_id,
+            launch_method="direct_zapret2",
+            refresh=refresh,
+            startup_scope=startup_scope,
+            parent=self,
+        )
+        worker.loaded.connect(
+            lambda loaded_request_id, snapshot, load_token=token: self._on_payload_snapshot_loaded(
+                loaded_request_id,
+                snapshot,
+                load_token,
+                reason=reason,
+            )
+        )
+        self._basic_payload_worker = worker
+        worker.start()
+
+    def _on_payload_snapshot_loaded(self, request_id: int, snapshot, token: int, *, reason: str) -> None:
+        if request_id != self._basic_payload_request_id:
+            return
+        if not self.is_page_load_token_current(token):
+            return
+        if not self.isVisible():
+            self._preset_refresh_pending = True
+            return
+
+        self._set_payload_loading(False)
+
+        payload = getattr(snapshot, "payload", None)
+        if payload is None:
+            return
+
+        started_at = self._payload_load_started_at
+        if started_at is not None:
+            _log_startup_z2_direct_metric("_build_content.payload", (_time.perf_counter() - started_at) * 1000)
+
+        self._apply_payload_snapshot(payload, reason=reason)
+        self._render_probe_build_finished_at = _time.perf_counter()
+        QTimer.singleShot(0, self._log_render_probe_idle)
 
     def _log_render_probe_idle(self) -> None:
         if self._render_probe_idle_logged:
@@ -490,47 +588,10 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def _reload_strategies(self):
         """Перезагружает стратегии"""
-        if hasattr(self, '_reload_btn'):
-            self._reload_btn.set_loading(True)
         try:
-            payload = self._get_basic_payload(refresh=True)
-            if not self._payload_requires_rebuild(payload):
-                self._apply_payload_to_existing_list(payload, reason="reload")
-                log("Стратегии обновлены без полной перестройки", "INFO")
-                return
-
-            # Перестраиваем UI
-            self._built = False
-            self._basic_payload_cache = payload
-            self._list_structure_signature = None
-
-            # Удаляем старые виджеты, сохраняя заголовки.
-            # Ищем subtitle_label динамически, т.к. back_button может быть
-            # вставлен в позицию 0, сдвигая subtitle с индекса 1 на 2.
-            _keep = 2  # fallback: title + subtitle
-            _sub = getattr(self, "subtitle_label", None)
-            if _sub is not None:
-                for _i in range(min(self.content_layout.count(), 6)):
-                    _item = self.content_layout.itemAt(_i)
-                    if _item and _item.widget() is _sub:
-                        _keep = _i + 1
-                        break
-            while self.content_layout.count() > _keep:
-                item = self.content_layout.takeAt(_keep)
-                if item.widget():
-                    item.widget().deleteLater()
-
-            self._targets_list = None
-            self._empty_state_label = None
-            self._build_content()
-
-            log("Стратегии перезагружены", "INFO")
-
+            self._request_payload_refresh(refresh=True, reason="manual_reload")
         except Exception as e:
             log(f"Ошибка перезагрузки: {e}", "ERROR")
-        finally:
-            if hasattr(self, '_reload_btn'):
-                self._reload_btn.set_loading(False)
 
     def refresh_from_preset_switch(self):
         """
@@ -538,46 +599,19 @@ class Zapret2StrategiesPageNew(BasePage):
         Вызывается асинхронно из MainWindow после активации пресета.
         """
         if not self.isVisible():
-            self._basic_payload_cache = None
             self._preset_refresh_pending = True
             return
         try:
-            payload = self._get_basic_payload(refresh=True)
-            target_items = payload.target_items or {}
-            requires_rebuild = self._payload_requires_rebuild(payload)
-
-            # Важный случай: страница могла открыться слишком рано и построиться
-            # пустой, когда source preset ещё не был готов. Раньше после этого
-            # последующие content-revision только обновляли уже существующий список,
-            # а если списка не было вовсе, UI так и оставался пустым до ручного
-            # нажатия «Обновить». Здесь мы явно пересобираем страницу, если данные
-            # уже появились или на экране сейчас показан empty state.
-            if requires_rebuild:
-                if self._targets_list is None or target_items or self._empty_state_label is not None:
-                    self._reload_strategies()
-                return
-
-            self._apply_payload_to_existing_list(payload, reason="preset_switch")
-
+            self._request_payload_refresh(refresh=True, reason="preset_switch")
         except Exception as e:
             log(f"Ошибка refresh_from_preset_switch: {e}", "DEBUG")
-
-    def _get_direct_facade(self):
-        from core.presets.direct_facade import DirectPresetFacade
-
-        return DirectPresetFacade.from_launch_method("direct_zapret2")
-
-    def _get_basic_payload(self, *, refresh: bool = False, startup_scope: str | None = None):
-        if refresh or self._basic_payload_cache is None:
-            self._basic_payload_cache = self._get_direct_facade().get_basic_ui_payload(
-                startup_scope=startup_scope,
-            )
-        return self._basic_payload_cache
 
     def _build_empty_state_text(self) -> str:
         empty_state = None
         try:
-            empty_state = self._get_direct_facade().get_basic_ui_empty_state()
+            from core.services import get_direct_ui_snapshot_service
+
+            empty_state = get_direct_ui_snapshot_service().get_basic_ui_empty_state("direct_zapret2")
         except Exception as e:
             log(f"Zapret2StrategiesPageNew: не удалось определить причину пустого списка: {e}", "DEBUG")
 
@@ -639,6 +673,9 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def update_current_strategy(self, name: str):
         """Совместимость: обновляет отображение текущей стратегии"""
+        if not self.isVisible():
+            self._preset_refresh_pending = True
+            return
         if name and name != "Автостарт DPI отключен":
             self.current_strategy_label.setText(name)
         else:
@@ -670,7 +707,6 @@ class Zapret2StrategiesPageNew(BasePage):
             return
         if "active_preset_revision" in changed_fields:
             if not self.isVisible():
-                self._basic_payload_cache = None
                 self._preset_refresh_pending = True
                 return
             self.refresh_from_preset_switch()
@@ -679,7 +715,6 @@ class Zapret2StrategiesPageNew(BasePage):
                 self._suppress_next_preset_refresh = False
                 return
             if not self.isVisible():
-                self._basic_payload_cache = None
                 self._preset_refresh_pending = True
                 return
             self.refresh_from_preset_switch()
@@ -688,11 +723,11 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def show_loading(self):
         """Совместимость: показывает спиннер"""
-        pass
+        self._set_payload_loading(True)
 
     def show_success(self):
         """Совместимость: показывает галочку"""
-        pass
+        self._set_payload_loading(False)
 
     def _update_current_strategies_display(self):
         """Совместимость: обновляет отображение текущих стратегий"""
@@ -734,7 +769,6 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def reload_for_mode_change(self):
         """Совместимость: перезагружает страницу при смене режима"""
-        self._basic_payload_cache = None
         self.refresh_from_preset_switch()
 
     def _show_info_popup(self):

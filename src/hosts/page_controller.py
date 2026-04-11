@@ -130,13 +130,18 @@ class HostsStatusDisplayPlan:
 
 
 @dataclass(slots=True)
-class HostsShowEventPlan:
+class HostsPageInitPlan:
     init_hosts_manager: bool
     check_access: bool
     rebuild_services: bool
     mark_initialized: bool
-    start_watcher: bool
-    refresh_triggers: list[str]
+    invalidate_cache: bool
+    update_ui: bool
+
+
+@dataclass(slots=True)
+class HostsActivationPlan:
+    reconcile_hidden_refresh: bool
     invalidate_cache: bool
     update_ui: bool
 
@@ -206,24 +211,28 @@ class HostsPageController:
             return None
 
     @staticmethod
-    def build_show_event_plan(
+    def build_page_init_plan(
         *,
-        startup_initialized: bool,
+        runtime_initialized: bool,
         has_hosts_manager: bool,
         ipv6_catalog_changed: bool,
-    ) -> HostsShowEventPlan:
-        refresh_triggers: list[str] = []
-        if ipv6_catalog_changed:
-            refresh_triggers.append("ipv6")
-        refresh_triggers.append("tab")
+    ) -> HostsPageInitPlan:
+        should_initialize = not bool(runtime_initialized)
+        _ = ipv6_catalog_changed
 
-        return HostsShowEventPlan(
-            init_hosts_manager=not startup_initialized and not has_hosts_manager,
-            check_access=not startup_initialized,
-            rebuild_services=not startup_initialized,
-            mark_initialized=not startup_initialized,
-            start_watcher=True,
-            refresh_triggers=refresh_triggers,
+        return HostsPageInitPlan(
+            init_hosts_manager=should_initialize and not has_hosts_manager,
+            check_access=should_initialize,
+            rebuild_services=should_initialize,
+            mark_initialized=should_initialize,
+            invalidate_cache=True,
+            update_ui=True,
+        )
+
+    @staticmethod
+    def build_activation_plan(*, catalog_dirty: bool) -> HostsActivationPlan:
+        return HostsActivationPlan(
+            reconcile_hidden_refresh=bool(catalog_dirty),
             invalidate_cache=True,
             update_ui=True,
         )
@@ -537,15 +546,16 @@ class HostsPageController:
             pass
         return False
 
+    @classmethod
     def build_selection_sync_plan(
-        self,
+        cls,
         *,
         service_names: list[str],
         active_domains_map: dict[str, str],
     ) -> HostsSelectionSyncPlan:
         from hosts.proxy_domains import get_service_available_dns_profiles, get_service_has_geohide_ips
 
-        direct_profile = self.get_direct_profile_name()
+        direct_profile = cls.get_direct_profile_name()
         entries: dict[str, HostsSelectionSyncEntry] = {}
         new_selection: dict[str, str] = {}
 
@@ -557,14 +567,14 @@ class HostsPageController:
             toggle_checked = False
 
             if direct_only:
-                enabled = self._infer_direct_toggle_from_hosts(service_name, active_domains_map)
+                enabled = cls._infer_direct_toggle_from_hosts(service_name, active_domains_map)
                 toggle_enabled = bool(direct_profile and direct_profile in available)
                 toggle_checked = bool(enabled and toggle_enabled)
                 if toggle_checked and direct_profile:
                     selected_profile = direct_profile
                     new_selection[service_name] = direct_profile
             else:
-                inferred = self._infer_profile_from_hosts(service_name, available, active_domains_map)
+                inferred = cls._infer_profile_from_hosts(service_name, available, active_domains_map)
                 if inferred:
                     selected_profile = inferred
                     new_selection[service_name] = inferred
@@ -595,8 +605,9 @@ class HostsPageController:
             for marker in ("chatgpt", "openai", "gemini", "claude", "copilot", "grok", "manus")
         )
 
+    @classmethod
     def build_services_catalog_plan(
-        self,
+        cls,
         *,
         current_selection: dict[str, str],
         active_domains_map: dict[str, str],
@@ -630,12 +641,12 @@ class HostsPageController:
         for service_name in ordered_services:
             if not get_service_has_geohide_ips(service_name):
                 no_geohide.append(service_name)
-            elif self._is_ai_service(service_name):
+            elif cls._is_ai_service(service_name):
                 ai.append(service_name)
             else:
                 other.append(service_name)
 
-        sync_plan = self.build_selection_sync_plan(
+        sync_plan = cls.build_selection_sync_plan(
             service_names=ordered_services,
             active_domains_map=active_domains_map,
         )
@@ -668,9 +679,9 @@ class HostsPageController:
                 continue
 
             common_profiles = [
-                (profile_name, self.format_dns_profile_label(profile_name))
+                (profile_name, cls.format_dns_profile_label(profile_name))
                 for profile_name in get_common_dns_profiles(names)
-                if self.format_dns_profile_label(profile_name)
+                if cls.format_dns_profile_label(profile_name)
             ]
 
             rows: list[HostsServiceRowPlan] = []
@@ -685,7 +696,7 @@ class HostsPageController:
                         direct_only=bool(entry.direct_only) if entry is not None else direct_only,
                         available_profiles=available_profiles,
                         profile_items=[
-                            (profile_name, self.format_dns_profile_label(profile_name))
+                            (profile_name, cls.format_dns_profile_label(profile_name))
                             for profile_name in available_profiles
                         ],
                         selected_profile=entry.selected_profile if entry is not None else None,
@@ -731,14 +742,15 @@ class HostsPageController:
             apply_now=True,
         )
 
+    @classmethod
     def build_direct_toggle_plan(
-        self,
+        cls,
         *,
         current_selection: dict[str, str],
         service_name: str,
         checked: bool,
     ) -> HostsSelectionMutationPlan:
-        direct_profile = self.get_direct_profile_name()
+        direct_profile = cls.get_direct_profile_name()
         new_selection = dict(current_selection)
         if not direct_profile:
             new_selection.pop(service_name, None)
@@ -769,8 +781,9 @@ class HostsPageController:
             apply_now=False,
         )
 
+    @classmethod
     def build_bulk_profile_selection_plan(
-        self,
+        cls,
         *,
         current_selection: dict[str, str],
         service_names: list[str],

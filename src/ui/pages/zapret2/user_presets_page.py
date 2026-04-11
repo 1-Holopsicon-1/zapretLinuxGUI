@@ -46,9 +46,12 @@ import qtawesome as qta
 from ui.pages.base_page import BasePage
 from ui.pages.preset_actions_menu import show_preset_actions_menu
 from ui.pages.preset_rating_menu import show_preset_rating_menu
-from ui.pages.user_presets_runtime_controller import UserPresetsRuntimeController
-from ui.pages.user_presets_toolbar import UserPresetsToolbarLayout
-from .user_presets_page_controller import Zapret2UserPresetsPageController
+from core.services import get_preset_store, get_user_presets_runtime_service
+from core.runtime.user_presets_runtime_service import UserPresetsRuntimeAdapter
+from ui.pages.direct_user_presets_page_controller import (
+    DirectUserPresetsPageController,
+    DirectUserPresetsPageControllerConfig,
+)
 from ui.compat_widgets import (
     ActionButton,
     PrimaryActionButton,
@@ -113,942 +116,14 @@ def _tr_text(key: str, language: str, default: str, **kwargs) -> str:
     return text
 
 
-def _fluent_icon(name: str):
-    if FluentIcon is None:
-        return None
-    return getattr(FluentIcon, name, None)
-
-
-def _make_menu_action(text: str, *, icon=None, parent=None):
-    if Action is not None:
-        if icon is not None:
-            try:
-                return Action(icon, text, parent)
-            except TypeError:
-                pass
-        try:
-            action = Action(text, parent)
-        except TypeError:
-            try:
-                action = Action(text)
-            except TypeError:
-                action = None
-        if action is not None:
-            try:
-                if icon is not None and hasattr(action, "setIcon"):
-                    action.setIcon(icon)
-            except Exception:
-                pass
-            return action
-
-    action = QAction(text, parent)
-    try:
-        if icon is not None:
-            action.setIcon(icon)
-    except Exception:
-        pass
-    return action
-
-
-def _accent_fg_for_tokens(tokens) -> str:
-    """Chooses readable foreground for the current accent color."""
-    try:
-        return str(tokens.accent_fg)
-    except Exception:
-        return "rgba(18, 18, 18, 0.90)"
-
-
-def _normalize_preset_icon_color(value: Optional[str]) -> str:
-    raw = str(value or "").strip()
-    if _HEX_COLOR_RGB_RE.fullmatch(raw):
-        return raw.lower()
-    if _HEX_COLOR_RGBA_RE.fullmatch(raw):
-        lowered = raw.lower()
-        return f"#{lowered[1:7]}"
-    try:
-        return get_theme_tokens().accent_hex
-    except Exception:
-        return _DEFAULT_PRESET_ICON_COLOR
-
-
-def _cached_icon(name: str, color: str):
-    key = f"{name}|{color}"
-    icon = _icon_cache.get(key)
-    if icon is None:
-        icon = qta.icon(name, color=color)
-        _icon_cache[key] = icon
-    return icon
-
-
-def _relative_luminance(color: QColor) -> float:
-    def _channel_luma(channel: int) -> float:
-        value = max(0.0, min(1.0, float(channel) / 255.0))
-        if value <= 0.03928:
-            return value / 12.92
-        return ((value + 0.055) / 1.055) ** 2.4
-
-    return (
-        0.2126 * _channel_luma(color.red())
-        + 0.7152 * _channel_luma(color.green())
-        + 0.0722 * _channel_luma(color.blue())
-    )
-
-
-def _contrast_ratio(foreground: QColor, background: QColor) -> float:
-    fg = QColor(foreground)
-    bg = QColor(background)
-    fg.setAlpha(255)
-    bg.setAlpha(255)
-    l1 = _relative_luminance(fg)
-    l2 = _relative_luminance(bg)
-    lighter = max(l1, l2)
-    darker = min(l1, l2)
-    return (lighter + 0.05) / (darker + 0.05)
-
-
-def _pick_contrast_color(
-    preferred_color: str,
-    background_color: QColor,
-    fallback_colors: list[str],
-    *,
-    minimum_ratio: float = 2.4,
-) -> str:
-    bg = QColor(background_color)
-    if not bg.isValid():
-        bg = QColor("#000000")
-    bg.setAlpha(255)
-
-    candidates: list[str] = []
-    for raw in [preferred_color, *fallback_colors]:
-        value = str(raw or "").strip()
-        if value and value not in candidates:
-            candidates.append(value)
-
-    best_color = None
-    best_ratio = -1.0
-    for candidate in candidates:
-        color = QColor(candidate)
-        if not color.isValid():
-            continue
-        color.setAlpha(255)
-        ratio = _contrast_ratio(color, bg)
-        if ratio >= minimum_ratio:
-            return color.name(QColor.NameFormat.HexRgb)
-        if ratio > best_ratio:
-            best_ratio = ratio
-            best_color = color
-
-    if best_color is not None:
-        return best_color.name(QColor.NameFormat.HexRgb)
-    return "#f5f5f5" if _relative_luminance(bg) < 0.45 else "#111111"
-
-
-def _color_with_alpha(color_value: str, alpha: int, fallback_hex: str) -> str:
-    color = QColor(color_value)
-    if not color.isValid():
-        color = QColor(fallback_hex)
-    color.setAlpha(max(0, min(255, int(alpha))))
-    return f"rgba({color.red()}, {color.green()}, {color.blue()}, {color.alpha()})"
-
-
-def _to_qcolor(value, fallback_hex: str = "#000000") -> QColor:
-    if isinstance(value, QColor):
-        color = QColor(value)
-        if color.isValid():
-            return color
-
-    text = str(value or "").strip()
-    if text:
-        match = _CSS_RGBA_COLOR_RE.fullmatch(text)
-        if match:
-            try:
-                r = max(0, min(255, int(match.group(1))))
-                g = max(0, min(255, int(match.group(2))))
-                b = max(0, min(255, int(match.group(3))))
-                alpha_raw = match.group(4)
-
-                if alpha_raw is None:
-                    a = 255
-                else:
-                    a_float = float(alpha_raw)
-                    if a_float <= 1.0:
-                        a = int(round(max(0.0, min(1.0, a_float)) * 255.0))
-                    else:
-                        a = int(round(max(0.0, min(255.0, a_float))))
-
-                return QColor(r, g, b, a)
-            except Exception:
-                pass
-
-        color = QColor(text)
-        if color.isValid():
-            return color
-
-    fallback = QColor(fallback_hex)
-    if fallback.isValid():
-        return fallback
-    return QColor(0, 0, 0)
-
-
-class _PresetListModel(QAbstractListModel):
-    KindRole = Qt.ItemDataRole.UserRole + 1
-    NameRole = Qt.ItemDataRole.UserRole + 2
-    FileNameRole = Qt.ItemDataRole.UserRole + 3
-    DescriptionRole = Qt.ItemDataRole.UserRole + 4
-    DateRole = Qt.ItemDataRole.UserRole + 5
-    ActiveRole = Qt.ItemDataRole.UserRole + 6
-    TextRole = Qt.ItemDataRole.UserRole + 7
-    IconColorRole = Qt.ItemDataRole.UserRole + 8
-    BuiltinRole = Qt.ItemDataRole.UserRole + 9
-    DepthRole = Qt.ItemDataRole.UserRole + 10
-    PinnedRole = Qt.ItemDataRole.UserRole + 11
-    RatingRole = Qt.ItemDataRole.UserRole + 12
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._rows: list[dict[str, object]] = []
-
-    def set_rows(self, rows: list[dict[str, object]]) -> None:
-        self.beginResetModel()
-        self._rows = rows
-        self.endResetModel()
-
-    def find_preset_row(self, file_name: str) -> int:
-        target = str(file_name or "").strip()
-        if not target:
-            return -1
-        for row_index, row in enumerate(self._rows):
-            if str(row.get("kind") or "") != "preset":
-                continue
-            if str(row.get("file_name") or "") == target:
-                return row_index
-        return -1
-
-    def update_preset_row(self, file_name: str, **changes) -> bool:
-        row_index = self.find_preset_row(file_name)
-        if row_index < 0:
-            return False
-
-        row = self._rows[row_index]
-        role_map = {
-            "name": [int(Qt.ItemDataRole.DisplayRole), self.NameRole],
-            "description": [self.DescriptionRole],
-            "date": [self.DateRole],
-            "is_active": [self.ActiveRole],
-            "icon_color": [self.IconColorRole],
-            "is_builtin": [self.BuiltinRole],
-            "is_pinned": [self.PinnedRole],
-            "rating": [self.RatingRole],
-        }
-
-        changed_roles: set[int] = set()
-        for key, value in changes.items():
-            if key not in role_map:
-                continue
-            if row.get(key) == value:
-                continue
-            row[key] = value
-            changed_roles.update(role_map[key])
-
-        if not changed_roles:
-            return False
-
-        model_index = self.index(row_index, 0)
-        self.dataChanged.emit(model_index, model_index, sorted(changed_roles))
-        return True
-
-    def set_active_preset(
-        self,
-        file_name: str,
-        *,
-        display_name: str = "",
-        use_display_name_fallback: bool = False,
-    ) -> bool:
-        target_file_name = str(file_name or "").strip()
-        target_display_name = str(display_name or "").strip()
-        changed_rows: list[int] = []
-        for row_index, row in enumerate(self._rows):
-            if str(row.get("kind") or "") != "preset":
-                continue
-            row_file_name = str(row.get("file_name") or "")
-            row_display_name = str(row.get("name") or "")
-            next_active = bool(target_file_name and row_file_name == target_file_name)
-            if not next_active and use_display_name_fallback:
-                next_active = bool(target_display_name and row_display_name == target_display_name)
-            if bool(row.get("is_active", False)) == next_active:
-                continue
-            row["is_active"] = next_active
-            changed_rows.append(row_index)
-
-        for row_index in changed_rows:
-            model_index = self.index(row_index, 0)
-            self.dataChanged.emit(model_index, model_index, [self.ActiveRole])
-
-        return bool(changed_rows)
-
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        if parent.isValid():
-            return 0
-        return len(self._rows)
-
-    def flags(self, index: QModelIndex):
-        if not index.isValid():
-            return Qt.ItemFlag.ItemIsEnabled
-
-        kind = str(index.data(self.KindRole) or "")
-        flags = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
-        if kind == "preset":
-            flags |= Qt.ItemFlag.ItemIsDragEnabled
-        return flags
-
-    def supportedDragActions(self):
-        return Qt.DropAction.MoveAction
-
-    def supportedDropActions(self):
-        return Qt.DropAction.MoveAction
-
-    def mimeTypes(self):
-        return ["application/x-zapret-preset-item"]
-
-    def mimeData(self, indexes):
-        mime = QMimeData()
-        if not indexes:
-            return mime
-
-        index = indexes[0]
-        kind = str(index.data(self.KindRole) or "")
-        if kind != "preset":
-            return mime
-        payload = {"kind": kind, "file_name": str(index.data(self.FileNameRole) or "")}
-        mime.setData("application/x-zapret-preset-item", json.dumps(payload).encode("utf-8"))
-        return mime
-
-    def data(self, index: QModelIndex, role: int = int(Qt.ItemDataRole.DisplayRole)):
-        if not index.isValid() or index.row() < 0 or index.row() >= len(self._rows):
-            return None
-
-        row = self._rows[index.row()]
-        kind = row.get("kind", "preset")
-
-        if role == int(Qt.ItemDataRole.DisplayRole):
-            if kind == "preset":
-                return row.get("name", "")
-            return row.get("text", "")
-
-        if role == self.KindRole:
-            return kind
-        if role == self.NameRole:
-            return row.get("name", "")
-        if role == self.FileNameRole:
-            return row.get("file_name", "")
-        if role == self.DescriptionRole:
-            return row.get("description", "")
-        if role == self.DateRole:
-            return row.get("date", "")
-        if role == self.ActiveRole:
-            return bool(row.get("is_active", False))
-        if role == self.TextRole:
-            return row.get("text", "")
-        if role == self.IconColorRole:
-            return row.get("icon_color", _DEFAULT_PRESET_ICON_COLOR)
-        if role == self.BuiltinRole:
-            return bool(row.get("is_builtin", False))
-        if role == self.DepthRole:
-            return int(row.get("depth", 0) or 0)
-        if role == self.PinnedRole:
-            return bool(row.get("is_pinned", False))
-        if role == self.RatingRole:
-            return int(row.get("rating", 0) or 0)
-
-        return None
-
-
-class _LinkedWheelListView(ListView):
-    preset_activated = pyqtSignal(str)
-    preset_move_requested = pyqtSignal(str, int)
-    item_dropped = pyqtSignal(str, str, str, str)
-    preset_context_requested = pyqtSignal(str, QPoint)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._drag_start_pos: QPoint | None = None
-
-    def wheelEvent(self, e):
-        scrollbar = self.verticalScrollBar()
-        if scrollbar is None:
-            super().wheelEvent(e)
-            return
-
-        delta = e.angleDelta().y()
-        at_top = scrollbar.value() <= scrollbar.minimum()
-        at_bottom = scrollbar.value() >= scrollbar.maximum()
-
-        if (delta > 0 and at_top) or (delta < 0 and at_bottom):
-            # User presets pages use the inner list as the single source of scrolling.
-            # Do not bubble wheel events to BasePage, otherwise the outer page starts
-            # scrolling too and we get a confusing double-scroll behavior.
-            e.accept()
-            return
-
-        super().wheelEvent(e)
-        e.accept()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start_pos = event.position().toPoint()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if not (event.buttons() & Qt.MouseButton.LeftButton):
-            super().mouseMoveEvent(event)
-            return
-
-        if self._drag_start_pos is None:
-            super().mouseMoveEvent(event)
-            return
-
-        if (event.position().toPoint() - self._drag_start_pos).manhattanLength() < QApplication.startDragDistance():
-            super().mouseMoveEvent(event)
-            return
-
-        index = self.indexAt(self._drag_start_pos)
-        if not index.isValid():
-            super().mouseMoveEvent(event)
-            return
-
-        kind = str(index.data(_PresetListModel.KindRole) or "")
-        if kind != "preset":
-            super().mouseMoveEvent(event)
-            return
-
-        model = self.model()
-        if model is None:
-            super().mouseMoveEvent(event)
-            return
-
-        mime = model.mimeData([index])
-        if mime is None:
-            super().mouseMoveEvent(event)
-            return
-
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-        self._drag_start_pos = None
-        drag.exec(Qt.DropAction.MoveAction)
-        event.accept()
-        return
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.RightButton:
-            index = self.indexAt(event.position().toPoint())
-            if index.isValid() and str(index.data(_PresetListModel.KindRole) or "") == "preset":
-                name = str(index.data(_PresetListModel.FileNameRole) or "")
-                if name:
-                    self.setCurrentIndex(index)
-                    self.preset_context_requested.emit(name, self.viewport().mapToGlobal(event.position().toPoint()))
-                    event.accept()
-                    return
-        super().mouseReleaseEvent(event)
-
-    def focusInEvent(self, event):
-        super().focusInEvent(event)
-        if not self.currentIndex().isValid() and self.model() is not None:
-            for row in range(self.model().rowCount()):
-                index = self.model().index(row, 0)
-                if str(index.data(_PresetListModel.KindRole) or "") == "preset":
-                    self.setCurrentIndex(index)
-                    break
-
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_PageUp, Qt.Key.Key_PageDown):
-            index = self.currentIndex()
-            if index.isValid() and str(index.data(_PresetListModel.KindRole) or "") == "preset":
-                name = str(index.data(_PresetListModel.FileNameRole) or "")
-                if name:
-                    direction = -1 if event.key() == Qt.Key.Key_PageUp else 1
-                    self.preset_move_requested.emit(name, direction)
-                    event.accept()
-                    return
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            index = self.currentIndex()
-            if index.isValid() and str(index.data(_PresetListModel.KindRole) or "") == "preset":
-                name = str(index.data(_PresetListModel.FileNameRole) or "")
-                if name:
-                    self.preset_activated.emit(name)
-                    event.accept()
-                    return
-        super().keyPressEvent(event)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasFormat("application/x-zapret-preset-item"):
-            event.acceptProposedAction()
-            return
-        super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasFormat("application/x-zapret-preset-item"):
-            event.acceptProposedAction()
-            return
-        super().dragMoveEvent(event)
-
-    def dropEvent(self, event):
-        if not event.mimeData().hasFormat("application/x-zapret-preset-item"):
-            super().dropEvent(event)
-            return
-
-        try:
-            payload = json.loads(bytes(event.mimeData().data("application/x-zapret-preset-item")).decode("utf-8"))
-        except Exception:
-            event.ignore()
-            return
-
-        source_kind = str(payload.get("kind") or "")
-        source_id = str(payload.get("file_name") or payload.get("name") or "").strip()
-        if source_kind != "preset" or not source_id:
-            event.ignore()
-            return
-
-        target_index = self.indexAt(event.position().toPoint())
-        target_kind = "end"
-        target_id = ""
-        if target_index.isValid():
-            target_kind = str(target_index.data(_PresetListModel.KindRole) or "")
-            if target_kind == "preset":
-                target_id = str(target_index.data(_PresetListModel.FileNameRole) or "")
-            else:
-                target_kind = "end"
-                target_id = ""
-
-        self.item_dropped.emit(source_kind, source_id, target_kind, target_id)
-        event.acceptProposedAction()
-
-
-class _PresetListDelegate(QStyledItemDelegate):
-    action_triggered = pyqtSignal(str, str)
-
-    _ROW_HEIGHT = 44
-    _SECTION_HEIGHT = 24
-    _EMPTY_HEIGHT = 64
-    _ACTION_SIZE = 28
-    _ACTION_SPACING = 6
-    _PIN_SIZE = 14
-    _PIN_COLUMN_WIDTH = 18
-    _PIN_TO_ICON_SPACING = 8
-
-    _ACTION_ICONS = {
-        "folder": "fa5s.folder-open",
-        "rating": "fa5s.star-half-alt",
-        "edit": "fa5s.ellipsis-v",
-    }
-
-    _PENDING_SHAKE_ROTATIONS = (0, -8, 8, -6, 6, -4, 4, -2, 0)
-    _PENDING_SHAKE_INTERVAL_MS = 50
-
-    def __init__(self, view: QListView):
-        super().__init__(view)
-        self._view = view
-        self._ui_language = "ru"
-        self._action_tooltips: dict[str, str] = {}
-        self._hover_row = -1
-        self._pressed_row = -1
-        self._selected_rows: set[int] = set()
-        self._pending_destructive: Optional[tuple[str, str]] = None
-        self._pending_timer = QTimer(self)
-        self._pending_timer.setSingleShot(True)
-        self._pending_timer.timeout.connect(self._clear_pending_destructive)
-        self._pending_shake_step = 0
-        self._pending_shake_rotation = 0
-        self._pending_shake_timer = QTimer(self)
-        self._pending_shake_timer.timeout.connect(self._advance_pending_shake)
-        self.set_ui_language("ru")
-
-    def _tr(self, key: str, default: str, **kwargs) -> str:
-        return _tr_text(key, self._ui_language, default, **kwargs)
-
-    def set_ui_language(self, language: str) -> None:
-        self._ui_language = language
-        self._action_tooltips = {
-            "rating": self._tr("page.z2_user_presets.delegate.tooltip.rating", "Поставить рейтинг"),
-            "edit": self._tr("page.z2_user_presets.delegate.tooltip.edit", "Меню пресета"),
-            "pin": self._tr("page.z2_user_presets.delegate.tooltip.pin", "Закрепить сверху"),
-        }
-
-    def reset_interaction_state(self):
-        self._clear_pending_destructive(update=False)
-        self.setHoverRow(-1)
-        self.setPressedRow(-1)
-        self.setSelectedRows([])
-
-    def setHoverRow(self, row: int) -> None:
-        self._hover_row = int(row)
-
-    def setPressedRow(self, row: int) -> None:
-        self._pressed_row = int(row)
-
-    def setSelectedRows(self, indexes) -> None:
-        rows: set[int] = set()
-        try:
-            for index in indexes or []:
-                row = getattr(index, "row", None)
-                row_value = row() if callable(row) else row
-                if row_value is None:
-                    continue
-                rows.add(int(row_value))
-        except Exception:
-            rows = set()
-
-        self._selected_rows = rows
-        if self._pressed_row in self._selected_rows:
-            self._pressed_row = -1
-
-    def _icon_rect_for_row(self, row_rect: QRect, depth: int) -> QRect:
-        pin_rect = self._pin_rect(row_rect, "preset", depth)
-        if pin_rect is not None:
-            icon_left = pin_rect.left() + self._PIN_COLUMN_WIDTH + self._PIN_TO_ICON_SPACING
-        else:
-            icon_left = row_rect.left() + 12 + depth * 18
-        return QRect(icon_left, row_rect.center().y() - 10, 20, 20)
-
-    def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:
-        kind = index.data(_PresetListModel.KindRole)
-        if kind == "section":
-            return QSize(0, self._SECTION_HEIGHT)
-        if kind == "empty":
-            return QSize(0, self._EMPTY_HEIGHT)
-        return QSize(0, self._ROW_HEIGHT)
-
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
-        kind = index.data(_PresetListModel.KindRole)
-
-        if kind == "section":
-            self._paint_section_row(painter, option, str(index.data(_PresetListModel.TextRole) or ""))
-            return
-
-        if kind == "empty":
-            self._paint_empty_row(painter, option, str(index.data(_PresetListModel.TextRole) or ""))
-            return
-
-        self._paint_preset_row(painter, option, index)
-
-    def editorEvent(self, event, model, option: QStyleOptionViewItem, index: QModelIndex):
-        _ = model
-        kind = str(index.data(_PresetListModel.KindRole) or "")
-        if kind != "preset":
-            return False
-        if event.type() != QEvent.Type.MouseButtonRelease:
-            return False
-        if not isinstance(event, QMouseEvent):
-            return False
-        if event.button() != Qt.MouseButton.LeftButton:
-            return False
-
-        item_id = str(index.data(_PresetListModel.FileNameRole) or "")
-        if not item_id:
-            return False
-
-        self._view.setCurrentIndex(index)
-        is_active = bool(index.data(_PresetListModel.ActiveRole))
-        is_builtin = bool(index.data(_PresetListModel.BuiltinRole))
-        depth = int(index.data(_PresetListModel.DepthRole) or 0)
-        action = self._action_at(option.rect, kind, is_active, is_builtin, depth, event.position().toPoint())
-
-        if action:
-            self._handle_action_click(item_id, action, event)
-            return True
-
-        self._clear_pending_destructive(update=False)
-        self.action_triggered.emit("activate", item_id)
-        return True
-
-    def helpEvent(self, event: QHelpEvent, view, option: QStyleOptionViewItem, index: QModelIndex) -> bool:
-        kind = str(index.data(_PresetListModel.KindRole) or "")
-        if kind != "preset":
-            return super().helpEvent(event, view, option, index)
-
-        name = str(index.data(_PresetListModel.NameRole) or "")
-        is_active = bool(index.data(_PresetListModel.ActiveRole))
-        is_builtin = bool(index.data(_PresetListModel.BuiltinRole))
-        depth = int(index.data(_PresetListModel.DepthRole) or 0)
-        action = self._action_at(option.rect, kind, is_active, is_builtin, depth, event.pos())
-        if not action:
-            return super().helpEvent(event, view, option, index)
-
-        tooltip = self._action_tooltips.get(action, "")
-        if tooltip:
-            QToolTip.showText(event.globalPos(), tooltip, view)
-            return True
-        return super().helpEvent(event, view, option, index)
-
-    def _handle_action_click(self, name: str, action: str, _event: QMouseEvent):
-        self._clear_pending_destructive(update=False)
-        self.action_triggered.emit(action, name)
-        self._view.viewport().update()
-
-    def _pulse_destructive_action(self, name: str, action: str, delay_ms: int = 170) -> None:
-        key = (name, action)
-        if self._pending_destructive is not None:
-            return
-
-        self._pending_destructive = key
-        self._start_pending_shake()
-        self._pending_timer.start(max(800, int(delay_ms) + 200))
-        self._view.viewport().update()
-
-        def _emit_action() -> None:
-            if self._pending_destructive != key:
-                return
-            self.action_triggered.emit(action, name)
-            self._clear_pending_destructive(update=False)
-            self._view.viewport().update()
-
-        QTimer.singleShot(max(0, int(delay_ms)), _emit_action)
-
-    def _clear_pending_destructive(self, update: bool = True):
-        self._pending_timer.stop()
-        self._pending_shake_timer.stop()
-        self._pending_shake_step = 0
-        self._pending_shake_rotation = 0
-        if self._pending_destructive is None:
-            return
-        self._pending_destructive = None
-        if update:
-            self._view.viewport().update()
-
-    def _start_pending_shake(self):
-        self._pending_shake_timer.stop()
-        self._pending_shake_step = 0
-        self._pending_shake_rotation = int(self._PENDING_SHAKE_ROTATIONS[0])
-        self._pending_shake_timer.start(self._PENDING_SHAKE_INTERVAL_MS)
-
-    def _advance_pending_shake(self):
-        self._pending_shake_step += 1
-        if self._pending_shake_step >= len(self._PENDING_SHAKE_ROTATIONS):
-            self._pending_shake_timer.stop()
-            self._pending_shake_step = 0
-            self._pending_shake_rotation = 0
-            self._view.viewport().update()
-            return
-
-        self._pending_shake_rotation = int(self._PENDING_SHAKE_ROTATIONS[self._pending_shake_step])
-        self._view.viewport().update()
-
-    def _visible_actions(self, kind: str, is_active: bool, is_builtin: bool) -> list[str]:
-        _ = (kind, is_active, is_builtin)
-        return ["rating", "edit"]
-
-    def _action_rects(self, row_rect: QRect, kind: str, is_active: bool, is_builtin: bool) -> list[tuple[str, QRect]]:
-        actions = self._visible_actions(kind, is_active, is_builtin)
-        if not actions:
-            return []
-
-        total_width = len(actions) * self._ACTION_SIZE + (len(actions) - 1) * self._ACTION_SPACING
-        x = row_rect.right() - 12 - total_width + 1
-        y = row_rect.center().y() - (self._ACTION_SIZE // 2)
-
-        rects: list[tuple[str, QRect]] = []
-        for action in actions:
-            rects.append((action, QRect(x, y, self._ACTION_SIZE, self._ACTION_SIZE)))
-            x += self._ACTION_SIZE + self._ACTION_SPACING
-        return rects
-
-    def _action_at(self, option_rect: QRect, kind: str, is_active: bool, is_builtin: bool, depth: int, pos) -> Optional[str]:
-        pin_rect = self._pin_rect(option_rect, kind, depth)
-        if pin_rect is not None and pin_rect.contains(pos):
-            return "pin"
-        for action, rect in self._action_rects(option_rect, kind, is_active, is_builtin):
-            if rect.contains(pos):
-                return action
-        return None
-
-    def _pin_rect(self, row_rect: QRect, kind: str, depth: int = 0) -> Optional[QRect]:
-        if kind != "preset":
-            return None
-        left = row_rect.left() + 12 + depth * 18
-        top = row_rect.center().y() - (self._PIN_SIZE // 2)
-        return QRect(left, top, self._PIN_SIZE, self._PIN_SIZE)
-
-    def _paint_action_icon(self, painter: QPainter, icon_name: str, icon_color: str, icon_rect: QRect, rotation: int = 0):
-        icon = _cached_icon(icon_name, icon_color)
-        pixmap = icon.pixmap(icon_rect.size())
-        if pixmap.isNull():
-            return
-
-        if rotation:
-            rotated = pixmap.transformed(QTransform().rotate(rotation), Qt.TransformationMode.SmoothTransformation)
-            center = icon_rect.center()
-            draw_x = center.x() - (rotated.width() // 2)
-            draw_y = center.y() - (rotated.height() // 2)
-            painter.drawPixmap(draw_x, draw_y, rotated)
-            return
-
-        painter.drawPixmap(icon_rect.topLeft(), pixmap)
-
-    def _paint_section_row(self, painter: QPainter, option: QStyleOptionViewItem, text: str):
-        painter.save()
-        tokens = get_theme_tokens()
-        rect = option.rect
-
-        text_rect = rect.adjusted(12, 0, -12, 0)
-        font = painter.font()
-        font.setPointSize(9)
-        font.setBold(True)
-        painter.setFont(font)
-
-        metrics = QFontMetrics(font)
-        text_width = metrics.horizontalAdvance(text)
-
-        painter.setPen(_to_qcolor(tokens.fg_muted, "#9aa2af"))
-        painter.drawText(text_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), text)
-
-        # Draw a subtle separator line to the right of the label.
-        line_x1 = text_rect.left() + text_width + 10
-        line_x2 = rect.right() - 12
-        if line_x2 > line_x1:
-            painter.setPen(_to_qcolor(tokens.divider, "#5f6368"))
-            y = rect.center().y()
-            painter.drawLine(line_x1, y, line_x2, y)
-        painter.restore()
-
-    def _paint_empty_row(self, painter: QPainter, option: QStyleOptionViewItem, text: str):
-        painter.save()
-        tokens = get_theme_tokens()
-        painter.setPen(_to_qcolor(tokens.fg_muted, "#9aa2af"))
-        font = painter.font()
-        font.setPointSize(10)
-        painter.setFont(font)
-        painter.drawText(option.rect.adjusted(8, 0, -8, 0), int(Qt.AlignmentFlag.AlignCenter), text)
-        painter.restore()
-
-    def _paint_preset_row(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
-        tokens = get_theme_tokens()
-        semantic = get_semantic_palette(tokens.theme_name)
-        name = str(index.data(_PresetListModel.NameRole) or "")
-        date_text = str(index.data(_PresetListModel.DateRole) or "")
-        is_active = bool(index.data(_PresetListModel.ActiveRole))
-        is_builtin = bool(index.data(_PresetListModel.BuiltinRole))
-        depth = int(index.data(_PresetListModel.DepthRole) or 0)
-        is_pinned = bool(index.data(_PresetListModel.PinnedRole))
-        rating = int(index.data(_PresetListModel.RatingRole) or 0)
-
-        row_rect = option.rect
-        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-
-        if is_active:
-            bg = _to_qcolor(tokens.accent_soft_bg, tokens.accent_hex)
-        elif hovered:
-            bg = _to_qcolor(tokens.surface_bg_hover, tokens.surface_bg)
-        else:
-            bg = QColor(Qt.GlobalColor.transparent)
-
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        if bg.alpha() > 0:
-            painter.fillRect(row_rect, bg)
-
-        pin_rect = self._pin_rect(row_rect, "preset", depth)
-        icon_rect = self._icon_rect_for_row(row_rect, depth)
-        icon_name = "fa5s.star" if is_active else "fa5s.file-alt"
-        icon_color = _pick_contrast_color(
-            _normalize_preset_icon_color(str(index.data(_PresetListModel.IconColorRole) or "")),
-            bg,
-            [tokens.accent_hex, tokens.fg],
-            minimum_ratio=2.6,
-        )
-        _cached_icon(icon_name, icon_color).paint(painter, icon_rect)
-
-        action_rects = self._action_rects(row_rect, "preset", is_active, is_builtin)
-        right_cursor = action_rects[0][1].left() - 10 if action_rects else row_rect.right() - 12
-
-        if is_active:
-            badge_text = self._tr("page.z2_user_presets.delegate.badge.active", "Активен")
-            badge_font = painter.font()
-            badge_font.setPointSize(8)
-            badge_font.setBold(True)
-            badge_metrics = QFontMetrics(badge_font)
-            badge_width = badge_metrics.horizontalAdvance(badge_text) + 14
-            badge_rect = QRect(right_cursor - badge_width, row_rect.center().y() - 9, badge_width, 18)
-
-            painter.setBrush(QColor(tokens.accent_hex))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(badge_rect, 4, 4)
-
-            painter.setFont(badge_font)
-            painter.setPen(_to_qcolor(_accent_fg_for_tokens(tokens), "#f5f5f5"))
-            painter.drawText(badge_rect, int(Qt.AlignmentFlag.AlignCenter), badge_text)
-            right_cursor = badge_rect.left() - 10
-
-        if date_text:
-            date_font = painter.font()
-            date_font.setPointSize(9)
-            date_font.setBold(False)
-            painter.setFont(date_font)
-            date_metrics = QFontMetrics(date_font)
-            date_width = date_metrics.horizontalAdvance(date_text)
-            date_rect = QRect(max(row_rect.left() + 80, right_cursor - date_width), row_rect.top(), date_width, row_rect.height())
-            painter.setPen(_to_qcolor(tokens.fg_faint, "#aeb5c1"))
-            painter.drawText(date_rect, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter), date_text)
-            right_cursor = date_rect.left() - 10
-
-        if rating > 0:
-            rating_text = f"{rating}/10"
-            rating_font = painter.font()
-            rating_font.setPointSize(8)
-            rating_font.setBold(True)
-            painter.setFont(rating_font)
-            rating_metrics = QFontMetrics(rating_font)
-            rating_width = rating_metrics.horizontalAdvance(rating_text) + 14
-            rating_rect = QRect(max(row_rect.left() + 80, right_cursor - rating_width), row_rect.center().y() - 9, rating_width, 18)
-            painter.setBrush(_to_qcolor(tokens.surface_bg_hover, tokens.surface_bg))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(rating_rect, 4, 4)
-            painter.setPen(_to_qcolor(tokens.fg_muted, "#c3cad5"))
-            painter.drawText(rating_rect, int(Qt.AlignmentFlag.AlignCenter), rating_text)
-            right_cursor = rating_rect.left() - 10
-
-        name_left = icon_rect.right() + 10
-        name_rect = QRect(name_left, row_rect.top(), max(40, right_cursor - name_left), row_rect.height())
-        name_font = painter.font()
-        name_font.setPointSize(10)
-        name_font.setBold(True)
-        painter.setFont(name_font)
-        painter.setPen(_to_qcolor(tokens.fg, "#f5f5f5"))
-        name_metrics = QFontMetrics(name_font)
-        elided_name = name_metrics.elidedText(name, Qt.TextElideMode.ElideRight, name_rect.width())
-        painter.drawText(name_rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), elided_name)
-
-        if pin_rect is not None:
-            pin_icon = "fa5s.thumbtack" if is_pinned else "fa5s.thumbtack"
-            pin_color = tokens.accent_hex if is_pinned else tokens.fg_faint
-            self._paint_action_icon(
-                painter,
-                pin_icon,
-                pin_color,
-                pin_rect.adjusted(2, 2, -2, -2),
-            )
-
-        for action, action_rect in action_rects:
-            btn_bg = _to_qcolor(tokens.surface_bg_hover, tokens.surface_bg)
-            icon_col = _pick_contrast_color(
-                str(tokens.fg_muted),
-                btn_bg,
-                [tokens.fg],
-                minimum_ratio=2.6,
-            )
-
-            painter.setBrush(btn_bg)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(action_rect, 6, 6)
-
-            icon_name = self._ACTION_ICONS.get(action, "fa5s.circle")
-            self._paint_action_icon(
-                painter,
-                icon_name,
-                icon_col,
-                action_rect.adjusted(7, 7, -7, -7),
-            )
-
-        painter.restore()
-
+from ui.pages.user_presets_components import (
+    UserPresetsToolbarLayout,
+    _PresetListModel,
+    _LinkedWheelListView,
+    _PresetListDelegate,
+    _fluent_icon,
+    _make_menu_action,
+)
 
 class _CreatePresetDialog(MessageBoxBase):
     """Диалог создания нового пресета."""
@@ -1276,6 +351,9 @@ class BaseZapret2UserPresetsPage(BasePage):
             parent,
             title_key="page.z2_user_presets.title",
         )
+        self._page_api = self._build_controller().build_page_api()
+        self._runtime_service = self._build_runtime_service()
+        self._runtime_service.attach_page(self, self._build_runtime_adapter())
 
         self._breadcrumb = None
         self._back_btn = None
@@ -1312,17 +390,7 @@ class BaseZapret2UserPresetsPage(BasePage):
 
         self._presets_model: Optional[_PresetListModel] = None
         self._presets_delegate: Optional[_PresetListDelegate] = None
-        self._manager = None
-        self._manager_backend = ""
-        self._ui_dirty = True  # needs rebuild on next show
-        self._cached_presets_metadata: dict[str, dict[str, object]] = {}
         self._last_page_theme_key: tuple[str, str, str] | None = None
-
-        self._file_watcher: Optional[QFileSystemWatcher] = None
-        self._watcher_active = False
-        self._watcher_reload_timer = QTimer(self)
-        self._watcher_reload_timer.setSingleShot(True)
-        self._watcher_reload_timer.timeout.connect(self._reload_presets_from_watcher)
 
         self._bulk_reset_running = False
         self._layout_resync_timer = QTimer(self)
@@ -1340,12 +408,47 @@ class BaseZapret2UserPresetsPage(BasePage):
 
         self._ui_state_store: Optional[MainWindowStateStore] = None
         self._ui_state_unsubscribe = None
-        self._controller = Zapret2UserPresetsPageController()
-        self._runtime_controller = UserPresetsRuntimeController()
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+        self._build_ui()
+        self._after_ui_built()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
         return _tr_text(key, self._ui_language, default, **kwargs)
+
+    def _build_controller(self):
+        return DirectUserPresetsPageController(
+            DirectUserPresetsPageControllerConfig(
+                launch_method="direct_zapret2",
+                selection_key="winws2",
+                hierarchy_scope="preset_zapret2",
+                empty_not_found_key="page.z2_user_presets.empty.not_found",
+                empty_none_key="page.z2_user_presets.empty.none",
+                list_log_prefix="Z2UserPresetsPage",
+                activate_error_level="error",
+                activate_error_mode="raw",
+                copy_hierarchy_meta_on_duplicate=False,
+                get_preset_store=get_preset_store,
+            )
+        )
+
+    def _build_runtime_service(self):
+        return get_user_presets_runtime_service("preset_zapret2")
+
+    def _build_runtime_adapter(self) -> UserPresetsRuntimeAdapter:
+        return UserPresetsRuntimeAdapter(
+            bulk_reset_running=lambda: bool(self._bulk_reset_running),
+            read_single_metadata=self._listing_api().read_single_preset_list_metadata_light,
+            selected_source_file_name=self._listing_api().get_selected_source_preset_file_name_light,
+            presets_dir=self._listing_api().get_presets_dir_light,
+            load_all_metadata=self._listing_api().load_preset_list_metadata_light,
+            rebuild_rows=lambda all_presets, started_at=None: self._rebuild_presets_rows(
+                all_presets,
+                started_at=started_at,
+            ),
+            delete_preset_meta=lambda name: self._get_hierarchy_store().delete_preset_meta(
+                name,
+                display_name=self._resolve_display_name(name),
+            ),
+        )
 
     def _current_breadcrumb_title(self) -> str:
         return self._tr("page.z2_user_presets.title", "Мои пресеты")
@@ -1381,86 +484,72 @@ class BaseZapret2UserPresetsPage(BasePage):
         except Exception:
             pass
 
-    def _get_preset_store(self):
-        from core.services import get_preset_store
+    def _controller_api(self):
+        return self._page_api
 
-        return get_preset_store()
+    def _listing_api(self):
+        return self._controller_api().listing
+
+    def _actions_api(self):
+        return self._controller_api().actions
+
+    def _storage_api(self):
+        return self._controller_api().storage
+
+    def _get_preset_store(self):
+        return self._storage_api().get_preset_store()
 
     def _list_preset_entries_light(self) -> list[dict[str, object]]:
-        return self._controller.list_preset_entries_light()
+        return self._listing_api().list_preset_entries_light()
 
     def _get_active_preset_name_light(self) -> str:
-        return self._controller.get_active_preset_name_light()
+        return self._listing_api().get_active_preset_name_light()
 
     def _get_selected_source_preset_file_name_light(self) -> str:
-        return self._controller.get_selected_source_preset_file_name_light()
+        return self._listing_api().get_selected_source_preset_file_name_light()
 
     def _load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
-        return self._controller.load_preset_list_metadata_light()
+        return self._listing_api().load_preset_list_metadata_light()
 
     def _get_presets_dir_light(self):
-        return self._controller.get_presets_dir_light()
+        return self._listing_api().get_presets_dir_light()
 
     def _read_single_preset_list_metadata_light(self, file_name_or_name: str) -> tuple[str, dict[str, object]] | None:
-        return self._controller.read_single_preset_list_metadata_light(file_name_or_name)
+        return self._listing_api().read_single_preset_list_metadata_light(file_name_or_name)
 
     def _resolve_display_name(self, reference: str) -> str:
-        return self._controller.resolve_display_name(reference)
+        return self._listing_api().resolve_display_name(reference)
 
     def _on_store_changed(self):
-        self._runtime_controller.on_store_changed(self)
+        self._runtime_service.on_store_changed()
 
     def _on_store_updated(self, file_name_or_name: str):
-        self._runtime_controller.on_store_updated(self, file_name_or_name)
-
-    def _current_search_query(self) -> str:
-        return self._runtime_controller.current_search_query(self)
-
-    def _capture_presets_view_state(self) -> dict[str, object]:
-        return self._runtime_controller.capture_presets_view_state(self)
-
-    def _restore_presets_view_state(self, state: dict[str, object]) -> None:
-        self._runtime_controller.restore_presets_view_state(self, state)
-
-    def _try_apply_single_preset_metadata_update(
-        self,
-        normalized_file_name: str,
-        *,
-        previous_metadata: dict[str, object],
-        next_metadata: dict[str, object],
-    ) -> bool:
-        return self._runtime_controller.try_apply_single_preset_metadata_update(
-            self,
-            normalized_file_name,
-            previous_metadata=previous_metadata,
-            next_metadata=next_metadata,
-        )
+        self._runtime_service.on_store_updated(file_name_or_name)
 
     def _on_store_switched(self, _name: str):
-        self._runtime_controller.on_store_switched(self, _name)
+        self._runtime_service.on_store_switched(_name)
 
     def _on_ui_state_changed(self, state: AppUiState, changed_fields: frozenset[str]) -> None:
-        self._runtime_controller.on_ui_state_changed(self, state, changed_fields)
-
-    def _get_direct_facade(self):
-        return self._controller._get_direct_facade()
+        self._runtime_service.on_ui_state_changed(state, changed_fields)
 
     def _is_builtin_preset_file(self, name: str) -> bool:
-        return self._controller.is_builtin_preset_file_with_cache(name, self._cached_presets_metadata)
+        return self._storage_api().is_builtin_preset_file_with_cache(
+            name,
+            self._runtime_service.cached_presets_metadata(),
+        )
 
     def _hierarchy_scope_key(self) -> str:
         return "preset_zapret2"
 
     def _get_hierarchy_store(self) -> PresetHierarchyStore:
-        return self._controller.get_hierarchy_store()
+        return self._storage_api().get_hierarchy_store()
 
     def on_page_activated(self, first_show: bool) -> None:
         _ = first_show
         self._rebuild_breadcrumb()
         self._apply_mode_labels()
-        self._start_watching_presets()
         self._resync_layout_metrics()
-        if self._ui_dirty:
+        if self._runtime_service.is_ui_dirty():
             self.refresh_presets_view_if_possible()
         else:
             self._update_presets_view_height()
@@ -1474,7 +563,6 @@ class BaseZapret2UserPresetsPage(BasePage):
     def on_page_hidden(self) -> None:
         self._layout_resync_timer.stop()
         self._layout_resync_delayed_timer.stop()
-        self._stop_watching_presets()
 
     def _after_ui_built(self) -> None:
         started_at = time.perf_counter()
@@ -1485,6 +573,10 @@ class BaseZapret2UserPresetsPage(BasePage):
             store.presets_changed.connect(self._on_store_changed)
             store.preset_switched.connect(self._on_store_switched)
             store.preset_updated.connect(self._on_store_updated)
+        except Exception:
+            pass
+        try:
+            self._start_watching_presets()
         except Exception:
             pass
 
@@ -1552,25 +644,7 @@ class BaseZapret2UserPresetsPage(BasePage):
             pass
 
     def _start_watching_presets(self):
-        self._runtime_controller.start_watching_presets(self)
-
-    def _stop_watching_presets(self):
-        self._runtime_controller.stop_watching_presets(self)
-
-    def _on_presets_dir_changed(self, path: str):
-        self._runtime_controller.on_presets_dir_changed(self, path)
-
-    def _on_preset_file_changed(self, path: str):
-        self._runtime_controller.on_preset_file_changed(self, path)
-
-    def _schedule_presets_reload(self, delay_ms: int = 500):
-        self._runtime_controller.schedule_presets_reload(self, delay_ms)
-
-    def _reload_presets_from_watcher(self):
-        self._runtime_controller.reload_presets_from_watcher(self)
-
-    def _sync_watched_preset_files(self, file_names: set[str] | None = None) -> None:
-        self._runtime_controller.sync_watched_preset_files(self, file_names)
+        self._runtime_service.start_watching_presets()
 
     def _build_ui(self):
         tokens = get_theme_tokens()
@@ -1794,7 +868,7 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _apply_preset_search(self) -> None:
         if not self.isVisible():
-            self._ui_dirty = True
+            self._runtime_service.set_ui_dirty(True)
             return
         self._refresh_presets_view_from_cache()
 
@@ -1824,9 +898,9 @@ class BaseZapret2UserPresetsPage(BasePage):
         from_current = getattr(dlg, "_source", "current") == "current"
 
         try:
-            result = self._controller.create_preset(name=name, from_current=from_current)
+            result = self._actions_api().create_preset(name=name, from_current=from_current)
             if result.structure_changed:
-                self._runtime_controller.mark_presets_structure_changed(self)
+                self._runtime_service.mark_presets_structure_changed()
             log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка создания пресета: {e}", "ERROR")
@@ -1854,9 +928,9 @@ class BaseZapret2UserPresetsPage(BasePage):
             return
 
         try:
-            result = self._controller.rename_preset(current_name=current_name, new_name=new_name)
+            result = self._actions_api().rename_preset(current_name=current_name, new_name=new_name)
             if result.structure_changed:
-                self._runtime_controller.mark_presets_structure_changed(self)
+                self._runtime_service.mark_presets_structure_changed()
             log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка переименования пресета: {e}", "ERROR")
@@ -1881,9 +955,9 @@ class BaseZapret2UserPresetsPage(BasePage):
             return
 
         try:
-            result = self._controller.import_preset_from_file(file_path=file_path)
+            result = self._actions_api().import_preset_from_file(file_path=file_path)
             if result.structure_changed:
-                self._runtime_controller.mark_presets_structure_changed(self)
+                self._runtime_service.mark_presets_structure_changed()
             log(result.log_message, result.log_level)
             if result.infobar_level == "warning":
                 InfoBar.warning(title=result.infobar_title, content=result.infobar_content, parent=self.window())
@@ -1905,9 +979,9 @@ class BaseZapret2UserPresetsPage(BasePage):
 
         self._bulk_reset_running = True
         try:
-            result = self._controller.reset_all_presets()
+            result = self._actions_api().reset_all_presets()
             if result.structure_changed:
-                self._runtime_controller.mark_presets_structure_changed(self)
+                self._runtime_service.mark_presets_structure_changed()
             log(result.log_message, result.log_level)
             self._show_reset_all_result(result.success_count, result.total_count)
 
@@ -1924,7 +998,7 @@ class BaseZapret2UserPresetsPage(BasePage):
             )
         finally:
             self._bulk_reset_running = False
-            if self._ui_dirty and self.isVisible():
+            if self._runtime_service.is_ui_dirty() and self.isVisible():
                 self.refresh_presets_view_if_possible()
 
     def _show_reset_all_result(self, success_count: int, total_count: int) -> None:
@@ -1948,21 +1022,21 @@ class BaseZapret2UserPresetsPage(BasePage):
             pass
 
     def _load_presets(self):
-        self._runtime_controller.load_presets(self)
+        self._runtime_service.load_presets()
 
     def refresh_presets_view_if_possible(self) -> None:
-        self._runtime_controller.refresh_presets_view_if_possible(self)
+        self._runtime_service.refresh_presets_view_if_possible()
 
     def _refresh_presets_view_from_cache(self) -> None:
-        self._runtime_controller.refresh_presets_view_from_cache(self)
+        self._runtime_service.refresh_presets_view_from_cache()
 
     def _rebuild_presets_rows(self, all_presets: dict[str, dict[str, object]], *, started_at: float | None = None) -> None:
         try:
-            view_state = self._capture_presets_view_state() if hasattr(self, "presets_list") else {}
+            view_state = self._runtime_service.capture_presets_view_state() if hasattr(self, "presets_list") else {}
             active_file_name = self._get_selected_source_preset_file_name_light()
-            plan = self._controller.build_preset_rows_plan(
+            plan = self._listing_api().build_preset_rows_plan(
                 all_presets=all_presets,
-                query=self._current_search_query(),
+                query=self._runtime_service.current_search_query(),
                 active_file_name=active_file_name,
                 language=self._ui_language,
             )
@@ -1971,12 +1045,12 @@ class BaseZapret2UserPresetsPage(BasePage):
                 self._presets_delegate.reset_interaction_state()
             if self._presets_model:
                 self._presets_model.set_rows(plan.rows)
-            self._runtime_controller.ensure_preset_list_current_index(self)
+            self._runtime_service.ensure_preset_list_current_index()
             if view_state:
-                self._restore_presets_view_state(view_state)
+                self._runtime_service.restore_presets_view_state(view_state)
 
             # Update restore-deleted button visibility
-            self._restore_deleted_btn.setVisible(False)
+            self._restore_deleted_btn.setVisible(self._storage_api().has_deleted_presets())
 
             self._update_presets_view_height()
             self._schedule_layout_resync()
@@ -2018,7 +1092,7 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _on_toggle_pin_preset(self, name: str):
         try:
             display_name = self._resolve_display_name(name)
-            pinned = self._controller.toggle_preset_pin(name, display_name)
+            pinned = self._storage_api().toggle_preset_pin(name, display_name)
             log(f"Пресет '{display_name}' {'закреплён' if pinned else 'откреплён'}", "INFO")
             self._refresh_presets_view_from_cache()
         except Exception as e:
@@ -2029,10 +1103,10 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _move_preset_by_step(self, name: str, direction: int):
         try:
-            moved = self._controller.move_preset_by_step(
+            moved = self._storage_api().move_preset_by_step(
                 name,
                 direction,
-                cached_metadata=self._cached_presets_metadata,
+                cached_metadata=self._runtime_service.cached_presets_metadata(),
             )
             if moved:
                 self._refresh_presets_view_from_cache()
@@ -2041,12 +1115,12 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _on_item_dropped(self, source_kind: str, source_id: str, target_kind: str, target_id: str):
         try:
-            moved = self._controller.move_preset_on_drop(
+            moved = self._storage_api().move_preset_on_drop(
                 source_kind=source_kind,
                 source_id=source_id,
                 target_kind=target_kind,
                 target_id=target_id,
-                cached_metadata=self._cached_presets_metadata,
+                cached_metadata=self._runtime_service.cached_presets_metadata(),
             )
             if moved:
                 log(f"Элемент '{source_id}' перенесён перетаскиванием", "INFO")
@@ -2056,10 +1130,10 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _on_activate_preset(self, name: str):
         display_name = self._resolve_display_name(name)
-        result = self._controller.activate_preset(file_name=name, display_name=display_name)
+        result = self._actions_api().activate_preset(file_name=name, display_name=display_name)
         log(result.log_message, result.log_level)
         if result.ok and result.activated_file_name:
-            self._runtime_controller.apply_active_preset_marker_for_target(self, result.activated_file_name)
+            self._runtime_service.apply_active_preset_marker_for_target(result.activated_file_name)
             return
 
         if result.infobar_level == "error":
@@ -2118,9 +1192,9 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _on_duplicate_preset(self, name: str):
         try:
             display_name = self._resolve_display_name(name)
-            result = self._controller.duplicate_preset(file_name=name, display_name=display_name)
+            result = self._actions_api().duplicate_preset(file_name=name, display_name=display_name)
             if result.structure_changed:
-                self._runtime_controller.mark_presets_structure_changed(self)
+                self._runtime_service.mark_presets_structure_changed()
             log(result.log_message, result.log_level)
 
         except Exception as e:
@@ -2155,7 +1229,7 @@ class BaseZapret2UserPresetsPage(BasePage):
                 if not box.exec():
                     return
 
-            result = self._controller.reset_preset_to_template(file_name=name, display_name=display_name)
+            result = self._actions_api().reset_preset_to_template(file_name=name, display_name=display_name)
             log(result.log_message, result.log_level)
 
         except Exception as e:
@@ -2169,8 +1243,8 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _on_delete_preset(self, name: str):
         try:
             display_name = self._resolve_display_name(name)
-            if self._controller.is_builtin_preset_file(name):
-                result = self._controller.delete_preset(file_name=name, display_name=display_name)
+            if self._storage_api().is_builtin_preset_file(name):
+                result = self._actions_api().delete_preset(file_name=name, display_name=display_name)
                 if result.infobar_level == "warning":
                     InfoBar.warning(
                         title=self._tr("common.error.title", "Ошибка"),
@@ -2200,31 +1274,17 @@ class BaseZapret2UserPresetsPage(BasePage):
                 if not box.exec():
                     return
 
-            result = self._controller.delete_preset(file_name=name, display_name=display_name)
+            result = self._actions_api().delete_preset(file_name=name, display_name=display_name)
+            if result.error_code == "not_found":
+                log(result.log_message, result.log_level)
+                self._runtime_service.recover_missing_deleted_preset(name)
+                return
             if result.structure_changed:
-                self._runtime_controller.mark_presets_structure_changed(self)
+                self._runtime_service.mark_presets_structure_changed()
             log(result.log_message, result.log_level)
 
         except Exception as e:
             log(f"Ошибка удаления пресета: {e}", "ERROR")
-            if "Preset not found" in str(e):
-                try:
-                    self._get_hierarchy_store().delete_preset_meta(name, display_name=self._resolve_display_name(name))
-                except Exception:
-                    pass
-                normalized_name = str(name or "").strip()
-                if normalized_name:
-                    self._cached_presets_metadata.pop(normalized_name, None)
-                    if not normalized_name.lower().endswith(".txt"):
-                        self._cached_presets_metadata.pop(f"{normalized_name}.txt", None)
-                if self.isVisible() and self._cached_presets_metadata:
-                    self._ui_dirty = False
-                    self._refresh_presets_view_from_cache()
-                else:
-                    self._ui_dirty = True
-                    if self.isVisible():
-                        self._load_presets()
-                return
             InfoBar.error(
                 title=self._tr("common.error.title", "Ошибка"),
                 content=self._tr("page.z2_user_presets.error.generic", "Ошибка: {error}", error=e),
@@ -2244,7 +1304,7 @@ class BaseZapret2UserPresetsPage(BasePage):
             return
 
         try:
-            result = self._controller.export_preset(file_name=name, file_path=file_path, display_name=display_name)
+            result = self._actions_api().export_preset(file_name=name, file_path=file_path, display_name=display_name)
             log(result.log_message, result.log_level)
             if result.infobar_level == "success":
                 InfoBar.success(title=result.infobar_title, content=result.infobar_content, parent=self.window())
@@ -2260,9 +1320,9 @@ class BaseZapret2UserPresetsPage(BasePage):
     def _on_restore_deleted(self):
         """Restore all previously deleted presets that have matching templates."""
         try:
-            result = self._controller.restore_deleted_presets()
+            result = self._actions_api().restore_deleted_presets()
             if result.structure_changed:
-                self._runtime_controller.mark_presets_structure_changed(self)
+                self._runtime_service.mark_presets_structure_changed()
             log(result.log_message, result.log_level)
         except Exception as e:
             log(f"Ошибка восстановления удалённых пресетов: {e}", "ERROR")
@@ -2291,7 +1351,7 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _open_presets_info(self):
         """Открывает страницу с информацией о пресетах."""
-        result = self._controller.open_presets_info()
+        result = self._actions_api().open_presets_info()
         log(result.log_message, result.log_level)
         if (not result.ok) and result.infobar_level == "warning":
             InfoBar.warning(
@@ -2301,7 +1361,7 @@ class BaseZapret2UserPresetsPage(BasePage):
             )
 
     def _open_new_configs_post(self):
-        result = self._controller.open_new_configs_post()
+        result = self._actions_api().open_new_configs_post()
         log(result.log_message, result.log_level)
         if (not result.ok) and result.infobar_level == "warning":
             InfoBar.warning(

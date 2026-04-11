@@ -53,7 +53,6 @@ class CustomIpSetPage(BasePage):
             title_key="page.custom_ipset.title",
             subtitle_key="page.custom_ipset.subtitle",
         )
-        self._controller = HostlistPageController()
         self._desc_label = None
         self._add_card = None
         self._actions_card = None
@@ -78,18 +77,16 @@ class CustomIpSetPage(BasePage):
         self._status_timer = QTimer()
         self._status_timer.setSingleShot(True)
         self._status_timer.timeout.connect(self._update_status)
-        self._initial_entries_load_requested = False
+        self._runtime_initialized = False
 
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        if self._initial_entries_load_requested:
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
             return
-        self._initial_entries_load_requested = True
+        self._runtime_initialized = True
         QTimer.singleShot(0, self._load_entries)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
@@ -261,7 +258,7 @@ class CustomIpSetPage(BasePage):
     def _load_entries(self):
         """Загружает пользовательский список из ipset-all.user.txt."""
         try:
-            state = self._controller.load_custom_ipset_text()
+            state = HostlistPageController.load_custom_ipset_text()
 
             # Блокируем сигнал чтобы не срабатывало автосохранение
             self.text_edit.blockSignals(True)
@@ -410,7 +407,7 @@ class CustomIpSetPage(BasePage):
         """Сохраняет пользовательский список в ipset-all.user.txt."""
         try:
             text = self.text_edit.toPlainText()
-            state = self._controller.save_custom_ipset_text(text)
+            state = HostlistPageController.save_custom_ipset_text(text)
 
             # Обновляем UI - заменяем URL на IP
             new_text = state.normalized_text
@@ -433,7 +430,7 @@ class CustomIpSetPage(BasePage):
             log(f"Ошибка сохранения ipset-all.user.txt: {e}", "ERROR")
 
     def _update_status(self):
-        plan = self._controller.build_custom_ipset_status_plan(self.text_edit.toPlainText())
+        plan = HostlistPageController.build_custom_ipset_status_plan(self.text_edit.toPlainText())
 
         # Обновляем UI
         if plan.invalid_lines:
@@ -459,7 +456,7 @@ class CustomIpSetPage(BasePage):
         self._render_status_label()
 
     def _add_entry(self):
-        plan = self._controller.build_add_custom_ipset_plan(
+        plan = HostlistPageController.build_add_custom_ipset_plan(
             raw_text=self.input.text().strip(),
             current_text=self.text_edit.toPlainText(),
         )
@@ -508,7 +505,7 @@ class CustomIpSetPage(BasePage):
         try:
             # Сохраняем перед открытием
             self._save_entries()
-            self._controller.open_ipset_all_user_file()
+            HostlistPageController.open_ipset_all_user_file()
         except Exception as e:
             log(f"Ошибка открытия ipset-all.user.txt: {e}", "ERROR")
             if InfoBar:

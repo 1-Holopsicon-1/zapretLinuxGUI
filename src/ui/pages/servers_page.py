@@ -1,7 +1,7 @@
 # ui/pages/servers_page.py
 """Страница мониторинга серверов обновлений"""
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QStackedWidget, QTableWidgetItem, QHeaderView,
@@ -16,6 +16,7 @@ from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
 from ui.text_catalog import tr as tr_catalog
 from updater.update_page_controller import UpdatePageController
+from updater.server_status_table_state import ServerStatusTableState
 from updater.update_page_view_controller import UpdatePageViewController
 from ui.widgets.win11_controls import Win11ToggleRow
 
@@ -110,7 +111,6 @@ class UpdateStatusCard(CardWidget):
         self._state_message = ""
         self._state_elapsed = 0.0
         self._tokens = get_theme_tokens()
-        self._view_controller = UpdatePageViewController()
         self._build_ui()
         self._theme_refresh = ThemeRefreshController(self, self._apply_theme)
 
@@ -190,7 +190,7 @@ class UpdateStatusCard(CardWidget):
         self._icon_label.setPixmap(pixmap)
 
     def _apply_state_text(self) -> None:
-        plan = self._view_controller.build_update_status_card_plan(
+        plan = UpdatePageViewController.build_update_status_card_plan(
             state=self._state,
             version=self._state_version,
             source=self._state_source,
@@ -227,14 +227,14 @@ class UpdateStatusCard(CardWidget):
             self.check_btn.setEnabled(plan.check_enabled)
 
     def start_checking(self):
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="checking",
             language=self._ui_language,
         )
         self._apply_transition_plan(plan)
 
     def stop_checking(self, found_update: bool = False, version: str = ""):
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="result",
             language=self._ui_language,
             version=version,
@@ -243,7 +243,7 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def set_error(self, message: str):
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="error",
             language=self._ui_language,
             message=message,
@@ -251,7 +251,7 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def show_found_update(self, version: str, source: str) -> None:
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="found",
             language=self._ui_language,
             version=version,
@@ -260,14 +260,14 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def show_download_error(self) -> None:
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="download_error",
             language=self._ui_language,
         )
         self._apply_transition_plan(plan)
 
     def show_deferred(self, version: str) -> None:
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="deferred",
             language=self._ui_language,
             version=version,
@@ -275,7 +275,7 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def show_checked_ago(self, elapsed: float) -> None:
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="checked_ago",
             language=self._ui_language,
             elapsed=elapsed,
@@ -283,14 +283,14 @@ class UpdateStatusCard(CardWidget):
         self._apply_transition_plan(plan)
 
     def show_manual_hint(self) -> None:
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="manual",
             language=self._ui_language,
         )
         self._apply_transition_plan(plan)
 
     def show_auto_enabled_hint(self) -> None:
-        plan = self._view_controller.build_update_status_transition_plan(
+        plan = UpdatePageViewController.build_update_status_transition_plan(
             target_state="auto_on",
             language=self._ui_language,
         )
@@ -332,7 +332,6 @@ class ChangelogCard(CardWidget):
         self._raw_changelog = ""
         self._raw_version = ""
         self._mode = "idle"
-        self._view_controller = UpdatePageViewController()
         self._build_ui()
         self._theme_refresh = ThemeRefreshController(self, self._apply_theme)
         self.hide()
@@ -466,14 +465,14 @@ class ChangelogCard(CardWidget):
 
         if self._raw_changelog:
             try:
-                self.changelog_text.setText(self._view_controller.make_links_clickable(self._raw_changelog, tokens.accent_hex))
+                self.changelog_text.setText(UpdatePageViewController.make_links_clickable(self._raw_changelog, tokens.accent_hex))
             except Exception:
                 pass
 
     def show_update(self, version: str, changelog: str):
         if self._is_downloading:
             return
-        plan = self._view_controller.build_changelog_update_plan(
+        plan = UpdatePageViewController.build_changelog_update_plan(
             version=version,
             changelog=changelog,
             app_version=APP_VERSION,
@@ -498,7 +497,7 @@ class ChangelogCard(CardWidget):
         self._apply_theme()
 
     def start_download(self, version: str):
-        plan = self._view_controller.build_changelog_download_start_plan(
+        plan = UpdatePageViewController.build_changelog_download_start_plan(
             version=version,
             language=self._ui_language,
             now=time.time(),
@@ -535,7 +534,7 @@ class ChangelogCard(CardWidget):
         self.progress_widget.setVisible(plan.progress_visible)
 
     def update_progress(self, percent: int, done_bytes: int, total_bytes: int):
-        plan = self._view_controller.build_changelog_progress_plan(
+        plan = UpdatePageViewController.build_changelog_progress_plan(
             percent=percent,
             done_bytes=done_bytes,
             total_bytes=total_bytes,
@@ -571,7 +570,7 @@ class ChangelogCard(CardWidget):
         self.eta_label.setText(plan.eta_label_text)
 
     def download_complete(self):
-        plan = self._view_controller.build_changelog_terminal_plan(
+        plan = UpdatePageViewController.build_changelog_terminal_plan(
             kind="installing",
             language=self._ui_language,
             app_version=APP_VERSION,
@@ -594,7 +593,7 @@ class ChangelogCard(CardWidget):
         self.eta_label.setText(plan.eta_label_text)
 
     def download_failed(self, error: str):
-        plan = self._view_controller.build_changelog_terminal_plan(
+        plan = UpdatePageViewController.build_changelog_terminal_plan(
             kind="failed",
             language=self._ui_language,
             app_version=APP_VERSION,
@@ -624,7 +623,7 @@ class ChangelogCard(CardWidget):
     def set_ui_language(self, language: str) -> None:
         self._ui_language = language
         self.later_btn.setText(self._tr("page.servers.changelog.button.later", "Позже"))
-        plan = self._view_controller.build_changelog_terminal_plan(
+        plan = UpdatePageViewController.build_changelog_terminal_plan(
             kind=self._mode if self._mode in {"downloading", "installing", "failed"} else "update",
             language=self._ui_language,
             app_version=APP_VERSION,
@@ -671,15 +670,31 @@ class ServersPage(BasePage):
         )
 
         self._tokens = get_theme_tokens()
-        self._server_status_map: dict[str, dict] = {}
-        self._server_row_map: dict[str, int] = {}
+        self._server_table_state = ServerStatusTableState()
         self._update_controller = UpdatePageController(self)
-        self._view_controller = UpdatePageViewController()
+        self._runtime_initialized = False
 
-        self.enable_deferred_ui_build()
+        self._build_ui()
+        self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)
+
+    def _run_runtime_init_once(self) -> None:
+        plan = self._update_controller.build_page_init_plan(
+            runtime_initialized=self._runtime_initialized,
+        )
+        if not plan.should_apply_idle_view_state:
+            return
+        self._runtime_initialized = True
+        QTimer.singleShot(
+            0,
+            lambda action=plan.view_action, elapsed=plan.elapsed_seconds: self._update_controller.apply_idle_view_state(
+                view_action=action,
+                elapsed_seconds=elapsed,
+            ),
+        )
 
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
@@ -697,7 +712,7 @@ class ServersPage(BasePage):
                 pass
 
     def _render_server_row(self, row: int, server_name: str, status: dict) -> None:
-        plan = self._view_controller.build_server_row_plan(
+        plan = UpdatePageViewController.build_server_row_plan(
             row_server_name=server_name,
             status=status,
             channel=CHANNEL,
@@ -715,13 +730,10 @@ class ServersPage(BasePage):
         self.servers_table.setItem(row, 3, QTableWidgetItem(plan.extra_text))
 
     def _refresh_server_rows(self) -> None:
-        for server_name, row in self._server_row_map.items():
-            if row < 0 or row >= self.servers_table.rowCount():
+        for entry in self._server_table_state.iter_entries():
+            if entry.row < 0 or entry.row >= self.servers_table.rowCount():
                 continue
-            status = self._server_status_map.get(server_name)
-            if not status:
-                continue
-            self._render_server_row(row, server_name, status)
+            self._render_server_row(entry.row, entry.server_name, entry.status)
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -982,27 +994,22 @@ class ServersPage(BasePage):
 
         self._apply_page_theme(force=True)
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        self._update_controller.on_page_shown()
-
     def get_ui_language(self) -> str:
         return self._ui_language
 
     def reset_server_rows(self) -> None:
         self.servers_table.setRowCount(0)
-        self._server_row_map.clear()
-        self._server_status_map.clear()
+        self._server_table_state.reset()
 
     def upsert_server_status(self, server_name: str, status: dict) -> None:
-        row = self._server_row_map.get(server_name)
-        if row is None:
-            row = self.servers_table.rowCount()
-            self.servers_table.insertRow(row)
-            self._server_row_map[server_name] = row
-
-        self._server_status_map[server_name] = dict(status or {})
-        self._render_server_row(row, server_name, self._server_status_map[server_name])
+        result = self._server_table_state.upsert(
+            server_name,
+            status,
+            next_row=self.servers_table.rowCount(),
+        )
+        if result.created:
+            self.servers_table.insertRow(result.row)
+        self._render_server_row(result.row, server_name, result.status)
 
     def start_checking(self) -> None:
         self.update_card.start_checking()
@@ -1075,7 +1082,7 @@ class ServersPage(BasePage):
         self._update_controller.dismiss_update()
 
     def _open_telegram_channel(self):
-        result = self._view_controller.open_update_channel(CHANNEL)
+        result = UpdatePageViewController.open_update_channel(CHANNEL)
         if not result.ok:
             try:
                 from qfluentwidgets import InfoBar

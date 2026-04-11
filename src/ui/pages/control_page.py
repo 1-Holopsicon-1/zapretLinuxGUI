@@ -83,15 +83,20 @@ class ControlPage(BasePage):
             title_key="page.control.title",
             subtitle_key="page.control.subtitle",
         )
-        self._controller = ControlPageController()
-        self._program_settings_synced = False
+        self._program_settings_runtime_attached = False
+        self._runtime_initialized = False
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._last_known_dpi_running = False
 
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
+        self._build_ui()
+        self._run_runtime_init_once()
 
-    def _after_ui_built(self) -> None:
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
+            return
+        self._runtime_initialized = True
+        self._attach_program_settings_runtime()
         self._update_stop_winws_button_text()
 
     def _start_dpi(self) -> None:
@@ -400,14 +405,6 @@ class ControlPage(BasePage):
         self.extra_actions_group.add_buttons([self.test_btn, self.folder_btn])
         self.add_widget(self.extra_actions_group)
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        # Обновляем состояние тогглов при каждом показе страницы
-        try:
-            self._sync_program_settings()
-        except Exception:
-            pass
-
     def _set_toggle_checked(self, toggle, checked: bool) -> None:
         """Устанавливает состояние toggle-карточки или переключателя без лишних сигналов."""
         try:
@@ -458,12 +455,34 @@ class ControlPage(BasePage):
                 pass
         self._on_reset_program_clicked()
 
+    def _attach_program_settings_runtime(self) -> None:
+        if self._program_settings_runtime_attached:
+            return
+        self._program_settings_runtime_attached = True
+        self._get_program_settings_runtime_service().subscribe(
+            self._apply_program_settings_snapshot,
+            emit_initial=True,
+        )
+
+    def _apply_program_settings_snapshot(self, snapshot) -> None:
+        """Применяет shared snapshot программных настроек к toggle-элементам."""
+        self._set_toggle_checked(self.auto_dpi_toggle, getattr(snapshot, "auto_dpi_enabled", False))
+        self._set_toggle_checked(self.defender_toggle, getattr(snapshot, "defender_disabled", False))
+        self._set_toggle_checked(self.max_block_toggle, getattr(snapshot, "max_blocked", False))
+
     def _sync_program_settings(self) -> None:
-        """Синхронизирует UI с текущими настройками (реестр/система)."""
-        plan = self._controller.load_program_settings()
-        self._set_toggle_checked(self.auto_dpi_toggle, plan.auto_dpi_enabled)
-        self._set_toggle_checked(self.defender_toggle, plan.defender_disabled)
-        self._set_toggle_checked(self.max_block_toggle, plan.max_blocked)
+        """Явно перечитывает shared snapshot программных настроек."""
+        snapshot = self._get_program_settings_runtime_service().refresh()
+        self._apply_program_settings_snapshot(snapshot)
+
+    def _get_program_settings_runtime_service(self):
+        app_context = getattr(self.window(), "app_context", None)
+        service = getattr(app_context, "program_settings_runtime_service", None)
+        if service is None:
+            from core.services import get_program_settings_runtime_service
+
+            service = get_program_settings_runtime_service()
+        return service
 
     def _set_status(self, msg: str) -> None:
         try:
@@ -496,14 +515,14 @@ class ControlPage(BasePage):
 
     def _on_auto_dpi_toggled(self, enabled: bool) -> None:
         try:
-            plan = self._controller.save_auto_dpi(enabled)
+            plan = ControlPageController.save_auto_dpi(enabled)
             self._set_status(plan.message)
             InfoBar.success(title=plan.title, content=plan.message, parent=self.window())
         finally:
             self._sync_program_settings()
 
     def _on_defender_toggled(self, disable: bool) -> None:
-        start_plan = self._controller.build_defender_toggle_start_plan(
+        start_plan = ControlPageController.build_defender_toggle_start_plan(
             disable=disable,
             language=self._ui_language,
         )
@@ -525,7 +544,7 @@ class ControlPage(BasePage):
             if start_plan.start_status:
                 self._set_status(start_plan.start_status)
 
-            result_plan = self._controller.run_defender_toggle(
+            result_plan = ControlPageController.run_defender_toggle(
                 disable=disable,
                 status_callback=self._set_status,
             )
@@ -534,7 +553,7 @@ class ControlPage(BasePage):
             self._sync_program_settings()
 
     def _on_max_blocker_toggled(self, enable: bool) -> None:
-        start_plan = self._controller.build_max_block_toggle_start_plan(
+        start_plan = ControlPageController.build_max_block_toggle_start_plan(
             enable=enable,
             language=self._ui_language,
         )
@@ -546,7 +565,7 @@ class ControlPage(BasePage):
             if start_plan.start_status:
                 self._set_status(start_plan.start_status)
 
-            result_plan = self._controller.run_max_block_toggle(
+            result_plan = ControlPageController.run_max_block_toggle(
                 enable=enable,
                 status_callback=self._set_status,
             )
@@ -556,7 +575,7 @@ class ControlPage(BasePage):
 
     def _on_reset_program_clicked(self) -> None:
         try:
-            ok, message = self._controller.reset_startup_cache()
+            ok, message = ControlPageController.reset_startup_cache()
             if ok:
                 self._set_status(message)
             else:
@@ -566,7 +585,7 @@ class ControlPage(BasePage):
 
     def _update_stop_winws_button_text(self):
         """Обновляет подпись кнопки остановки (winws.exe vs winws2.exe) по текущему режиму."""
-        plan = self._controller.build_stop_button_plan(language=self._ui_language)
+        plan = ControlPageController.build_stop_button_plan(language=self._ui_language)
         self.stop_winws_btn.setText(plan.text)
         
     def set_loading(self, loading: bool, text: str = ""):
@@ -619,14 +638,14 @@ class ControlPage(BasePage):
         if store is not None:
             try:
                 snapshot = store.snapshot()
-                plan = self._controller.resolve_runtime_state(
+                plan = ControlPageController.resolve_runtime_state(
                     snapshot_state=snapshot,
                     last_known_dpi_running=self._last_known_dpi_running,
                 )
                 return plan.phase, plan.last_error
             except Exception:
                 pass
-        plan = self._controller.resolve_runtime_state(
+        plan = ControlPageController.resolve_runtime_state(
             snapshot_state=None,
             last_known_dpi_running=self._last_known_dpi_running,
         )
@@ -702,7 +721,7 @@ class ControlPage(BasePage):
         
     def update_status(self, state: str | bool, last_error: str = ""):
         """Обновляет отображение статуса"""
-        plan = self._controller.build_status_plan(
+        plan = ControlPageController.build_status_plan(
             state=state,
             last_error=last_error,
             language=self._ui_language,
@@ -723,7 +742,7 @@ class ControlPage(BasePage):
     def update_strategy(self, name: str):
         """Обновляет отображение текущей стратегии"""
         self._update_stop_winws_button_text()
-        plan = self._controller.build_strategy_display_plan(
+        plan = ControlPageController.build_strategy_display_plan(
             name=name,
             language=self._ui_language,
             window=self.window() or self,

@@ -48,46 +48,15 @@ class DirectPresetSummaryLoadWorker(QThread):
 
 
 def load_direct_zapret2_preset_summary_payload() -> dict:
-    payload: dict = {
-        "active_preset_name": "",
-        "active_lists": [],
-    }
     try:
-        from core.services import get_direct_flow_coordinator
-        from core.presets.direct_facade import DirectPresetFacade
+        from core.services import get_direct_ui_snapshot_service
 
-        preset = get_direct_flow_coordinator().get_selected_source_manifest("direct_zapret2")
-        payload["active_preset_name"] = str(getattr(preset, "name", "") or "").strip()
-
-        source_text = DirectPresetFacade.from_launch_method("direct_zapret2").read_selected_source_text()
-        active_lists: list[str] = []
-        seen_lists: set[str] = set()
-
-        for raw in str(source_text or "").splitlines():
-            stripped = raw.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            for value in _HOSTLIST_DISPLAY_RE.findall(stripped):
-                list_path = value.strip().strip('"').strip("'")
-                if not list_path:
-                    continue
-
-                normalized = list_path.replace("\\", "/")
-                list_name = normalized.rsplit("/", 1)[-1]
-                if not list_name:
-                    continue
-
-                dedupe_key = list_name.lower()
-                if dedupe_key in seen_lists:
-                    continue
-                seen_lists.add(dedupe_key)
-                active_lists.append(list_name)
-
-        payload["active_lists"] = active_lists
+        return get_direct_ui_snapshot_service().load_preset_summary_payload("direct_zapret2")
     except Exception:
-        pass
-
-    return payload
+        return {
+            "active_preset_name": "",
+            "active_lists": [],
+        }
 
 
 _HOSTLIST_DISPLAY_RE = re.compile(r"--(?:hostlist|hostlist-exclude)=([^\s]+)")
@@ -121,55 +90,13 @@ class DirectModeChangePlan:
         self.refresh_mode_label_after = bool(refresh_mode_label_after)
 
 
-class DirectOptimisticStartupPlan:
-    def __init__(self, *, should_mark_running: bool, preset_name_text: str, preset_name_tooltip: str):
-        self.should_mark_running = bool(should_mark_running)
-        self.preset_name_text = preset_name_text
-        self.preset_name_tooltip = preset_name_tooltip
-
-
-class DirectDeferredShowPlan:
-    def __init__(self, *, should_continue: bool, schedule_advanced: bool, schedule_summary: bool, refresh_mode_label: bool):
-        self.should_continue = bool(should_continue)
-        self.schedule_advanced = bool(schedule_advanced)
-        self.schedule_summary = bool(schedule_summary)
-        self.refresh_mode_label = bool(refresh_mode_label)
-
-
-class DirectUiStateChangePlan:
-    def __init__(
-        self,
-        *,
-        refresh_mode_label: bool,
-        mark_advanced_dirty: bool,
-        mark_preset_summary_dirty: bool,
-        reload_advanced_now: bool,
-        reload_summary_now: bool,
-        update_status_state: str | bool,
-        update_status_error: str,
-        strategy_summary: str,
-        loading: bool,
-        loading_text: str,
-    ):
-        self.refresh_mode_label = bool(refresh_mode_label)
-        self.mark_advanced_dirty = bool(mark_advanced_dirty)
-        self.mark_preset_summary_dirty = bool(mark_preset_summary_dirty)
-        self.reload_advanced_now = bool(reload_advanced_now)
-        self.reload_summary_now = bool(reload_summary_now)
-        self.update_status_state = update_status_state
-        self.update_status_error = update_status_error
-        self.strategy_summary = strategy_summary
-        self.loading = bool(loading)
-        self.loading_text = loading_text
-
-
 class Zapret2DirectControlPageController(ControlPageController):
     @staticmethod
     def load_advanced_settings_state() -> dict:
         try:
-            from core.presets.direct_facade import DirectPresetFacade
+            from core.services import get_direct_ui_snapshot_service
 
-            return DirectPresetFacade.from_launch_method("direct_zapret2").get_advanced_settings_state() or {}
+            return get_direct_ui_snapshot_service().load_advanced_settings_state("direct_zapret2")
         except Exception:
             return {}
 
@@ -184,72 +111,6 @@ class Zapret2DirectControlPageController(ControlPageController):
     @staticmethod
     def create_preset_summary_worker(request_id: int, parent=None) -> DirectPresetSummaryLoadWorker:
         return DirectPresetSummaryLoadWorker(request_id, parent)
-
-    @staticmethod
-    def build_optimistic_startup_plan() -> DirectOptimisticStartupPlan:
-        try:
-            from strategy_menu import get_strategy_launch_method
-
-            method = str(get_strategy_launch_method() or "").strip().lower()
-        except Exception:
-            method = ""
-
-        try:
-            from core.services import get_selection_service
-
-            file_name = str(get_selection_service().get_selected_file_name("winws2") or "").strip()
-        except Exception:
-            file_name = ""
-
-        if file_name:
-            display_name = os.path.splitext(os.path.basename(file_name))[0].strip() or file_name
-            return DirectOptimisticStartupPlan(
-                should_mark_running=(method == "direct_zapret2"),
-                preset_name_text=display_name,
-                preset_name_tooltip=display_name,
-            )
-
-        return DirectOptimisticStartupPlan(
-            should_mark_running=(method == "direct_zapret2"),
-            preset_name_text="",
-            preset_name_tooltip="",
-        )
-
-    @staticmethod
-    def build_deferred_show_plan(*, page_visible: bool) -> DirectDeferredShowPlan:
-        return DirectDeferredShowPlan(
-            should_continue=bool(page_visible),
-            schedule_advanced=bool(page_visible),
-            schedule_summary=bool(page_visible),
-            refresh_mode_label=bool(page_visible),
-        )
-
-    @staticmethod
-    def build_ui_state_change_plan(*, state, changed_fields: frozenset[str], page_visible: bool) -> DirectUiStateChangePlan:
-        changed = set(changed_fields or ())
-        refresh_mode_label = "mode_revision" in changed
-        presets_changed = "active_preset_revision" in changed
-
-        return DirectUiStateChangePlan(
-            refresh_mode_label=refresh_mode_label,
-            mark_advanced_dirty=presets_changed,
-            mark_preset_summary_dirty=presets_changed,
-            reload_advanced_now=bool(presets_changed and page_visible),
-            reload_summary_now=bool(presets_changed and page_visible),
-            update_status_state=state.dpi_phase or ("running" if state.dpi_running else "stopped"),
-            update_status_error=state.dpi_last_error,
-            strategy_summary=state.current_strategy_summary or "",
-            loading=bool(state.dpi_busy),
-            loading_text=str(state.dpi_busy_text or ""),
-        )
-
-    @staticmethod
-    def build_strategy_update_plan(*, name: str) -> dict:
-        return {
-            "refresh_stop_button": True,
-            "schedule_preset_summary_reload": True,
-            "strategy_name": str(name or ""),
-        }
 
     @staticmethod
     def build_advanced_settings_apply_plan(state: dict | None) -> DirectAdvancedSettingsApplyPlan:
@@ -307,8 +168,9 @@ class Zapret2DirectControlPageController(ControlPageController):
             pass
         return "advanced"
 
-    def build_direct_mode_label_plan(self, *, language: str) -> DirectModeLabelPlan:
-        mode = self.get_direct_launch_mode_setting()
+    @staticmethod
+    def build_direct_mode_label_plan(*, language: str) -> DirectModeLabelPlan:
+        mode = Zapret2DirectControlPageController.get_direct_launch_mode_setting()
         key = "page.z2_control.mode.basic" if mode == "basic" else "page.z2_control.mode.advanced"
         default = "Basic" if mode == "basic" else "Advanced"
         return DirectModeLabelPlan(
@@ -427,7 +289,8 @@ class Zapret2DirectControlPageController(ControlPageController):
                 )
             )
 
-    def build_status_plan(self, *, state: str | bool, last_error: str, language: str) -> ControlStatusPlan:
+    @staticmethod
+    def build_status_plan(*, state: str | bool, last_error: str, language: str) -> ControlStatusPlan:
         from ui.text_catalog import tr as tr_catalog
 
         phase = str(state or "").strip().lower()
@@ -482,7 +345,7 @@ class Zapret2DirectControlPageController(ControlPageController):
             return ControlStatusPlan(
                 phase=phase,
                 title="Ошибка запуска Zapret",
-                description=self.short_dpi_error(last_error) or "Процесс не подтвердился или завершился сразу",
+                description=ControlPageController.short_dpi_error(last_error) or "Процесс не подтвердился или завершился сразу",
                 dot_color="#ff6b6b",
                 pulsing=False,
                 show_start=True,
@@ -500,10 +363,11 @@ class Zapret2DirectControlPageController(ControlPageController):
             show_stop_and_exit=False,
         )
 
-    def build_defender_toggle_start_plan(self, *, disable: bool, language: str) -> ControlToggleActionStartPlan:
+    @staticmethod
+    def build_defender_toggle_start_plan(*, disable: bool, language: str) -> ControlToggleActionStartPlan:
         from ui.text_catalog import tr as tr_catalog
 
-        if not self.is_user_admin():
+        if not ControlPageController.is_user_admin():
             return ControlToggleActionStartPlan(
                 blocked=True,
                 blocked_title="Требуются права администратора",
@@ -580,7 +444,8 @@ class Zapret2DirectControlPageController(ControlPageController):
     def run_defender_toggle(*, disable: bool, status_callback=None) -> ControlActionResultPlan:
         return ControlPageController.run_defender_toggle(disable=disable, status_callback=status_callback)
 
-    def build_max_block_toggle_start_plan(self, *, enable: bool, language: str) -> ControlToggleActionStartPlan:
+    @staticmethod
+    def build_max_block_toggle_start_plan(*, enable: bool, language: str) -> ControlToggleActionStartPlan:
         from ui.text_catalog import tr as tr_catalog
 
         if enable:

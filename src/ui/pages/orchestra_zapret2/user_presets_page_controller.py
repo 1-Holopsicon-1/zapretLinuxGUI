@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from functools import lru_cache
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
 from log import log
+from ui.pages.direct_user_presets_page_controller import DirectUserPresetsPageApiBundle
 
 
 @dataclass(slots=True)
@@ -65,13 +67,151 @@ class UserPresetActivationResult:
     activated_file_name: str | None
 
 
+@lru_cache(maxsize=1)
+def _get_shared_orchestra_manager():
+    from preset_orchestra_zapret2 import PresetManager
+
+    return PresetManager()
+
+
+class _OrchestraUserPresetsListingApiImpl:
+    def __init__(self, controller: "OrchestraZapret2UserPresetsPageController") -> None:
+        self._controller = controller
+
+    def list_preset_entries_light(self) -> list[dict[str, object]]:
+        return self._controller.list_preset_entries_light()
+
+    def get_active_preset_name_light(self) -> str:
+        return self._controller.get_active_preset_name_light()
+
+    def get_selected_source_preset_file_name_light(self) -> str:
+        return self._controller.get_selected_source_preset_file_name_light()
+
+    def get_presets_dir_light(self):
+        return self._controller.get_presets_dir_light()
+
+    def load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
+        return self._controller.load_preset_list_metadata_light()
+
+    def read_single_preset_list_metadata_light(self, file_name_or_name: str) -> tuple[str, dict[str, object]] | None:
+        return self._controller.read_single_preset_list_metadata_light(file_name_or_name)
+
+    def resolve_display_name(self, reference: str) -> str:
+        return self._controller.resolve_display_name(reference)
+
+    def build_preset_rows_plan(
+        self,
+        *,
+        all_presets: dict[str, dict[str, object]],
+        query: str,
+        active_file_name: str,
+        language: str,
+    ) -> UserPresetListPlan:
+        return self._controller.build_preset_rows_plan(
+            all_presets=all_presets,
+            query=query,
+            active_file_name=active_file_name,
+            language=language,
+        )
+
+
+class _OrchestraUserPresetsActionsApiImpl:
+    def __init__(self, controller: "OrchestraZapret2UserPresetsPageController") -> None:
+        self._controller = controller
+
+    def create_preset(self, *, name: str, from_current: bool) -> UserPresetActionResult:
+        return self._controller.create_preset(name=name, from_current=from_current)
+
+    def rename_preset(self, *, current_name: str, new_name: str) -> UserPresetActionResult:
+        return self._controller.rename_preset(current_name=current_name, new_name=new_name)
+
+    def import_preset_from_file(self, *, file_path: str) -> UserPresetImportResult:
+        return self._controller.import_preset_from_file(file_path=file_path)
+
+    def reset_all_presets(self) -> UserPresetResetAllResult:
+        return self._controller.reset_all_presets()
+
+    def activate_preset(self, *, file_name: str, display_name: str) -> UserPresetActivationResult:
+        return self._controller.activate_preset(file_name=file_name, display_name=display_name)
+
+    def duplicate_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
+        return self._controller.duplicate_preset(file_name=file_name, display_name=display_name)
+
+    def reset_preset_to_template(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
+        return self._controller.reset_preset_to_template(file_name=file_name, display_name=display_name)
+
+    def delete_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
+        return self._controller.delete_preset(file_name=file_name, display_name=display_name)
+
+    def export_preset(self, *, file_name: str, file_path: str, display_name: str) -> UserPresetActionResult:
+        return self._controller.export_preset(file_name=file_name, file_path=file_path, display_name=display_name)
+
+    def restore_deleted_presets(self) -> UserPresetActionResult:
+        return self._controller.restore_deleted_presets()
+
+    def open_presets_info(self) -> UserPresetActionResult:
+        return self._controller.open_presets_info()
+
+    def open_new_configs_post(self) -> UserPresetActionResult:
+        return self._controller.open_new_configs_post()
+
+
+class _OrchestraUserPresetsStorageApiImpl:
+    def __init__(self, controller: "OrchestraZapret2UserPresetsPageController") -> None:
+        self._controller = controller
+
+    def get_preset_store(self):
+        return self._controller.get_preset_store()
+
+    def get_hierarchy_store(self):
+        return self._controller.get_hierarchy_store()
+
+    def has_deleted_presets(self) -> bool:
+        return self._controller.has_deleted_presets()
+
+    def is_builtin_preset_file(self, name: str) -> bool:
+        return self._controller.is_builtin_preset_file(name)
+
+    def is_builtin_preset_file_with_cache(self, name: str, cached_metadata: dict[str, dict[str, object]] | None) -> bool:
+        return self._controller.is_builtin_preset_file_with_cache(name, cached_metadata)
+
+    def toggle_preset_pin(self, name: str, display_name: str) -> bool:
+        return self._controller.toggle_preset_pin(name, display_name)
+
+    def move_preset_by_step(self, name: str, direction: int, *, cached_metadata: dict[str, dict[str, object]] | None = None) -> bool:
+        return self._controller.move_preset_by_step(name, direction, cached_metadata=cached_metadata)
+
+    def move_preset_on_drop(
+        self,
+        *,
+        source_kind: str,
+        source_id: str,
+        target_kind: str,
+        target_id: str,
+        cached_metadata: dict[str, dict[str, object]] | None = None,
+    ) -> bool:
+        return self._controller.move_preset_on_drop(
+            source_kind=source_kind,
+            source_id=source_id,
+            target_kind=target_kind,
+            target_id=target_id,
+            cached_metadata=cached_metadata,
+        )
+
+
 class OrchestraZapret2UserPresetsPageController:
     LAUNCH_METHOD = "direct_zapret2_orchestra"
     HIERARCHY_SCOPE = "preset_orchestra_zapret2"
 
     def __init__(self) -> None:
-        self._manager = None
-        self._manager_backend = ""
+        self._page_api = DirectUserPresetsPageApiBundle(
+            listing=_OrchestraUserPresetsListingApiImpl(self),
+            actions=_OrchestraUserPresetsActionsApiImpl(self),
+            storage=_OrchestraUserPresetsStorageApiImpl(self),
+        )
+
+    def build_page_api(self) -> DirectUserPresetsPageApiBundle:
+        return self._page_api
 
     @staticmethod
     def _get_direct_facade():
@@ -83,18 +223,14 @@ class OrchestraZapret2UserPresetsPageController:
 
         return get_preset_store()
 
-    def get_orchestra_manager(self):
-        backend = "preset_orchestra_zapret2"
-        if self._manager is None or self._manager_backend != backend:
-            from preset_orchestra_zapret2 import PresetManager
+    @staticmethod
+    def get_orchestra_manager():
+        return _get_shared_orchestra_manager()
 
-            self._manager = PresetManager()
-            self._manager_backend = backend
-        return self._manager
-
-    def list_preset_entries_light(self) -> list[dict[str, object]]:
+    @classmethod
+    def list_preset_entries_light(cls) -> list[dict[str, object]]:
         try:
-            manager = self.get_orchestra_manager()
+            manager = cls.get_orchestra_manager()
             return [
                 {
                     "file_name": f"{name}.txt",
@@ -145,10 +281,11 @@ class OrchestraZapret2UserPresetsPageController:
     def is_builtin_preset_file_with_cache(_name: str, _cached_metadata: dict[str, dict[str, object]] | None) -> bool:
         return False
 
-    def get_hierarchy_store(self):
+    @classmethod
+    def get_hierarchy_store(cls):
         from core.presets.library_hierarchy import PresetHierarchyStore
 
-        return PresetHierarchyStore(self.HIERARCHY_SCOPE)
+        return PresetHierarchyStore(cls.HIERARCHY_SCOPE)
 
     @staticmethod
     def has_deleted_presets() -> bool:
@@ -159,13 +296,14 @@ class OrchestraZapret2UserPresetsPageController:
         except Exception:
             return False
 
-    def load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
+    @classmethod
+    def load_preset_list_metadata_light(cls) -> dict[str, dict[str, object]]:
         from core.presets.list_metadata import read_preset_list_metadata
 
         metadata: dict[str, dict[str, object]] = {}
-        presets_dir = self.get_presets_dir_light()
+        presets_dir = cls.get_presets_dir_light()
 
-        for entry in self.list_preset_entries_light():
+        for entry in cls.list_preset_entries_light():
             file_name = str(entry.get("file_name") or "").strip()
             display_name = str(entry.get("display_name") or file_name).strip()
             kind = str(entry.get("kind") or "").strip() or "user"
@@ -192,7 +330,8 @@ class OrchestraZapret2UserPresetsPageController:
 
         return metadata
 
-    def read_single_preset_list_metadata_light(self, file_name_or_name: str) -> tuple[str, dict[str, object]] | None:
+    @classmethod
+    def read_single_preset_list_metadata_light(cls, file_name_or_name: str) -> tuple[str, dict[str, object]] | None:
         from core.presets.list_metadata import read_preset_list_metadata
 
         candidate = str(file_name_or_name or "").strip()
@@ -201,7 +340,7 @@ class OrchestraZapret2UserPresetsPageController:
 
         candidate_file_name = candidate if candidate.lower().endswith(".txt") else f"{candidate}.txt"
         matched_entry = None
-        for entry in self.list_preset_entries_light():
+        for entry in cls.list_preset_entries_light():
             entry_file_name = str(entry.get("file_name") or "").strip()
             entry_display_name = str(entry.get("display_name") or entry_file_name).strip()
             if entry_file_name == candidate_file_name or entry_display_name == candidate:
@@ -215,7 +354,7 @@ class OrchestraZapret2UserPresetsPageController:
         display_name = str(matched_entry.get("display_name") or candidate_file_name).strip()
         kind = str(matched_entry.get("kind") or "").strip() or "user"
         is_builtin = bool(matched_entry.get("is_builtin", False))
-        path = self.get_presets_dir_light() / candidate_file_name
+        path = cls.get_presets_dir_light() / candidate_file_name
 
         try:
             metadata = {
@@ -236,17 +375,20 @@ class OrchestraZapret2UserPresetsPageController:
 
         return candidate_file_name, metadata
 
-    def toggle_preset_pin(self, name: str, display_name: str) -> bool:
-        hierarchy = self.get_hierarchy_store()
+    @classmethod
+    def toggle_preset_pin(cls, name: str, display_name: str) -> bool:
+        hierarchy = cls.get_hierarchy_store()
         return bool(hierarchy.toggle_preset_pin(name, display_name=display_name))
 
-    def move_preset_by_step(self, name: str, direction: int, *, cached_metadata: dict[str, dict[str, object]] | None = None) -> bool:
+    @classmethod
+    def move_preset_by_step(cls, name: str, direction: int, *, cached_metadata: dict[str, dict[str, object]] | None = None) -> bool:
         _ = cached_metadata
-        hierarchy = self.get_hierarchy_store()
-        return bool(hierarchy.move_preset_by_step_flat(self.list_preset_entries_light(), name, direction, is_builtin_resolver=lambda _file_name: False))
+        hierarchy = cls.get_hierarchy_store()
+        return bool(hierarchy.move_preset_by_step_flat(cls.list_preset_entries_light(), name, direction, is_builtin_resolver=lambda _file_name: False))
 
+    @classmethod
     def move_preset_on_drop(
-        self,
+        cls,
         *,
         source_kind: str,
         source_id: str,
@@ -258,27 +400,28 @@ class OrchestraZapret2UserPresetsPageController:
         if source_kind != "preset":
             return False
 
-        hierarchy = self.get_hierarchy_store()
-        all_names = self.list_preset_entries_light()
+        hierarchy = cls.get_hierarchy_store()
+        all_names = cls.list_preset_entries_light()
 
         if target_kind == "preset" and target_id:
             return bool(hierarchy.move_preset_before_flat(all_names, source_id, target_id, is_builtin_resolver=lambda _file_name: False))
 
         return bool(hierarchy.move_preset_to_end_flat(all_names, source_id, is_builtin_resolver=lambda _file_name: False))
 
+    @classmethod
     def build_preset_rows_plan(
-        self,
+        cls,
         *,
         all_presets: dict[str, dict[str, object]],
         query: str,
         active_file_name: str,
         language: str,
     ) -> UserPresetListPlan:
-        from ui.pages.user_presets_runtime_controller import normalize_preset_icon_color
+        from core.runtime.user_presets_runtime_service import normalize_preset_icon_color
         from ui.text_catalog import tr as tr_catalog
 
         normalized_query = str(query or "").strip().lower()
-        hierarchy = self.get_hierarchy_store()
+        hierarchy = cls.get_hierarchy_store()
         builtin_by_file = {
             file_name: bool(meta.get("is_builtin", False))
             for file_name, meta in all_presets.items()
@@ -357,8 +500,9 @@ class OrchestraZapret2UserPresetsPageController:
             query=normalized_query,
         )
 
-    def create_preset(self, *, name: str, from_current: bool) -> UserPresetActionResult:
-        manager = self.get_orchestra_manager()
+    @classmethod
+    def create_preset(cls, *, name: str, from_current: bool) -> UserPresetActionResult:
+        manager = cls.get_orchestra_manager()
         preset = manager.create_preset(name, from_current=from_current)
         if not preset:
             raise RuntimeError("Не удалось создать пресет.")
@@ -372,12 +516,13 @@ class OrchestraZapret2UserPresetsPageController:
             structure_changed=True,
         )
 
-    def rename_preset(self, *, current_name: str, new_name: str) -> UserPresetActionResult:
-        display_name = self.resolve_display_name(current_name)
-        manager = self.get_orchestra_manager()
+    @classmethod
+    def rename_preset(cls, *, current_name: str, new_name: str) -> UserPresetActionResult:
+        display_name = cls.resolve_display_name(current_name)
+        manager = cls.get_orchestra_manager()
         if not manager.rename_preset_by_file_name(current_name, new_name):
             raise RuntimeError("Не удалось переименовать пресет.")
-        self.get_hierarchy_store().rename_preset_meta(
+        cls.get_hierarchy_store().rename_preset_meta(
             current_name,
             new_name,
             old_display_name=display_name,
@@ -393,13 +538,14 @@ class OrchestraZapret2UserPresetsPageController:
             structure_changed=True,
         )
 
-    def import_preset_from_file(self, *, file_path: str) -> UserPresetImportResult:
+    @classmethod
+    def import_preset_from_file(cls, *, file_path: str) -> UserPresetImportResult:
         requested_name = str(Path(file_path).stem or "").strip() or "Imported"
-        manager = self.get_orchestra_manager()
+        manager = cls.get_orchestra_manager()
         if not manager.import_preset(Path(file_path), requested_name):
             raise RuntimeError("Не удалось импортировать пресет")
         try:
-            self.get_hierarchy_store().delete_preset_meta(requested_name, display_name=requested_name)
+            cls.get_hierarchy_store().delete_preset_meta(requested_name, display_name=requested_name)
         except Exception:
             pass
         actual_file_name = f"{requested_name}.txt"
@@ -420,8 +566,9 @@ class OrchestraZapret2UserPresetsPageController:
             structure_changed=True,
         )
 
-    def reset_all_presets(self) -> UserPresetResetAllResult:
-        manager = self.get_orchestra_manager()
+    @classmethod
+    def reset_all_presets(cls) -> UserPresetResetAllResult:
+        manager = cls.get_orchestra_manager()
         success_count, total_count, failed = manager.reset_all_presets_to_default_templates()
         failed_count = len(failed or [])
         if failed_count:
@@ -444,11 +591,12 @@ class OrchestraZapret2UserPresetsPageController:
             switched_file_name=None,
         )
 
-    def activate_preset(self, *, file_name: str, display_name: str) -> UserPresetActivationResult:
+    @classmethod
+    def activate_preset(cls, *, file_name: str, display_name: str) -> UserPresetActivationResult:
         target_file_name = str(file_name or "").strip()
         target_display_name = str(display_name or target_file_name).strip() or target_file_name
         try:
-            manager = self.get_orchestra_manager()
+            manager = cls.get_orchestra_manager()
             activated = bool(manager.switch_preset_by_file_name(target_file_name, reload_dpi=False))
             if activated:
                 return UserPresetActivationResult(
@@ -480,13 +628,14 @@ class OrchestraZapret2UserPresetsPageController:
                 activated_file_name=None,
             )
 
-    def duplicate_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
+    @classmethod
+    def duplicate_preset(cls, *, file_name: str, display_name: str) -> UserPresetActionResult:
         new_name = f"{display_name} (копия)"
-        manager = self.get_orchestra_manager()
+        manager = cls.get_orchestra_manager()
         if not manager.duplicate_preset_by_file_name(file_name, new_name):
             raise RuntimeError("Не удалось дублировать пресет")
         try:
-            self.get_hierarchy_store().copy_preset_meta_to_new(
+            cls.get_hierarchy_store().copy_preset_meta_to_new(
                 file_name,
                 new_name,
                 source_display_name=display_name,
@@ -504,8 +653,9 @@ class OrchestraZapret2UserPresetsPageController:
             structure_changed=True,
         )
 
-    def reset_preset_to_template(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
-        manager = self.get_orchestra_manager()
+    @classmethod
+    def reset_preset_to_template(cls, *, file_name: str, display_name: str) -> UserPresetActionResult:
+        manager = cls.get_orchestra_manager()
         if not manager.reset_preset_to_default_template_by_file_name(file_name):
             raise RuntimeError("Не удалось сбросить пресет к настройкам шаблона")
         return UserPresetActionResult(
@@ -518,13 +668,14 @@ class OrchestraZapret2UserPresetsPageController:
             structure_changed=False,
         )
 
-    def delete_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
-        manager = self.get_orchestra_manager()
+    @classmethod
+    def delete_preset(cls, *, file_name: str, display_name: str) -> UserPresetActionResult:
+        manager = cls.get_orchestra_manager()
         deleted = manager.delete_preset_by_file_name(file_name)
         if not deleted:
             raise RuntimeError("Не удалось удалить пресет")
         try:
-            self.get_hierarchy_store().delete_preset_meta(file_name, display_name=display_name)
+            cls.get_hierarchy_store().delete_preset_meta(file_name, display_name=display_name)
         except Exception:
             pass
         return UserPresetActionResult(
@@ -537,8 +688,9 @@ class OrchestraZapret2UserPresetsPageController:
             structure_changed=True,
         )
 
-    def export_preset(self, *, file_name: str, file_path: str, display_name: str) -> UserPresetActionResult:
-        manager = self.get_orchestra_manager()
+    @classmethod
+    def export_preset(cls, *, file_name: str, file_path: str, display_name: str) -> UserPresetActionResult:
+        manager = cls.get_orchestra_manager()
         if not manager.export_preset_by_file_name(file_name, Path(file_path)):
             raise RuntimeError("Не удалось экспортировать пресет")
         return UserPresetActionResult(
@@ -551,7 +703,8 @@ class OrchestraZapret2UserPresetsPageController:
             structure_changed=False,
         )
 
-    def restore_deleted_presets(self) -> UserPresetActionResult:
+    @staticmethod
+    def restore_deleted_presets() -> UserPresetActionResult:
         from preset_orchestra_zapret2.preset_defaults import clear_all_deleted_presets, ensure_templates_copied_to_presets
 
         clear_all_deleted_presets()

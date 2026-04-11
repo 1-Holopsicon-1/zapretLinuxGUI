@@ -120,8 +120,6 @@ class PremiumPage(BasePage):
             title_key="page.premium.title",
             subtitle_key="page.premium.subtitle",
         )
-
-        self._controller = PremiumPageController()
         self.checker = None
         self.RegistryManager = None
         self.current_thread = None
@@ -153,9 +151,9 @@ class PremiumPage(BasePage):
         self._pairing_status_timer.setInterval(self._PAIRING_AUTOPOLL_INTERVAL_MS)
         self._pairing_status_timer.timeout.connect(self._poll_pairing_status)
         self._actions_bar = None
+        self._runtime_initialized = False
 
-        self.enable_deferred_ui_build()
-        self._initialized = False
+        self._build_ui()
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
 
@@ -255,7 +253,7 @@ class PremiumPage(BasePage):
         text_default: str = "",
         text_kwargs: dict | None = None,
     ) -> None:
-        plan = self._controller.build_activation_status_plan(
+        plan = PremiumPageController.build_activation_status_plan(
             text=text,
             text_key=text_key,
             text_default=text_default,
@@ -298,7 +296,7 @@ class PremiumPage(BasePage):
         )
 
     def _apply_subscription_snapshot(self, is_premium: bool, days_remaining: int | None) -> None:
-        badge_plan, days_plan, _emitted_days = self._controller.build_subscription_snapshot_plan(
+        badge_plan, days_plan, _emitted_days = PremiumPageController.build_subscription_snapshot_plan(
             is_premium=is_premium,
             days_remaining=days_remaining,
         )
@@ -370,24 +368,30 @@ class PremiumPage(BasePage):
 
         self.server_status_label.setText(self._tr("page.premium.label.server.checking", "Сервер: проверка..."))
 
+    def _run_runtime_init_once(self) -> None:
+        plan = PremiumPageController.build_page_init_plan(
+            runtime_initialized=self._runtime_initialized,
+        )
+        if not plan.ensure_checker_once:
+            return
+
+        self._runtime_initialized = True
+        self._init_checker()
+        self._server_status_mode = plan.init_server_status_plan.mode
+        self._server_status_message = plan.init_server_status_plan.message
+        self._server_status_success = plan.init_server_status_plan.success
+        self._render_server_status()
+
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     def on_page_activated(self, first_show: bool) -> None:
-        if not self._initialized:
-            self._initialized = True
-            self._init_checker()
-            plan = self._controller.build_server_status_plan(mode="idle")
-            self._server_status_mode = plan.mode
-            self._server_status_message = plan.message
-            self._server_status_success = plan.success
-            self._render_server_status()
         self._sync_pairing_status_autopoll()
 
     def on_page_hidden(self) -> None:
         self._stop_pairing_status_autopoll()
 
     def closeEvent(self, event):
-        plan = self._controller.build_close_plan(
+        plan = PremiumPageController.build_close_plan(
             thread_running=bool(self.current_thread and self.current_thread.isRunning()),
         )
         if plan.stop_autopoll:
@@ -401,7 +405,7 @@ class PremiumPage(BasePage):
 
     def _init_checker(self):
         try:
-            init_result = self._controller.resolve_checker_bundle()
+            init_result = PremiumPageController.resolve_checker_bundle()
             self.checker = init_result.checker
             self.RegistryManager = init_result.storage
             if not init_result.init_ok:
@@ -576,6 +580,7 @@ class PremiumPage(BasePage):
         self._actions_bar.add_button(self.extend_btn)
 
         self.add_widget(self._actions_bar)
+        self._run_runtime_init_once()
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -640,19 +645,19 @@ class PremiumPage(BasePage):
             self.key_input_container.setVisible(visible)
 
     def _has_pending_pair_code(self) -> bool:
-        snapshot = self._controller.read_pairing_snapshot(
+        snapshot = PremiumPageController.read_pairing_snapshot(
             self.RegistryManager,
             current_time=int(time.time()),
         )
         return snapshot.has_pending_pair_code
 
     def _can_poll_pairing_status(self) -> bool:
-        snapshot = self._controller.read_pairing_snapshot(
+        snapshot = PremiumPageController.read_pairing_snapshot(
             self.RegistryManager,
             current_time=int(time.time()),
         )
 
-        plan = self._controller.build_pairing_autopoll_plan(
+        plan = PremiumPageController.build_pairing_autopoll_plan(
             checker_ready=bool(self.checker),
             storage_ready=bool(self.RegistryManager),
             page_visible=self.isVisible(),
@@ -665,11 +670,11 @@ class PremiumPage(BasePage):
         return plan.can_poll
 
     def _start_pairing_status_autopoll(self) -> None:
-        snapshot = self._controller.read_pairing_snapshot(
+        snapshot = PremiumPageController.read_pairing_snapshot(
             self.RegistryManager,
             current_time=int(time.time()),
         )
-        plan = self._controller.build_pairing_autopoll_plan(
+        plan = PremiumPageController.build_pairing_autopoll_plan(
             checker_ready=bool(self.checker),
             storage_ready=bool(self.RegistryManager),
             page_visible=self.isVisible(),
@@ -687,12 +692,12 @@ class PremiumPage(BasePage):
             self._pairing_status_timer.stop()
 
     def _sync_pairing_status_autopoll(self) -> None:
-        snapshot = self._controller.read_pairing_snapshot(
+        snapshot = PremiumPageController.read_pairing_snapshot(
             self.RegistryManager,
             current_time=int(time.time()),
         )
 
-        plan = self._controller.build_pairing_autopoll_plan(
+        plan = PremiumPageController.build_pairing_autopoll_plan(
             checker_ready=bool(self.checker),
             storage_ready=bool(self.RegistryManager),
             page_visible=self.isVisible(),
@@ -708,7 +713,7 @@ class PremiumPage(BasePage):
             self._stop_pairing_status_autopoll()
 
     def _poll_pairing_status(self) -> None:
-        plan = self._controller.build_pairing_poll_plan(
+        plan = PremiumPageController.build_pairing_poll_plan(
             can_poll=self._can_poll_pairing_status(),
         )
         if plan.should_stop_timer:
@@ -721,11 +726,11 @@ class PremiumPage(BasePage):
         if not self.checker:
             return
         try:
-            snapshot = self._controller.read_device_storage_snapshot(
+            snapshot = PremiumPageController.read_device_storage_snapshot(
                 self.RegistryManager,
                 current_time=int(time.time()),
             )
-            plan = self._controller.build_device_info_plan(
+            plan = PremiumPageController.build_device_info_plan(
                 device_id=self.checker.device_id,
                 device_token=snapshot.get("device_token"),
                 pair_code=snapshot.get("pair_code"),
@@ -755,7 +760,7 @@ class PremiumPage(BasePage):
             log(f"Ошибка обновления информации об устройстве: {e}", "DEBUG")
 
     def _open_extend_bot(self) -> None:
-        result = self._controller.open_extend_bot()
+        result = PremiumPageController.open_extend_bot()
         if result.ok:
             return
         if InfoBar:
@@ -772,7 +777,7 @@ class PremiumPage(BasePage):
     # ── pair code ────────────────────────────────────────────────────────────
 
     def _create_pair_code(self):
-        gate_plan = self._controller.build_worker_gate_plan(
+        gate_plan = PremiumPageController.build_worker_gate_plan(
             thread_running=bool(self.current_thread and self.current_thread.isRunning()),
         )
         if not gate_plan.can_start:
@@ -786,7 +791,7 @@ class PremiumPage(BasePage):
                 )
                 return
 
-        plan = self._controller.build_pair_code_start_plan()
+        plan = PremiumPageController.build_pair_code_start_plan()
         self._activation_in_progress = plan.activation_in_progress
         if plan.stop_autopoll:
             self._stop_pairing_status_autopoll()
@@ -803,13 +808,13 @@ class PremiumPage(BasePage):
             text_kwargs=plan.activation_status_plan.text_kwargs,
         )
 
-        self.current_thread = self._controller.create_worker_thread(self.checker.pair_start)
+        self.current_thread = PremiumPageController.create_worker_thread(self.checker.pair_start)
         self.current_thread.result_ready.connect(self._on_pair_code_created)
         self.current_thread.error_occurred.connect(self._on_activation_error)
         self.current_thread.start()
 
     def _on_pair_code_created(self, result):
-        plan = self._controller.build_pair_code_result_plan(result)
+        plan = PremiumPageController.build_pair_code_result_plan(result)
         self._activation_in_progress = plan.activation_in_progress
         self.activate_btn.setEnabled(plan.activate_enabled)
         self.activate_btn.setText(self._tr(plan.activate_text_key, plan.activate_text_default))
@@ -836,7 +841,7 @@ class PremiumPage(BasePage):
             self._stop_pairing_status_autopoll()
 
     def _on_activation_error(self, error):
-        plan = self._controller.build_pair_code_error_plan(str(error or ""))
+        plan = PremiumPageController.build_pair_code_error_plan(str(error or ""))
         self._activation_in_progress = plan.activation_in_progress
         if plan.clear_key_input:
             self.key_input.clear()
@@ -856,7 +861,7 @@ class PremiumPage(BasePage):
     # ── status check ─────────────────────────────────────────────────────────
 
     def _check_status(self):
-        gate_plan = self._controller.build_worker_gate_plan(
+        gate_plan = PremiumPageController.build_worker_gate_plan(
             thread_running=bool(self.current_thread and self.current_thread.isRunning()),
         )
         if not gate_plan.can_start:
@@ -882,7 +887,7 @@ class PremiumPage(BasePage):
             details_default="Подключение к серверу",
         )
 
-        self.current_thread = self._controller.create_worker_thread(self.checker.check_device_activation)
+        self.current_thread = PremiumPageController.create_worker_thread(self.checker.check_device_activation)
         self.current_thread.result_ready.connect(self._on_status_complete)
         self.current_thread.error_occurred.connect(self._on_status_error)
         self.current_thread.start()
@@ -891,7 +896,7 @@ class PremiumPage(BasePage):
         self.refresh_btn.set_loading(False)
         self._update_device_info()
         try:
-            plan = self._controller.build_status_check_plan(
+            plan = PremiumPageController.build_status_check_plan(
                 result,
                 linked_hint=self._tr(
                     "page.premium.status.inactive.linked_hint",
@@ -937,7 +942,7 @@ class PremiumPage(BasePage):
     def _on_status_error(self, error):
         self._sync_pairing_status_autopoll()
         self.refresh_btn.set_loading(False)
-        plan = self._controller.build_status_check_plan(
+        plan = PremiumPageController.build_status_check_plan(
             {"activated": False, "status": str(error or ""), "found": False},
             linked_hint=self._tr(
                 "page.premium.status.inactive.linked_hint",
@@ -958,14 +963,14 @@ class PremiumPage(BasePage):
     # ── connection test ───────────────────────────────────────────────────────
 
     def _test_connection(self):
-        gate_plan = self._controller.build_worker_gate_plan(
+        gate_plan = PremiumPageController.build_worker_gate_plan(
             thread_running=bool(self.current_thread and self.current_thread.isRunning()),
         )
         if not gate_plan.can_start:
             return
         if not self.checker:
             self._init_checker()
-        plan = self._controller.build_connection_test_start_plan(
+        plan = PremiumPageController.build_connection_test_start_plan(
             checker_ready=bool(self.checker),
         )
         self._connection_test_in_progress = plan.connection_in_progress
@@ -978,13 +983,13 @@ class PremiumPage(BasePage):
         if not self.checker:
             return
 
-        self.current_thread = self._controller.create_worker_thread(self.checker.test_connection)
+        self.current_thread = PremiumPageController.create_worker_thread(self.checker.test_connection)
         self.current_thread.result_ready.connect(self._on_connection_test_complete)
         self.current_thread.error_occurred.connect(self._on_connection_test_error)
         self.current_thread.start()
 
     def _on_connection_test_complete(self, result):
-        plan = self._controller.build_connection_test_result_plan(result)
+        plan = PremiumPageController.build_connection_test_result_plan(result)
         self._connection_test_in_progress = plan.connection_in_progress
         self.test_btn.setEnabled(plan.test_enabled)
         self.test_btn.setText(self._tr(plan.test_text_key, plan.test_text_default))
@@ -994,7 +999,7 @@ class PremiumPage(BasePage):
         self._render_server_status()
 
     def _on_connection_test_error(self, error):
-        plan = self._controller.build_connection_test_error_plan(str(error or ""))
+        plan = PremiumPageController.build_connection_test_error_plan(str(error or ""))
         self._connection_test_in_progress = plan.connection_in_progress
         self.test_btn.setEnabled(plan.test_enabled)
         self.test_btn.setText(self._tr(plan.test_text_key, plan.test_text_default))
@@ -1018,8 +1023,8 @@ class PremiumPage(BasePage):
             if not box.exec():
                 return
 
-        self._controller.reset_premium_storage(self.checker, self.RegistryManager)
-        plan = self._controller.build_reset_plan()
+        PremiumPageController.reset_premium_storage(self.checker, self.RegistryManager)
+        plan = PremiumPageController.build_reset_plan()
 
         if plan.clear_pair_input:
             self.key_input.clear()

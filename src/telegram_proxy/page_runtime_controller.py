@@ -67,7 +67,18 @@ class TelegramProxyStatsPlan:
     next_speed_hist_down: tuple[int, ...]
 
 
+@dataclass(slots=True)
+class TelegramProxyPageInitPlan:
+    ensure_hosts_once: bool
+
+
 class TelegramProxyRuntimeController:
+    @staticmethod
+    def build_page_init_plan(*, runtime_initialized: bool) -> TelegramProxyPageInitPlan:
+        return TelegramProxyPageInitPlan(
+            ensure_hosts_once=not bool(runtime_initialized),
+        )
+
     @staticmethod
     def build_status_plan(*, running: bool, restarting: bool, starting: bool, host: str, port: int) -> TelegramProxyStatusPlan:
         if restarting:

@@ -200,7 +200,8 @@ class ControlPageController:
             return first_line
         return first_line[:157] + "..."
 
-    def build_strategy_display_plan(self, *, name: str, language: str, window=None) -> ControlStrategyDisplayPlan:
+    @staticmethod
+    def build_strategy_display_plan(*, name: str, language: str, window=None) -> ControlStrategyDisplayPlan:
         from ui.text_catalog import tr as tr_catalog
 
         not_selected = tr_catalog(
@@ -237,9 +238,9 @@ class ControlPageController:
 
                     selections = DirectPresetFacade.from_launch_method(method).get_strategy_selections() or {}
                 else:
-                    from legacy_registry_launch.selection_store import get_direct_strategy_selections
+                    from preset_orchestra_zapret2 import PresetManager
 
-                    selections = get_direct_strategy_selections() or {}
+                    selections = PresetManager().get_strategy_selections() or {}
 
                 active_count = sum(
                     1 for strategy_id in selections.values() if (strategy_id or "none") != "none"
@@ -262,7 +263,8 @@ class ControlPageController:
             tooltip="",
         )
 
-    def build_status_plan(self, *, state: str | bool, last_error: str, language: str) -> ControlStatusPlan:
+    @staticmethod
+    def build_status_plan(*, state: str | bool, last_error: str, language: str) -> ControlStatusPlan:
         from ui.text_catalog import tr as tr_catalog
 
         phase = str(state or "").strip().lower()
@@ -317,7 +319,7 @@ class ControlPageController:
             return ControlStatusPlan(
                 phase=phase,
                 title="Ошибка запуска Zapret",
-                description=self.short_dpi_error(last_error) or "Процесс не подтвердился или завершился сразу",
+                description=ControlPageController.short_dpi_error(last_error) or "Процесс не подтвердился или завершился сразу",
                 dot_color="#ff6b6b",
                 pulsing=False,
                 show_start=True,
@@ -344,10 +346,11 @@ class ControlPageController:
         except Exception:
             return False
 
-    def build_defender_toggle_start_plan(self, *, disable: bool, language: str) -> ControlToggleActionStartPlan:
+    @staticmethod
+    def build_defender_toggle_start_plan(*, disable: bool, language: str) -> ControlToggleActionStartPlan:
         from ui.text_catalog import tr as tr_catalog
 
-        if not self.is_user_admin():
+        if not ControlPageController.is_user_admin():
             return ControlToggleActionStartPlan(
                 blocked=True,
                 blocked_title="Требуются права администратора",
@@ -487,7 +490,8 @@ class ControlPageController:
                 final_status="",
             )
 
-    def build_max_block_toggle_start_plan(self, *, enable: bool, language: str) -> ControlToggleActionStartPlan:
+    @staticmethod
+    def build_max_block_toggle_start_plan(*, enable: bool, language: str) -> ControlToggleActionStartPlan:
         from ui.text_catalog import tr as tr_catalog
 
         if enable:

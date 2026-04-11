@@ -48,10 +48,7 @@ class DpiSettingsPage(BasePage):
         self._zapret1_header = None
         self._orchestra_label = None
         self._advanced_notice = None
-        self._controller = DpiSettingsPageController()
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         self._load_settings()
 
     def _tr(self, key: str, default: str, **kwargs) -> str:
@@ -291,7 +288,7 @@ class DpiSettingsPage(BasePage):
     def _load_settings(self):
         """Загружает настройки"""
         try:
-            state = self._controller.load_state()
+            state = DpiSettingsPageController.load_state()
 
             # Устанавливаем выбранный метод
             self._update_method_selection(state.launch_method)
@@ -318,7 +315,7 @@ class DpiSettingsPage(BasePage):
     def _select_method(self, method: str):
         """Обработчик выбора метода"""
         try:
-            next_method = self._controller.apply_launch_method(method)
+            next_method = DpiSettingsPageController.apply_launch_method(method)
             self._update_method_selection(next_method)
             self._update_filters_visibility(next_method)
             self.launch_method_changed.emit(next_method)
@@ -340,7 +337,7 @@ class DpiSettingsPage(BasePage):
     def _on_discord_restart_changed(self, enabled: bool):
         """Обработчик изменения настройки перезапуска Discord"""
         try:
-            self._controller.set_discord_restart_enabled(enabled)
+            DpiSettingsPageController.set_discord_restart_enabled(enabled)
             status = "включён" if enabled else "отключён"
             log(f"Автоперезапуск Discord {status}", "INFO")
         except Exception as e:
@@ -373,7 +370,7 @@ class DpiSettingsPage(BasePage):
     def _on_strict_detection_changed(self, enabled: bool):
         """Обработчик изменения строгого режима детекции"""
         try:
-            self._controller.set_orchestra_setting("strict_detection", enabled, app=self.window())
+            DpiSettingsPageController.set_orchestra_setting("strict_detection", enabled, app=self.window())
             log(f"Строгий режим детекции: {'включён' if enabled else 'выключен'}", "INFO")
 
         except Exception as e:
@@ -382,7 +379,7 @@ class DpiSettingsPage(BasePage):
     def _on_debug_file_changed(self, enabled: bool):
         """Обработчик изменения сохранения debug файла"""
         try:
-            self._controller.set_orchestra_setting("debug_file", enabled, app=self.window())
+            DpiSettingsPageController.set_orchestra_setting("debug_file", enabled, app=self.window())
             log(f"Сохранение debug файла: {'включено' if enabled else 'выключено'}", "INFO")
 
         except Exception as e:
@@ -391,7 +388,7 @@ class DpiSettingsPage(BasePage):
     def _on_auto_restart_discord_changed(self, enabled: bool):
         """Обработчик изменения авторестарта при Discord FAIL"""
         try:
-            self._controller.set_orchestra_setting("auto_restart_discord", enabled, app=self.window())
+            DpiSettingsPageController.set_orchestra_setting("auto_restart_discord", enabled, app=self.window())
             log(f"Авторестарт при Discord FAIL: {'включён' if enabled else 'выключен'}", "INFO")
 
         except Exception as e:
@@ -400,7 +397,7 @@ class DpiSettingsPage(BasePage):
     def _on_discord_fails_changed(self, value: int):
         """Обработчик изменения количества фейлов для рестарта Discord"""
         try:
-            self._controller.set_orchestra_setting("discord_fails", value, app=self.window())
+            DpiSettingsPageController.set_orchestra_setting("discord_fails", value, app=self.window())
             log(f"Фейлов для рестарта Discord: {value}", "INFO")
 
         except Exception as e:
@@ -409,7 +406,7 @@ class DpiSettingsPage(BasePage):
     def _on_lock_successes_changed(self, value: int):
         """Обработчик изменения количества успехов для LOCK"""
         try:
-            self._controller.set_orchestra_setting("lock_successes", value, app=self.window())
+            DpiSettingsPageController.set_orchestra_setting("lock_successes", value, app=self.window())
             log(f"Успехов для LOCK: {value}", "INFO")
 
         except Exception as e:
@@ -418,7 +415,7 @@ class DpiSettingsPage(BasePage):
     def _on_unlock_fails_changed(self, value: int):
         """Обработчик изменения количества ошибок для AUTO-UNLOCK"""
         try:
-            self._controller.set_orchestra_setting("unlock_fails", value, app=self.window())
+            DpiSettingsPageController.set_orchestra_setting("unlock_fails", value, app=self.window())
             log(f"Ошибок для AUTO-UNLOCK: {value}", "INFO")
 
         except Exception as e:
@@ -448,15 +445,15 @@ class DpiSettingsPage(BasePage):
                 
     def _on_filter_changed(self, kind: str, value):
         """Обработчик изменения фильтра"""
-        self._controller.set_filter_state(kind, bool(value))
+        DpiSettingsPageController.set_filter_state(kind, bool(value))
 
         self.filters_changed.emit()
         
     def _update_filters_visibility(self, method: str | None = None):
         """Обновляет видимость фильтров и секций"""
         try:
-            resolved_method = str(method or self._controller.get_launch_method()).strip().lower()
-            visibility = self._controller.describe_visibility(resolved_method)
+            resolved_method = str(method or DpiSettingsPageController.get_launch_method()).strip().lower()
+            visibility = DpiSettingsPageController.describe_visibility(resolved_method)
 
             # For direct_zapret2 these options are shown on the Strategies/Management page
             # (ui/pages/zapret2/direct_control_page.py), so hide them here.
@@ -466,8 +463,8 @@ class DpiSettingsPage(BasePage):
             # from the current mode source of truth (preset for direct preset flow).
             if visibility.show_advanced:
                 try:
-                    self.wssize_toggle.setChecked(bool(self._controller.get_filter_state("wssize", resolved_method)), block_signals=True)
-                    self.debug_log_toggle.setChecked(bool(self._controller.get_filter_state("debug", resolved_method)), block_signals=True)
+                    self.wssize_toggle.setChecked(bool(DpiSettingsPageController.get_filter_state("wssize", resolved_method)), block_signals=True)
+                    self.debug_log_toggle.setChecked(bool(DpiSettingsPageController.get_filter_state("debug", resolved_method)), block_signals=True)
                 except Exception:
                     pass
 
@@ -475,7 +472,7 @@ class DpiSettingsPage(BasePage):
             self.discord_restart_toggle.setVisible(visibility.show_discord_restart)
             if visibility.show_discord_restart:
                 try:
-                    self.discord_restart_toggle.setChecked(self._controller.get_discord_restart_enabled(), block_signals=True)
+                    self.discord_restart_toggle.setChecked(DpiSettingsPageController.get_discord_restart_enabled(), block_signals=True)
                 except Exception:
                     pass
 

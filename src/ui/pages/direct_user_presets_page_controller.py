@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import sys
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Protocol
 
 from log import log
 
@@ -65,22 +67,272 @@ class UserPresetActivationResult:
     activated_file_name: str | None
 
 
-class Zapret1UserPresetsPageController:
-    LAUNCH_METHOD = "direct_zapret1"
-    SELECTION_KEY = "winws1"
-    HIERARCHY_SCOPE = "preset_zapret1"
+@dataclass(frozen=True, slots=True)
+class DirectUserPresetsPageControllerConfig:
+    launch_method: str
+    selection_key: str
+    hierarchy_scope: str
+    empty_not_found_key: str
+    empty_none_key: str
+    list_log_prefix: str
+    activate_error_level: str
+    activate_error_mode: str
+    copy_hierarchy_meta_on_duplicate: bool
+    get_preset_store: Callable[[], object]
 
-    @classmethod
-    def _get_direct_facade(cls):
+
+class DirectUserPresetsListingApi(Protocol):
+    def list_preset_entries_light(self) -> list[dict[str, object]]: ...
+    def get_active_preset_name_light(self) -> str: ...
+    def get_selected_source_preset_file_name_light(self) -> str: ...
+    def get_presets_dir_light(self): ...
+    def load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]: ...
+    def read_single_preset_list_metadata_light(self, file_name_or_name: str) -> tuple[str, dict[str, object]] | None: ...
+    def resolve_display_name(self, reference: str) -> str: ...
+    def build_preset_rows_plan(
+        self,
+        *,
+        all_presets: dict[str, dict[str, object]],
+        query: str,
+        active_file_name: str,
+        language: str,
+    ) -> UserPresetListPlan: ...
+
+
+class DirectUserPresetsActionsApi(Protocol):
+    def create_preset(self, *, name: str, from_current: bool) -> UserPresetActionResult: ...
+    def rename_preset(self, *, current_name: str, new_name: str) -> UserPresetActionResult: ...
+    def import_preset_from_file(self, *, file_path: str) -> UserPresetImportResult: ...
+    def reset_all_presets(self) -> UserPresetResetAllResult: ...
+    def activate_preset(self, *, file_name: str, display_name: str) -> UserPresetActivationResult: ...
+    def duplicate_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult: ...
+    def reset_preset_to_template(self, *, file_name: str, display_name: str) -> UserPresetActionResult: ...
+    def delete_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult: ...
+    def export_preset(self, *, file_name: str, file_path: str, display_name: str) -> UserPresetActionResult: ...
+    def restore_deleted_presets(self) -> UserPresetActionResult: ...
+    def open_presets_info(self) -> UserPresetActionResult: ...
+    def open_new_configs_post(self) -> UserPresetActionResult: ...
+
+
+class DirectUserPresetsStorageApi(Protocol):
+    def get_preset_store(self): ...
+    def get_hierarchy_store(self): ...
+    def has_deleted_presets(self) -> bool: ...
+    def is_builtin_preset_file(self, name: str) -> bool: ...
+    def is_builtin_preset_file_with_cache(self, name: str, cached_metadata: dict[str, dict[str, object]] | None) -> bool: ...
+    def toggle_preset_pin(self, name: str, display_name: str) -> bool: ...
+    def move_preset_by_step(self, name: str, direction: int, *, cached_metadata: dict[str, dict[str, object]] | None = None) -> bool: ...
+    def move_preset_on_drop(
+        self,
+        *,
+        source_kind: str,
+        source_id: str,
+        target_kind: str,
+        target_id: str,
+        cached_metadata: dict[str, dict[str, object]] | None = None,
+    ) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DirectUserPresetsPageApiBundle:
+    listing: DirectUserPresetsListingApi
+    actions: DirectUserPresetsActionsApi
+    storage: DirectUserPresetsStorageApi
+
+
+class _DirectUserPresetsListingApiImpl:
+    def __init__(self, controller: "DirectUserPresetsPageController") -> None:
+        self._controller = controller
+
+    def list_preset_entries_light(self) -> list[dict[str, object]]:
+        return self._controller.list_preset_entries_light()
+
+    def get_active_preset_name_light(self) -> str:
+        return self._controller.get_active_preset_name_light()
+
+    def get_selected_source_preset_file_name_light(self) -> str:
+        return self._controller.get_selected_source_preset_file_name_light()
+
+    def get_presets_dir_light(self):
+        return self._controller.get_presets_dir_light()
+
+    def load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
+        return self._controller.load_preset_list_metadata_light()
+
+    def read_single_preset_list_metadata_light(self, file_name_or_name: str) -> tuple[str, dict[str, object]] | None:
+        return self._controller.read_single_preset_list_metadata_light(file_name_or_name)
+
+    def resolve_display_name(self, reference: str) -> str:
+        return self._controller.resolve_display_name(reference)
+
+    def build_preset_rows_plan(
+        self,
+        *,
+        all_presets: dict[str, dict[str, object]],
+        query: str,
+        active_file_name: str,
+        language: str,
+    ) -> UserPresetListPlan:
+        return self._controller.build_preset_rows_plan(
+            all_presets=all_presets,
+            query=query,
+            active_file_name=active_file_name,
+            language=language,
+        )
+
+
+class _DirectUserPresetsActionsApiImpl:
+    def __init__(self, controller: "DirectUserPresetsPageController") -> None:
+        self._controller = controller
+
+    def create_preset(self, *, name: str, from_current: bool) -> UserPresetActionResult:
+        return self._controller.create_preset(name=name, from_current=from_current)
+
+    def rename_preset(self, *, current_name: str, new_name: str) -> UserPresetActionResult:
+        return self._controller.rename_preset(current_name=current_name, new_name=new_name)
+
+    def import_preset_from_file(self, *, file_path: str) -> UserPresetImportResult:
+        return self._controller.import_preset_from_file(file_path=file_path)
+
+    def reset_all_presets(self) -> UserPresetResetAllResult:
+        return self._controller.reset_all_presets()
+
+    def activate_preset(self, *, file_name: str, display_name: str) -> UserPresetActivationResult:
+        return self._controller.activate_preset(file_name=file_name, display_name=display_name)
+
+    def duplicate_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
+        return self._controller.duplicate_preset(file_name=file_name, display_name=display_name)
+
+    def reset_preset_to_template(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
+        return self._controller.reset_preset_to_template(file_name=file_name, display_name=display_name)
+
+    def delete_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
+        return self._controller.delete_preset(file_name=file_name, display_name=display_name)
+
+    def export_preset(self, *, file_name: str, file_path: str, display_name: str) -> UserPresetActionResult:
+        return self._controller.export_preset(file_name=file_name, file_path=file_path, display_name=display_name)
+
+    def restore_deleted_presets(self) -> UserPresetActionResult:
+        return self._controller.restore_deleted_presets()
+
+    def open_presets_info(self) -> UserPresetActionResult:
+        return self._controller.open_presets_info()
+
+    def open_new_configs_post(self) -> UserPresetActionResult:
+        return self._controller.open_new_configs_post()
+
+
+class _DirectUserPresetsStorageApiImpl:
+    def __init__(self, controller: "DirectUserPresetsPageController") -> None:
+        self._controller = controller
+
+    def get_preset_store(self):
+        return self._controller.get_preset_store()
+
+    def get_hierarchy_store(self):
+        return self._controller.get_hierarchy_store()
+
+    def has_deleted_presets(self) -> bool:
+        return self._controller.has_deleted_presets()
+
+    def is_builtin_preset_file(self, name: str) -> bool:
+        return self._controller.is_builtin_preset_file(name)
+
+    def is_builtin_preset_file_with_cache(self, name: str, cached_metadata: dict[str, dict[str, object]] | None) -> bool:
+        return self._controller.is_builtin_preset_file_with_cache(name, cached_metadata)
+
+    def toggle_preset_pin(self, name: str, display_name: str) -> bool:
+        return self._controller.toggle_preset_pin(name, display_name)
+
+    def move_preset_by_step(self, name: str, direction: int, *, cached_metadata: dict[str, dict[str, object]] | None = None) -> bool:
+        return self._controller.move_preset_by_step(name, direction, cached_metadata=cached_metadata)
+
+    def move_preset_on_drop(
+        self,
+        *,
+        source_kind: str,
+        source_id: str,
+        target_kind: str,
+        target_id: str,
+        cached_metadata: dict[str, dict[str, object]] | None = None,
+    ) -> bool:
+        return self._controller.move_preset_on_drop(
+            source_kind=source_kind,
+            source_id=source_id,
+            target_kind=target_kind,
+            target_id=target_id,
+            cached_metadata=cached_metadata,
+        )
+
+
+class DirectUserPresetsPageController:
+    def __init__(self, config: DirectUserPresetsPageControllerConfig) -> None:
+        self._config = config
+        self._page_api = DirectUserPresetsPageApiBundle(
+            listing=_DirectUserPresetsListingApiImpl(self),
+            actions=_DirectUserPresetsActionsApiImpl(self),
+            storage=_DirectUserPresetsStorageApiImpl(self),
+        )
+
+    def build_page_api(self) -> DirectUserPresetsPageApiBundle:
+        return self._page_api
+
+    def _get_installed_app_context(self):
+        try:
+            core_services = sys.modules.get("core.services")
+            if core_services is None:
+                import core.services as core_services
+
+            getter = getattr(core_services, "get_installed_app_context", None)
+            if callable(getter):
+                return getter()
+        except Exception:
+            pass
+        return None
+
+    def _get_direct_flow_coordinator(self):
+        app_context = self._get_installed_app_context()
+        coordinator = getattr(app_context, "direct_flow_coordinator", None)
+        if coordinator is not None:
+            return coordinator
+
+        core_services = sys.modules.get("core.services")
+        if core_services is None:
+            import core.services as core_services
+
+        return core_services.get_direct_flow_coordinator()
+
+    def _get_selection_service(self):
+        app_context = self._get_installed_app_context()
+        service = getattr(app_context, "preset_selection_service", None)
+        if service is not None:
+            return service
+
+        core_services = sys.modules.get("core.services")
+        if core_services is None:
+            import core.services as core_services
+
+        return core_services.get_selection_service()
+
+    def _get_app_paths(self):
+        app_context = self._get_installed_app_context()
+        app_paths = getattr(app_context, "app_paths", None)
+        if app_paths is not None:
+            return app_paths
+
+        core_services = sys.modules.get("core.services")
+        if core_services is None:
+            import core.services as core_services
+
+        return core_services.get_app_paths()
+
+    def _get_direct_facade(self):
         from core.presets.direct_facade import DirectPresetFacade
 
-        return DirectPresetFacade.from_launch_method(cls.LAUNCH_METHOD)
+        return DirectPresetFacade.from_launch_method(self._config.launch_method)
 
-    @staticmethod
-    def get_preset_store():
-        from core.services import get_preset_store_v1
-
-        return get_preset_store_v1()
+    def get_preset_store(self):
+        return self._config.get_preset_store()
 
     def create_preset(self, *, name: str, from_current: bool) -> UserPresetActionResult:
         facade = self._get_direct_facade()
@@ -102,7 +354,7 @@ class Zapret1UserPresetsPageController:
         if switched_file_name:
             from core.presets.direct_runtime_events import notify_direct_preset_switched
 
-            notify_direct_preset_switched(self.LAUNCH_METHOD, switched_file_name)
+            notify_direct_preset_switched(self._config.launch_method, switched_file_name)
 
         return UserPresetActionResult(
             ok=True,
@@ -152,7 +404,7 @@ class Zapret1UserPresetsPageController:
         if selected_file_name:
             from core.presets.direct_runtime_events import notify_direct_preset_switched
 
-            notify_direct_preset_switched(self.LAUNCH_METHOD, selected_file_name)
+            notify_direct_preset_switched(self._config.launch_method, selected_file_name)
 
         failed_count = len(failed or [])
         if failed_count:
@@ -180,10 +432,11 @@ class Zapret1UserPresetsPageController:
         new_name = f"{display_name} (копия)"
         facade = self._get_direct_facade()
         facade.duplicate_by_file_name(file_name, new_name)
-        try:
-            self.get_hierarchy_store().copy_preset_meta_to_new(file_name, new_name, source_display_name=display_name)
-        except Exception:
-            pass
+        if self._config.copy_hierarchy_meta_on_duplicate:
+            try:
+                self.get_hierarchy_store().copy_preset_meta_to_new(file_name, new_name, source_display_name=display_name)
+            except Exception:
+                pass
         return UserPresetActionResult(
             ok=True,
             log_level="INFO",
@@ -199,9 +452,9 @@ class Zapret1UserPresetsPageController:
         facade.reset_to_template_by_file_name(file_name)
         from core.presets.direct_runtime_events import notify_direct_preset_saved, notify_direct_preset_switched
 
-        notify_direct_preset_saved(self.LAUNCH_METHOD, file_name)
+        notify_direct_preset_saved(self._config.launch_method, file_name)
         if facade.is_selected_file_name(file_name):
-            notify_direct_preset_switched(self.LAUNCH_METHOD, file_name)
+            notify_direct_preset_switched(self._config.launch_method, file_name)
 
         return UserPresetActionResult(
             ok=True,
@@ -226,7 +479,21 @@ class Zapret1UserPresetsPageController:
             )
 
         facade = self._get_direct_facade()
-        facade.delete_by_file_name(file_name)
+        try:
+            facade.delete_by_file_name(file_name)
+        except Exception as e:
+            if "Preset not found" in str(e):
+                return UserPresetActionResult(
+                    ok=False,
+                    log_level="ERROR",
+                    log_message=f"Ошибка удаления пресета: {e}",
+                    infobar_level=None,
+                    infobar_title="",
+                    infobar_content="",
+                    structure_changed=False,
+                    error_code="not_found",
+                )
+            raise
         return UserPresetActionResult(
             ok=True,
             log_level="INFO",
@@ -257,7 +524,7 @@ class Zapret1UserPresetsPageController:
         if selected_file_name:
             from core.presets.direct_runtime_events import notify_direct_preset_switched
 
-            notify_direct_preset_switched(self.LAUNCH_METHOD, selected_file_name)
+            notify_direct_preset_switched(self._config.launch_method, selected_file_name)
 
         return UserPresetActionResult(
             ok=True,
@@ -269,6 +536,14 @@ class Zapret1UserPresetsPageController:
             structure_changed=True,
             switched_file_name=selected_file_name,
         )
+
+    def has_deleted_presets(self) -> bool:
+        try:
+            from core.presets.template_support import get_deleted_template_names
+
+            return bool(get_deleted_template_names(self._config.launch_method))
+        except Exception:
+            return False
 
     @staticmethod
     def open_presets_info() -> UserPresetActionResult:
@@ -348,36 +623,27 @@ class Zapret1UserPresetsPageController:
                 for item in facade.list_manifests()
             ]
         except Exception as e:
-            log(f"Z1UserPresetsPage: не удалось загрузить lightweight список пресетов: {e}", "ERROR")
+            log(f"{self._config.list_log_prefix}: не удалось загрузить lightweight список пресетов: {e}", "ERROR")
             return []
 
-    @classmethod
-    def get_active_preset_name_light(cls) -> str:
+    def get_active_preset_name_light(self) -> str:
         try:
-            from core.services import get_direct_flow_coordinator
-
-            preset = get_direct_flow_coordinator().get_selected_source_manifest(cls.LAUNCH_METHOD)
+            preset = self._get_direct_flow_coordinator().get_selected_source_manifest(self._config.launch_method)
             return str(preset.name if preset is not None else "").strip()
         except Exception:
             return ""
 
-    @classmethod
-    def get_selected_source_preset_file_name_light(cls) -> str:
+    def get_selected_source_preset_file_name_light(self) -> str:
         try:
-            from core.services import get_selection_service
-
-            return str(get_selection_service().get_selected_file_name(cls.SELECTION_KEY) or "").strip()
+            return str(self._get_selection_service().get_selected_file_name(self._config.selection_key) or "").strip()
         except Exception:
             return ""
 
-    @classmethod
-    def get_presets_dir_light(cls):
-        from core.services import get_app_paths
-
-        return get_app_paths().engine_paths(cls.SELECTION_KEY).ensure_directories().presets_dir
+    def get_presets_dir_light(self):
+        return self._get_app_paths().engine_paths(self._config.selection_key).ensure_directories().presets_dir
 
     def load_preset_list_metadata_light(self) -> dict[str, dict[str, object]]:
-        from core.presets.list_metadata import read_preset_list_metadata
+        from core.presets.lightweight_metadata import build_lightweight_preset_metadata
 
         metadata: dict[str, dict[str, object]] = {}
         presets_dir = self.get_presets_dir_light()
@@ -389,28 +655,18 @@ class Zapret1UserPresetsPageController:
             is_builtin = bool(entry.get("is_builtin", False))
             if not file_name:
                 continue
-            try:
-                path = presets_dir / file_name
-                metadata[file_name] = {
-                    **read_preset_list_metadata(path),
-                    "display_name": display_name,
-                    "kind": kind,
-                    "is_builtin": is_builtin,
-                }
-            except Exception:
-                metadata[file_name] = {
-                    "description": "",
-                    "modified_display": "",
-                    "icon_color": "",
-                    "display_name": display_name,
-                    "kind": kind,
-                    "is_builtin": is_builtin,
-                }
+            path = presets_dir / file_name
+            metadata[file_name] = build_lightweight_preset_metadata(
+                path,
+                display_name=display_name,
+                kind=kind,
+                is_builtin=is_builtin,
+            )
 
         return metadata
 
     def read_single_preset_list_metadata_light(self, file_name_or_name: str) -> tuple[str, dict[str, object]] | None:
-        from core.presets.list_metadata import read_preset_list_metadata
+        from core.presets.lightweight_metadata import build_lightweight_preset_metadata
 
         candidate = str(file_name_or_name or "").strip()
         if not candidate:
@@ -434,22 +690,12 @@ class Zapret1UserPresetsPageController:
         is_builtin = bool(matched_entry.get("is_builtin", False))
         path = self.get_presets_dir_light() / candidate_file_name
 
-        try:
-            metadata = {
-                **read_preset_list_metadata(path),
-                "display_name": display_name,
-                "kind": kind,
-                "is_builtin": is_builtin,
-            }
-        except Exception:
-            metadata = {
-                "description": "",
-                "modified_display": "",
-                "icon_color": "",
-                "display_name": display_name,
-                "kind": kind,
-                "is_builtin": is_builtin,
-            }
+        metadata = build_lightweight_preset_metadata(
+            path,
+            display_name=display_name,
+            kind=kind,
+            is_builtin=is_builtin,
+        )
 
         return candidate_file_name, metadata
 
@@ -470,7 +716,7 @@ class Zapret1UserPresetsPageController:
     def get_hierarchy_store(self):
         from core.presets.library_hierarchy import PresetHierarchyStore
 
-        return PresetHierarchyStore(self.HIERARCHY_SCOPE)
+        return PresetHierarchyStore(self._config.hierarchy_scope)
 
     def is_builtin_preset_file_with_cache(self, name: str, cached_metadata: dict[str, dict[str, object]] | None) -> bool:
         candidate = str(name or "").strip()
@@ -540,7 +786,7 @@ class Zapret1UserPresetsPageController:
         active_file_name: str,
         language: str,
     ) -> UserPresetListPlan:
-        from ui.pages.user_presets_runtime_controller import normalize_preset_icon_color
+        from core.runtime.user_presets_runtime_service import normalize_preset_icon_color
         from ui.text_catalog import tr as tr_catalog
 
         normalized_query = str(query or "").strip().lower()
@@ -599,7 +845,7 @@ class Zapret1UserPresetsPageController:
                     {
                         "kind": "empty",
                         "text": tr_catalog(
-                            "page.z1_user_presets.empty.not_found",
+                            self._config.empty_not_found_key,
                             language=language,
                             default="Ничего не найдено.",
                         ),
@@ -610,7 +856,7 @@ class Zapret1UserPresetsPageController:
                     {
                         "kind": "empty",
                         "text": tr_catalog(
-                            "page.z1_user_presets.empty.none",
+                            self._config.empty_none_key,
                             language=language,
                             default="Нет пресетов. Создайте новый или импортируйте из файла.",
                         ),
@@ -631,7 +877,7 @@ class Zapret1UserPresetsPageController:
         try:
             from core.presets.direct_runtime_events import activate_direct_preset_file
 
-            activate_direct_preset_file(self.LAUNCH_METHOD, target_file_name)
+            activate_direct_preset_file(self._config.launch_method, target_file_name)
             return UserPresetActivationResult(
                 ok=True,
                 log_level="INFO",
@@ -642,12 +888,17 @@ class Zapret1UserPresetsPageController:
                 activated_file_name=target_file_name,
             )
         except Exception as e:
+            content = (
+                f"Не удалось активировать пресет '{target_display_name}'"
+                if self._config.activate_error_mode == "friendly"
+                else f"Ошибка: {e}"
+            )
             return UserPresetActivationResult(
                 ok=False,
                 log_level="ERROR",
                 log_message=f"Ошибка активации пресета: {e}",
-                infobar_level="warning",
+                infobar_level=self._config.activate_error_level,
                 infobar_title="Ошибка",
-                infobar_content=f"Не удалось активировать пресет '{target_display_name}'",
+                infobar_content=content,
                 activated_file_name=None,
             )

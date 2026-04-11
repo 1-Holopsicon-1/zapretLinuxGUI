@@ -402,21 +402,19 @@ class BlobsPage(BasePage):
 
         self._desc_label = None
         self._filter_icon_label = None
-        self._initial_blobs_load_requested = False
+        self._runtime_initialized = False
         self._actions_group = None
         self._actions_meta_card = None
         self._actions_bar = None
 
-        self.enable_deferred_ui_build(after_build=self._after_ui_built)
-
-    def _after_ui_built(self) -> None:
+        self._build_ui()
         self._apply_page_theme(force=True)
+        self._run_runtime_init_once()
 
-    def on_page_activated(self, first_show: bool) -> None:
-        _ = first_show
-        if self._initial_blobs_load_requested:
+    def _run_runtime_init_once(self) -> None:
+        if self._runtime_initialized:
             return
-        self._initial_blobs_load_requested = True
+        self._runtime_initialized = True
         QTimer.singleShot(0, self._load_blobs)
 
     def _tr(self, key: str, default: str, **kwargs) -> str:

@@ -89,6 +89,37 @@ class CustomIpSetAddPlan:
 
 
 @dataclass(slots=True)
+class CustomIpRuLoadState:
+    text: str
+    lines_count: int
+    base_set: set[str]
+
+
+@dataclass(slots=True)
+class CustomIpRuSaveState:
+    normalized_text: str
+    saved_lines: list[str]
+    saved_count: int
+
+
+@dataclass(slots=True)
+class CustomIpRuStatusPlan:
+    total_count: int
+    base_count: int
+    user_count: int
+    invalid_lines: list[tuple[int, str]]
+
+
+@dataclass(slots=True)
+class CustomIpRuAddPlan:
+    level: str | None
+    title: str
+    content: str
+    new_text: str | None
+    clear_input: bool
+
+
+@dataclass(slots=True)
 class CustomNetrogatLoadState:
     text: str
     lines_count: int
@@ -117,6 +148,22 @@ class CustomNetrogatAddPlan:
     content: str
     new_text: str | None
     clear_input: bool
+
+
+@dataclass(slots=True)
+class HostlistActionResult:
+    ok: bool
+    log_level: str
+    log_message: str
+    infobar_level: str | None
+    infobar_title: str
+    infobar_content: str
+    reload_info: bool = False
+    reload_domains: bool = False
+    reload_exclusions: bool = False
+    append_domains_status_suffix: str = ""
+    append_exclusions_status_suffix: str = ""
+    invalidate_excl_base_cache: bool = False
 
 
 class HostlistPageController:
@@ -220,20 +267,21 @@ class HostlistPageController:
                 continue
         return total
 
-    def load_folder_info(self) -> HostlistFolderInfo:
+    @staticmethod
+    def load_folder_info() -> HostlistFolderInfo:
         if not os.path.exists(LISTS_FOLDER):
             return HostlistFolderInfo(False, 0, 0, 0, 0, LISTS_FOLDER)
 
         txt_files = [name for name in os.listdir(LISTS_FOLDER) if name.endswith(".txt")]
-        ipset_files = [name for name in txt_files if self._is_ipset_file_name(name)]
+        ipset_files = [name for name in txt_files if HostlistPageController._is_ipset_file_name(name)]
         hostlist_files = [name for name in txt_files if name not in ipset_files]
 
         return HostlistFolderInfo(
             folder_exists=True,
             hostlist_files_count=len(hostlist_files),
             ipset_files_count=len(ipset_files),
-            hostlist_lines=self._count_lines(LISTS_FOLDER, hostlist_files, max_files=12, skip_comments=False),
-            ipset_lines=self._count_lines(LISTS_FOLDER, ipset_files, max_files=12, skip_comments=True),
+            hostlist_lines=HostlistPageController._count_lines(LISTS_FOLDER, hostlist_files, max_files=12, skip_comments=False),
+            ipset_lines=HostlistPageController._count_lines(LISTS_FOLDER, ipset_files, max_files=12, skip_comments=True),
             folder=LISTS_FOLDER,
         )
 
@@ -282,7 +330,8 @@ class HostlistPageController:
             pass
         return True
 
-    def save_custom_domains_text(self, text: str) -> CustomDomainsSaveState:
+    @staticmethod
+    def save_custom_domains_text(text: str) -> CustomDomainsSaveState:
         from utils.hostlists_manager import rebuild_other_files
 
         os.makedirs(os.path.dirname(OTHER_USER_PATH), exist_ok=True)
@@ -299,8 +348,8 @@ class HostlistPageController:
                 normalized_lines.append(line)
                 continue
 
-            for item in self.split_domains(line):
-                domain = self.extract_domain(item)
+            for item in HostlistPageController.split_domains(line):
+                domain = HostlistPageController.extract_domain(item)
                 if domain:
                     if domain not in saved_lines:
                         saved_lines.append(domain)
@@ -332,17 +381,18 @@ class HostlistPageController:
         except Exception:
             return set()
 
-    def build_custom_domains_status_plan(self, text: str) -> CustomDomainsStatusPlan:
+    @staticmethod
+    def build_custom_domains_status_plan(text: str) -> CustomDomainsStatusPlan:
         lines = [
             line.strip()
             for line in str(text or "").split("\n")
             if line.strip() and not line.strip().startswith("#")
         ]
-        base_set = self.get_custom_domains_base_set()
+        base_set = HostlistPageController.get_custom_domains_base_set()
         valid_domains: list[str] = []
 
         for line in lines:
-            domain = self.extract_domain(line)
+            domain = HostlistPageController.extract_domain(line)
             if domain:
                 valid_domains.append(domain)
 
@@ -356,7 +406,8 @@ class HostlistPageController:
             user_count=user_count,
         )
 
-    def build_add_custom_domain_plan(self, *, raw_text: str, current_text: str) -> CustomDomainsAddPlan:
+    @staticmethod
+    def build_add_custom_domain_plan(*, raw_text: str, current_text: str) -> CustomDomainsAddPlan:
         text = str(raw_text or "").strip()
         if not text:
             return CustomDomainsAddPlan(
@@ -367,7 +418,7 @@ class HostlistPageController:
                 clear_input=False,
             )
 
-        domain = self.extract_domain(text)
+        domain = HostlistPageController.extract_domain(text)
         if not domain:
             return CustomDomainsAddPlan(
                 level="warning",
@@ -453,18 +504,20 @@ class HostlistPageController:
         except Exception:
             return set()
 
-    def load_custom_ipset_text(self) -> CustomIpSetLoadState:
+    @staticmethod
+    def load_custom_ipset_text() -> CustomIpSetLoadState:
         from utils.ipsets_manager import ensure_ipset_all_user_file
 
         ensure_ipset_all_user_file()
-        state = self.load_ipset_all_entries()
+        state = HostlistPageController.load_ipset_all_entries()
         return CustomIpSetLoadState(
             text="\n".join(state.entries),
             lines_count=len(state.entries),
             base_set=set(state.base_set or set()),
         )
 
-    def save_custom_ipset_text(self, text: str) -> CustomIpSetSaveState:
+    @staticmethod
+    def save_custom_ipset_text(text: str) -> CustomIpSetSaveState:
         entries: list[str] = []
         normalized_lines: list[str] = []
 
@@ -477,8 +530,8 @@ class HostlistPageController:
                 normalized_lines.append(line)
                 continue
 
-            for item in self.split_ip_entries(line):
-                norm = self.normalize_ipset_entry(item)
+            for item in HostlistPageController.split_ip_entries(line):
+                norm = HostlistPageController.normalize_ipset_entry(item)
                 if norm:
                     if norm not in entries:
                         entries.append(norm)
@@ -486,25 +539,26 @@ class HostlistPageController:
                 else:
                     normalized_lines.append(item)
 
-        self.save_ipset_all_entries(entries)
+        HostlistPageController.save_ipset_all_entries(entries)
         return CustomIpSetSaveState(
             normalized_text="\n".join(normalized_lines),
             saved_lines=entries,
             saved_count=len(entries),
         )
 
-    def build_custom_ipset_status_plan(self, text: str) -> CustomIpSetStatusPlan:
+    @staticmethod
+    def build_custom_ipset_status_plan(text: str) -> CustomIpSetStatusPlan:
         lines = [
             line.strip()
             for line in str(text or "").split("\n")
             if line.strip() and not line.strip().startswith("#")
         ]
-        base_set = self.get_custom_ipset_base_set()
+        base_set = HostlistPageController.get_custom_ipset_base_set()
         valid_entries: set[str] = set()
 
         for line in lines:
-            for item in self.split_ip_entries(line):
-                norm = self.normalize_ipset_entry(item)
+            for item in HostlistPageController.split_ip_entries(line):
+                norm = HostlistPageController.normalize_ipset_entry(item)
                 if norm:
                     valid_entries.add(norm)
 
@@ -513,8 +567,8 @@ class HostlistPageController:
             line = raw_line.strip()
             if not line or line.startswith("#"):
                 continue
-            for item in self.split_ip_entries(line):
-                if not self.normalize_ipset_entry(item):
+            for item in HostlistPageController.split_ip_entries(line):
+                if not HostlistPageController.normalize_ipset_entry(item):
                     invalid_lines.append((i, item))
 
         return CustomIpSetStatusPlan(
@@ -524,7 +578,8 @@ class HostlistPageController:
             invalid_lines=invalid_lines,
         )
 
-    def build_add_custom_ipset_plan(self, *, raw_text: str, current_text: str) -> CustomIpSetAddPlan:
+    @staticmethod
+    def build_add_custom_ipset_plan(*, raw_text: str, current_text: str) -> CustomIpSetAddPlan:
         text = str(raw_text or "").strip()
         if not text:
             return CustomIpSetAddPlan(
@@ -535,7 +590,7 @@ class HostlistPageController:
                 clear_input=False,
             )
 
-        norm = self.normalize_ipset_entry(text)
+        norm = HostlistPageController.normalize_ipset_entry(text)
         if not norm:
             return CustomIpSetAddPlan(
                 level="warning",
@@ -578,15 +633,176 @@ class HostlistPageController:
             clear_input=True,
         )
 
-    def load_custom_netrogat_text(self) -> CustomNetrogatLoadState:
-        state = self.load_netrogat_entries()
+    @staticmethod
+    def get_custom_ipru_base_set() -> set[str]:
+        try:
+            from utils.ipsets_manager import get_ipset_ru_base_set
+
+            return get_ipset_ru_base_set()
+        except Exception:
+            return set()
+
+    @staticmethod
+    def load_custom_ipru_text() -> CustomIpRuLoadState:
+        state = HostlistPageController.load_ipset_ru_entries()
+        return CustomIpRuLoadState(
+            text="\n".join(state.entries),
+            lines_count=len(state.entries),
+            base_set=set(state.base_set or set()),
+        )
+
+    @staticmethod
+    def save_custom_ipru_text(text: str) -> CustomIpRuSaveState:
+        entries: list[str] = []
+        normalized_lines: list[str] = []
+
+        for raw_line in str(text or "").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                entries.append(line)
+                normalized_lines.append(line)
+                continue
+
+            for item in HostlistPageController.split_ip_entries(line):
+                norm = HostlistPageController.normalize_ipset_entry(item)
+                if norm:
+                    if norm not in entries:
+                        entries.append(norm)
+                        normalized_lines.append(norm)
+                else:
+                    normalized_lines.append(item)
+
+        HostlistPageController.save_ipset_ru_entries(entries)
+        return CustomIpRuSaveState(
+            normalized_text="\n".join(normalized_lines),
+            saved_lines=entries,
+            saved_count=len(entries),
+        )
+
+    @staticmethod
+    def build_custom_ipru_status_plan(text: str) -> CustomIpRuStatusPlan:
+        lines = [
+            line.strip()
+            for line in str(text or "").split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        base_set = HostlistPageController.get_custom_ipru_base_set()
+        valid_entries: set[str] = set()
+
+        for line in lines:
+            for item in HostlistPageController.split_ip_entries(line):
+                norm = HostlistPageController.normalize_ipset_entry(item)
+                if norm:
+                    valid_entries.add(norm)
+
+        invalid_lines: list[tuple[int, str]] = []
+        for i, raw_line in enumerate(str(text or "").split("\n"), 1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            for item in HostlistPageController.split_ip_entries(line):
+                if not HostlistPageController.normalize_ipset_entry(item):
+                    invalid_lines.append((i, item))
+
+        return CustomIpRuStatusPlan(
+            total_count=len(base_set.union(valid_entries)),
+            base_count=len(base_set),
+            user_count=len({ip for ip in valid_entries if ip not in base_set}),
+            invalid_lines=invalid_lines,
+        )
+
+    @staticmethod
+    def build_add_custom_ipru_plan(*, raw_text: str, current_text: str) -> CustomIpRuAddPlan:
+        text = str(raw_text or "").strip()
+        if not text:
+            return CustomIpRuAddPlan(
+                level=None,
+                title="",
+                content="",
+                new_text=None,
+                clear_input=False,
+            )
+
+        added: list[str] = []
+        invalid: list[str] = []
+        skipped: list[str] = []
+        current_entries = [
+            line.strip().lower()
+            for line in str(current_text or "").split("\n")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+        for part in HostlistPageController.split_ip_entries(text):
+            norm = HostlistPageController.normalize_ipset_entry(part)
+            if not norm:
+                invalid.append(part)
+                continue
+            if norm.lower() in current_entries or norm.lower() in [a.lower() for a in added]:
+                skipped.append(norm)
+                continue
+            added.append(norm)
+
+        if not added and invalid:
+            return CustomIpRuAddPlan(
+                level="warning",
+                title="Ошибка",
+                content="Не удалось распознать IP или подсеть.\nПримеры: 1.2.3.4 или 10.0.0.0/8",
+                new_text=None,
+                clear_input=False,
+            )
+
+        if not added and skipped:
+            if len(skipped) == 1:
+                return CustomIpRuAddPlan(
+                    level="info",
+                    title="Информация",
+                    content=f"Запись уже есть:\n{skipped[0]}",
+                    new_text=None,
+                    clear_input=False,
+                )
+            return CustomIpRuAddPlan(
+                level="info",
+                title="Информация",
+                content=f"Все записи уже есть ({len(skipped)})",
+                new_text=None,
+                clear_input=False,
+            )
+
+        next_text = str(current_text or "")
+        if next_text and not next_text.endswith("\n"):
+            next_text += "\n"
+        next_text += "\n".join(added)
+
+        if skipped:
+            return CustomIpRuAddPlan(
+                level="success",
+                title="Добавлено",
+                content=f"Добавлено IP-исключений. Пропущено уже существующих: {len(skipped)}",
+                new_text=next_text,
+                clear_input=True,
+            )
+
+        return CustomIpRuAddPlan(
+            level=None,
+            title="",
+            content="",
+            new_text=next_text,
+            clear_input=True,
+        )
+
+    @staticmethod
+    def load_custom_netrogat_text() -> CustomNetrogatLoadState:
+        state = HostlistPageController.load_netrogat_entries()
         return CustomNetrogatLoadState(
             text="\n".join(state.entries),
             lines_count=len(state.entries),
             base_set=set(state.base_set or set()),
         )
 
-    def save_custom_netrogat_text(self, text: str) -> CustomNetrogatSaveState:
+    @staticmethod
+    def save_custom_netrogat_text(text: str) -> CustomNetrogatSaveState:
         from utils.netrogat_manager import _normalize_domain
 
         domains: list[str] = []
@@ -601,7 +817,7 @@ class HostlistPageController:
                 normalized_lines.append(line)
                 continue
 
-            for item in self.split_domains(line):
+            for item in HostlistPageController.split_domains(line):
                 norm = _normalize_domain(item)
                 if norm:
                     if norm not in domains:
@@ -610,7 +826,7 @@ class HostlistPageController:
                 else:
                     normalized_lines.append(item)
 
-        success = self.save_netrogat_entries(domains)
+        success = HostlistPageController.save_netrogat_entries(domains)
         return CustomNetrogatSaveState(
             success=bool(success),
             normalized_text="\n".join(normalized_lines),
@@ -618,7 +834,8 @@ class HostlistPageController:
             saved_count=len(domains),
         )
 
-    def build_custom_netrogat_status_plan(self, text: str) -> CustomNetrogatStatusPlan:
+    @staticmethod
+    def build_custom_netrogat_status_plan(text: str) -> CustomNetrogatStatusPlan:
         from utils.netrogat_manager import _normalize_domain
 
         lines = [
@@ -626,11 +843,11 @@ class HostlistPageController:
             for line in str(text or "").split("\n")
             if line.strip() and not line.strip().startswith("#")
         ]
-        base_set = self.get_netrogat_base_set()
+        base_set = HostlistPageController.get_netrogat_base_set()
         valid_entries: set[str] = set()
 
         for line in lines:
-            for item in self.split_domains(line):
+            for item in HostlistPageController.split_domains(line):
                 norm = _normalize_domain(item)
                 if norm:
                     valid_entries.add(norm)
@@ -650,7 +867,8 @@ class HostlistPageController:
         except Exception:
             return set()
 
-    def build_add_custom_netrogat_plan(self, *, raw_text: str, current_text: str) -> CustomNetrogatAddPlan:
+    @staticmethod
+    def build_add_custom_netrogat_plan(*, raw_text: str, current_text: str) -> CustomNetrogatAddPlan:
         from utils.netrogat_manager import _normalize_domain
 
         raw = str(raw_text or "").strip()
@@ -663,7 +881,7 @@ class HostlistPageController:
                 clear_input=False,
             )
 
-        parts = self.split_domains(raw)
+        parts = HostlistPageController.split_domains(raw)
         if not parts:
             return CustomNetrogatAddPlan(
                 level="warning",
@@ -833,6 +1051,239 @@ class HostlistPageController:
         from utils.netrogat_manager import ensure_netrogat_base_defaults
 
         return int(ensure_netrogat_base_defaults())
+
+    @staticmethod
+    def open_lists_folder_action() -> HostlistActionResult:
+        try:
+            HostlistPageController.open_lists_folder()
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Открыта папка листов",
+                infobar_level=None,
+                infobar_title="",
+                infobar_content="",
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка открытия папки: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось открыть папку:\n{e}",
+            )
+
+    @staticmethod
+    def rebuild_hostlists_action() -> HostlistActionResult:
+        try:
+            HostlistPageController.rebuild_hostlists()
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Хостлисты обновлены",
+                infobar_level="success",
+                infobar_title="Готово",
+                infobar_content="Хостлисты обновлены",
+                reload_info=True,
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка перестроения: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось перестроить:\n{e}",
+            )
+
+    @staticmethod
+    def open_domains_user_file_action() -> HostlistActionResult:
+        try:
+            HostlistPageController.open_domains_user_file()
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Открыт файл other.user.txt",
+                infobar_level=None,
+                infobar_title="",
+                infobar_content="",
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка открытия файла: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось открыть:\n{e}",
+            )
+
+    @staticmethod
+    def reset_domains_file_action() -> HostlistActionResult:
+        try:
+            if HostlistPageController.reset_domains_file():
+                return HostlistActionResult(
+                    ok=True,
+                    log_level="INFO",
+                    log_message="Файл other.user.txt сброшен",
+                    infobar_level=None,
+                    infobar_title="",
+                    infobar_content="",
+                    reload_domains=True,
+                    append_domains_status_suffix=" • ✅ Сброшено",
+                )
+            return HostlistActionResult(
+                ok=False,
+                log_level="WARNING",
+                log_message="Не удалось сбросить my hostlist",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content="Не удалось сбросить my hostlist",
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка сброса hostlist: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось сбросить:\n{e}",
+            )
+
+    @staticmethod
+    def open_ipset_all_user_file_action() -> HostlistActionResult:
+        try:
+            HostlistPageController.open_ipset_all_user_file()
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Открыт файл ipset-all.user.txt",
+                infobar_level=None,
+                infobar_title="",
+                infobar_content="",
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка открытия ipset-all.user.txt: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось открыть:\n{e}",
+            )
+
+    @staticmethod
+    def open_netrogat_user_file_action() -> HostlistActionResult:
+        try:
+            HostlistPageController.open_netrogat_user_file()
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Открыт файл netrogat.user.txt",
+                infobar_level=None,
+                infobar_title="",
+                infobar_content="",
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка открытия netrogat.user.txt: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось открыть:\n{e}",
+            )
+
+    @staticmethod
+    def open_netrogat_final_file_action() -> HostlistActionResult:
+        try:
+            HostlistPageController.open_netrogat_final_file()
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Открыт итоговый файл netrogat.txt",
+                infobar_level=None,
+                infobar_title="",
+                infobar_content="",
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка открытия итогового netrogat.txt: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось открыть итоговый файл: {e}",
+            )
+
+    @staticmethod
+    def add_missing_netrogat_defaults_action() -> HostlistActionResult:
+        added = HostlistPageController.add_missing_netrogat_defaults()
+        if added == 0:
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Системная база уже содержит все домены по умолчанию",
+                infobar_level="success",
+                infobar_title="Готово",
+                infobar_content="Системная база уже содержит все домены по умолчанию.",
+                invalidate_excl_base_cache=True,
+            )
+        return HostlistActionResult(
+            ok=True,
+            log_level="INFO",
+            log_message=f"Восстановлено доменов в системной базе: {added}",
+            infobar_level="success",
+            infobar_title="Готово",
+            infobar_content=f"Восстановлено доменов в системной базе: {added}",
+            invalidate_excl_base_cache=True,
+            reload_exclusions=True,
+        )
+
+    @staticmethod
+    def open_ipset_ru_user_file_action() -> HostlistActionResult:
+        try:
+            HostlistPageController.open_ipset_ru_user_file()
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Открыт файл ipset-ru.user.txt",
+                infobar_level=None,
+                infobar_title="",
+                infobar_content="",
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка открытия ipset-ru.user.txt: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось открыть:\n{e}",
+            )
+
+    @staticmethod
+    def open_ipset_ru_final_file_action() -> HostlistActionResult:
+        try:
+            HostlistPageController.open_ipset_ru_final_file()
+            return HostlistActionResult(
+                ok=True,
+                log_level="INFO",
+                log_message="Открыт итоговый файл ipset-ru.txt",
+                infobar_level=None,
+                infobar_title="",
+                infobar_content="",
+            )
+        except Exception as e:
+            return HostlistActionResult(
+                ok=False,
+                log_level="ERROR",
+                log_message=f"Ошибка открытия итогового ipset-ru.txt: {e}",
+                infobar_level="warning",
+                infobar_title="Ошибка",
+                infobar_content=f"Не удалось открыть итоговый файл: {e}",
+            )
 
     @staticmethod
     def load_ipset_ru_entries() -> HostlistEntriesState:
