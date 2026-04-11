@@ -181,14 +181,6 @@ class AutostartOptionCard(SimpleCardWidget):
         self._apply_visuals()
         self.update()  # Принудительное обновление виджета
 
-    def enterEvent(self, event):
-        if not self._disabled and not self._is_active:
-            pass  # SimpleCardWidget handles its own hover background
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        super().leaveEvent(event)
-
     def mousePressEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(event)
@@ -216,10 +208,6 @@ class ClickableModeCard(SimpleCardWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-
-    def refresh_theme(self) -> None:
-        # SimpleCardWidget handles its own theming; nothing extra needed.
-        pass
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -334,13 +322,6 @@ class AutostartPage(BasePage):
     def _on_ui_state_changed(self, state: AppUiState, _changed_fields: frozenset[str]) -> None:
         strategy_name = state.current_strategy_summary or self.strategy_name
         self.update_status(state.autostart_enabled, strategy_name)
-
-    def set_strategy_name(self, name: str):
-        self.strategy_name = name
-        if hasattr(self, "current_strategy_label"):
-            self.current_strategy_label.setText(
-                name or self._tr("page.autostart.strategy.not_selected", "Не выбрана")
-            )
 
     def _build_ui(self):
         tokens = get_theme_tokens()
@@ -539,12 +520,6 @@ class AutostartPage(BasePage):
         if hasattr(self, "gui_option") and hasattr(self.gui_option, "refresh_theme"):
             try:
                 self.gui_option.refresh_theme()
-            except Exception:
-                pass
-
-        if hasattr(self, "mode_card") and hasattr(self.mode_card, "refresh_theme"):
-            try:
-                self.mode_card.refresh_theme()
             except Exception:
                 pass
 

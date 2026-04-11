@@ -4,20 +4,20 @@
 import time
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtWidgets import QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QApplication, QSizePolicy, QPushButton
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton
 import qtawesome as qta
 
 try:
     from qfluentwidgets import (
         LineEdit, MessageBox, InfoBar,
         PushButton, PrimaryPushButton,
-        BodyLabel, CaptionLabel, StrongBodyLabel, SubtitleLabel,
+        BodyLabel, CaptionLabel, SubtitleLabel,
     )
     _HAS_FLUENT = True
 except ImportError:
     from PyQt6.QtWidgets import (   # type: ignore[assignment]
         QLineEdit as LineEdit, QLabel as BodyLabel, QLabel as CaptionLabel,
-        QLabel as StrongBodyLabel, QLabel as SubtitleLabel,
+        QLabel as SubtitleLabel,
     )
     PushButton = QPushButton  # type: ignore[assignment]
     PrimaryPushButton = QPushButton  # type: ignore[assignment]
@@ -25,82 +25,25 @@ except ImportError:
     InfoBar = None
     _HAS_FLUENT = False
 
-import webbrowser
-
 from donater.premium_page_controller import PremiumPageController
-from donater.premium_worker import PremiumWorkerThread
 from .base_page import BasePage
+from ui.pages.premium_status_card import StatusCard
+from ui.pages.premium_page_pairing_workflow import (
+    apply_pair_code_error_ui,
+    apply_pair_code_result_ui,
+    apply_pair_code_start_ui,
+    can_poll_pairing_status,
+    has_pending_pair_code,
+    poll_pairing_status,
+    start_pairing_status_autopoll,
+    stop_pairing_status_autopoll,
+    sync_pairing_status_autopoll,
+    update_device_info_labels,
+)
 from ui.compat_widgets import SettingsCard, RefreshButton, QuickActionsBar
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.theme_semantic import get_semantic_palette
 from ui.text_catalog import tr as tr_catalog
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# StatusCard — full-width subscription status display
-# ─────────────────────────────────────────────────────────────────────────────
-
-class StatusCard(QFrame):
-    """Full-width subscription status card (no InfoBar dependency)."""
-
-    _STATUS_CONFIG = {
-        'active':  {'bg': '#1c2e24', 'fg': '#7ecb9a', 'icon': '✓'},
-        'warning': {'bg': '#2a2516', 'fg': '#c8a96e', 'icon': '⚠'},
-        'expired': {'bg': '#2a1e1e', 'fg': '#c98080', 'icon': '✕'},
-        'neutral': {'bg': '#1a2030', 'fg': '#7aa8d4', 'icon': 'ℹ'},
-    }
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.setMinimumHeight(52)
-
-        row = QHBoxLayout(self)
-        row.setContentsMargins(14, 10, 14, 10)
-        row.setSpacing(10)
-
-        self._icon_lbl = QLabel()
-        self._icon_lbl.setFixedWidth(22)
-        self._icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self._title_lbl = QLabel()
-        self._detail_lbl = QLabel()
-
-        row.addWidget(self._icon_lbl)
-        row.addWidget(self._title_lbl)
-        row.addSpacing(8)
-        row.addWidget(self._detail_lbl)
-        row.addStretch(1)
-
-        self.set_status("", "", "neutral")
-
-    def set_status(self, text: str, details: str = "", status: str = "neutral"):
-        cfg = self._STATUS_CONFIG.get(status, self._STATUS_CONFIG['neutral'])
-
-        self._icon_lbl.setText(cfg['icon'])
-        self._icon_lbl.setStyleSheet(
-            f"color: {cfg['fg']}; font-size: 15px; font-weight: bold; background: transparent;"
-        )
-
-        self._title_lbl.setText(text)
-        self._title_lbl.setStyleSheet(
-            f"color: {cfg['fg']}; font-weight: 600; font-size: 13px; background: transparent;"
-        )
-
-        self._detail_lbl.setText(details)
-        self._detail_lbl.setStyleSheet(
-            "color: rgba(255,255,255,180); font-size: 13px; background: transparent;"
-        )
-        self._detail_lbl.setVisible(bool(details))
-
-        self.setStyleSheet(f"""
-            StatusCard {{
-                background-color: {cfg['bg']};
-                border: none;
-                border-radius: 8px;
-            }}
-        """)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PremiumPage
@@ -645,119 +588,72 @@ class PremiumPage(BasePage):
             self.key_input_container.setVisible(visible)
 
     def _has_pending_pair_code(self) -> bool:
-        snapshot = PremiumPageController.read_pairing_snapshot(
+        return has_pending_pair_code(
             self.RegistryManager,
             current_time=int(time.time()),
         )
-        return snapshot.has_pending_pair_code
 
     def _can_poll_pairing_status(self) -> bool:
-        snapshot = PremiumPageController.read_pairing_snapshot(
-            self.RegistryManager,
-            current_time=int(time.time()),
-        )
-
-        plan = PremiumPageController.build_pairing_autopoll_plan(
+        return can_poll_pairing_status(
             checker_ready=bool(self.checker),
-            storage_ready=bool(self.RegistryManager),
+            storage=self.RegistryManager,
             page_visible=self.isVisible(),
             activation_in_progress=self._activation_in_progress,
             connection_test_in_progress=self._connection_test_in_progress,
             worker_running=bool(self.current_thread and self.current_thread.isRunning()),
-            has_device_token=snapshot.has_device_token,
-            has_pending_pair_code=snapshot.has_pending_pair_code,
+            current_time=int(time.time()),
         )
-        return plan.can_poll
 
     def _start_pairing_status_autopoll(self) -> None:
-        snapshot = PremiumPageController.read_pairing_snapshot(
-            self.RegistryManager,
-            current_time=int(time.time()),
-        )
-        plan = PremiumPageController.build_pairing_autopoll_plan(
+        start_pairing_status_autopoll(
+            self._pairing_status_timer,
             checker_ready=bool(self.checker),
-            storage_ready=bool(self.RegistryManager),
+            storage=self.RegistryManager,
             page_visible=self.isVisible(),
             activation_in_progress=self._activation_in_progress,
             connection_test_in_progress=self._connection_test_in_progress,
             worker_running=bool(self.current_thread and self.current_thread.isRunning()),
-            has_device_token=snapshot.has_device_token,
-            has_pending_pair_code=snapshot.has_pending_pair_code,
+            current_time=int(time.time()),
         )
-        if plan.start_timer and not self._pairing_status_timer.isActive():
-            self._pairing_status_timer.start()
 
     def _stop_pairing_status_autopoll(self) -> None:
-        if self._pairing_status_timer.isActive():
-            self._pairing_status_timer.stop()
+        stop_pairing_status_autopoll(self._pairing_status_timer)
 
     def _sync_pairing_status_autopoll(self) -> None:
-        snapshot = PremiumPageController.read_pairing_snapshot(
-            self.RegistryManager,
-            current_time=int(time.time()),
-        )
-
-        plan = PremiumPageController.build_pairing_autopoll_plan(
+        sync_pairing_status_autopoll(
+            self._pairing_status_timer,
             checker_ready=bool(self.checker),
-            storage_ready=bool(self.RegistryManager),
+            storage=self.RegistryManager,
             page_visible=self.isVisible(),
             activation_in_progress=self._activation_in_progress,
             connection_test_in_progress=self._connection_test_in_progress,
             worker_running=bool(self.current_thread and self.current_thread.isRunning()),
-            has_device_token=snapshot.has_device_token,
-            has_pending_pair_code=snapshot.has_pending_pair_code,
+            current_time=int(time.time()),
         )
-        if plan.start_timer:
-            self._start_pairing_status_autopoll()
-        if plan.stop_timer:
-            self._stop_pairing_status_autopoll()
 
     def _poll_pairing_status(self) -> None:
-        plan = PremiumPageController.build_pairing_poll_plan(
+        poll_pairing_status(
             can_poll=self._can_poll_pairing_status(),
+            stop_autopoll=self._stop_pairing_status_autopoll,
+            check_status=self._check_status,
         )
-        if plan.should_stop_timer:
-            self._stop_pairing_status_autopoll()
-            return
-        if plan.should_check_status:
-            self._check_status()
 
     def _update_device_info(self):
-        if not self.checker:
-            return
-        try:
-            snapshot = PremiumPageController.read_device_storage_snapshot(
-                self.RegistryManager,
-                current_time=int(time.time()),
-            )
-            plan = PremiumPageController.build_device_info_plan(
-                device_id=self.checker.device_id,
-                device_token=snapshot.get("device_token"),
-                pair_code=snapshot.get("pair_code"),
-                last_check=snapshot.get("last_check"),
-                token_present_text=self._tr("page.premium.label.device_token.present", "device token: ✅"),
-                token_absent_text=self._tr("page.premium.label.device_token.absent", "device token: ❌"),
-                pair_template_text=self._tr("page.premium.label.pair_code.value", "pair: {pair_code}"),
-            )
-
-            self.device_id_label.setText(
-                self._tr(
-                    plan.device_id_text_key,
-                    plan.device_id_text_default,
-                    **plan.device_id_kwargs,
-                )
-            )
-            self.saved_key_label.setText(plan.saved_key_text)
-            self.last_check_label.setText(
-                self._tr(
-                    plan.last_check_text_key,
-                    plan.last_check_text_default,
-                    **plan.last_check_kwargs,
-                )
-            )
-        except Exception as e:
+        def _on_error(exc: Exception) -> None:
             from log import log
-            log(f"Ошибка обновления информации об устройстве: {e}", "DEBUG")
+
+            log(f"Ошибка обновления информации об устройстве: {exc}", "DEBUG")
+
+        update_device_info_labels(
+            checker=self.checker,
+            storage=self.RegistryManager,
+            tr=self._tr,
+            device_id_label=self.device_id_label,
+            saved_key_label=self.saved_key_label,
+            last_check_label=self.last_check_label,
+            on_error=_on_error,
+            current_time=int(time.time()),
+        )
 
     def _open_extend_bot(self) -> None:
         result = PremiumPageController.open_extend_bot()
@@ -791,22 +687,14 @@ class PremiumPage(BasePage):
                 )
                 return
 
-        plan = PremiumPageController.build_pair_code_start_plan()
+        plan = apply_pair_code_start_ui(
+            activate_btn=self.activate_btn,
+            key_input=self.key_input,
+            tr=self._tr,
+            set_activation_status=self._set_activation_status,
+            stop_autopoll=self._stop_pairing_status_autopoll,
+        )
         self._activation_in_progress = plan.activation_in_progress
-        if plan.stop_autopoll:
-            self._stop_pairing_status_autopoll()
-        if plan.clear_key_input:
-            self.key_input.clear()
-        self.activate_btn.setEnabled(plan.activate_enabled)
-        self.activate_btn.setText(
-            self._tr(plan.activate_text_key, plan.activate_text_default)
-        )
-        self._set_activation_status(
-            text=plan.activation_status_plan.text,
-            text_key=plan.activation_status_plan.text_key,
-            text_default=plan.activation_status_plan.text_default,
-            text_kwargs=plan.activation_status_plan.text_kwargs,
-        )
 
         self.current_thread = PremiumPageController.create_worker_thread(self.checker.pair_start)
         self.current_thread.result_ready.connect(self._on_pair_code_created)
@@ -814,49 +702,29 @@ class PremiumPage(BasePage):
         self.current_thread.start()
 
     def _on_pair_code_created(self, result):
-        plan = PremiumPageController.build_pair_code_result_plan(result)
-        self._activation_in_progress = plan.activation_in_progress
-        self.activate_btn.setEnabled(plan.activate_enabled)
-        self.activate_btn.setText(self._tr(plan.activate_text_key, plan.activate_text_default))
-        if plan.clear_key_input:
-            self.key_input.clear()
-        else:
-            self.key_input.setText(plan.key_input_text)
-        if plan.copy_to_clipboard and plan.key_input_text:
-            try:
-                QApplication.clipboard().setText(plan.key_input_text)
-            except Exception:
-                pass
-        self._set_activation_status(
-            text=plan.activation_status_plan.text,
-            text_key=plan.activation_status_plan.text_key,
-            text_default=plan.activation_status_plan.text_default,
-            text_kwargs=plan.activation_status_plan.text_kwargs,
+        plan = apply_pair_code_result_ui(
+            result,
+            activate_btn=self.activate_btn,
+            key_input=self.key_input,
+            tr=self._tr,
+            set_activation_status=self._set_activation_status,
+            update_device_info=self._update_device_info,
+            start_autopoll=self._start_pairing_status_autopoll,
+            stop_autopoll=self._stop_pairing_status_autopoll,
         )
-        if plan.update_device_info:
-            self._update_device_info()
-        if plan.start_autopoll:
-            self._start_pairing_status_autopoll()
-        if plan.stop_autopoll:
-            self._stop_pairing_status_autopoll()
+        self._activation_in_progress = plan.activation_in_progress
 
     def _on_activation_error(self, error):
-        plan = PremiumPageController.build_pair_code_error_plan(str(error or ""))
-        self._activation_in_progress = plan.activation_in_progress
-        if plan.clear_key_input:
-            self.key_input.clear()
-        self.activate_btn.setEnabled(plan.activate_enabled)
-        self.activate_btn.setText(self._tr(plan.activate_text_key, plan.activate_text_default))
-        self._set_activation_status(
-            text=plan.activation_status_plan.text,
-            text_key=plan.activation_status_plan.text_key,
-            text_default=plan.activation_status_plan.text_default,
-            text_kwargs=plan.activation_status_plan.text_kwargs,
+        plan = apply_pair_code_error_ui(
+            error,
+            activate_btn=self.activate_btn,
+            key_input=self.key_input,
+            tr=self._tr,
+            set_activation_status=self._set_activation_status,
+            update_device_info=self._update_device_info,
+            stop_autopoll=self._stop_pairing_status_autopoll,
         )
-        if plan.update_device_info:
-            self._update_device_info()
-        if plan.stop_autopoll:
-            self._stop_pairing_status_autopoll()
+        self._activation_in_progress = plan.activation_in_progress
 
     # ── status check ─────────────────────────────────────────────────────────
 

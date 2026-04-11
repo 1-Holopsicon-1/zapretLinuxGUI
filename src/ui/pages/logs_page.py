@@ -40,6 +40,12 @@ from ui.pages.logs_page_support_workflow import (
     get_orchestra_runner,
     update_orchestra_indicator,
 )
+from ui.pages.logs_page_worker_workflow import (
+    handle_thread_stop,
+    run_logs_runtime_init,
+    start_tail_worker,
+    start_winws_output_worker,
+)
 from ui.text_catalog import tr as tr_catalog
 from ui.theme import get_theme_tokens
 from log import log
@@ -148,21 +154,16 @@ class LogsPage(BasePage):
         self._run_runtime_init_once()
 
     def _run_runtime_init_once(self) -> None:
-        if self._runtime_initialized:
-            return
-        self._runtime_initialized = True
-
-        # Делаем первый refresh после построения UI, а не из activation,
-        # чтобы page activation не владел initial runtime-догрузкой.
-        QTimer.singleShot(0, lambda: self._refresh_logs_list(run_cleanup=False))
-        QTimer.singleShot(0, self._update_stats)
-
-        if not self._runtime_started:
-            self._runtime_started = True
-            self._start_tail_worker()
-            self._start_winws_output_worker()
-            # Таймер статуса должен жить отдельно от простого переключения вкладок.
-            self._winws_status_timer.start(3000)
+        self._runtime_initialized, self._runtime_started = run_logs_runtime_init(
+            runtime_initialized=self._runtime_initialized,
+            runtime_started=self._runtime_started,
+            schedule_fn=QTimer.singleShot,
+            refresh_logs_fn=self._refresh_logs_list,
+            update_stats_fn=self._update_stats,
+            start_tail_worker_fn=self._start_tail_worker,
+            start_winws_worker_fn=self._start_winws_output_worker,
+            start_status_timer_fn=self._winws_status_timer.start,
+        )
 
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
@@ -824,29 +825,19 @@ class LogsPage(BasePage):
             
     def _start_tail_worker(self):
         """Запускает worker для чтения лога"""
-        self._stop_tail_worker()
-        plan = LogsPageController.build_tail_start_plan(current_log_file=self.current_log_file)
-        if not plan.should_start:
-            return
-
-        self.log_text.clear()
-        self.info_label.setText(plan.info_text)
-
-        try:
-            self._thread = QThread(self)
-            self._worker = LogsPageController.create_log_tail_worker(plan.file_path)
-            self._worker.moveToThread(self._thread)
-
-            self._thread.started.connect(self._worker.run)
-            self._worker.new_lines.connect(self._append_text)
-            self._worker.finished.connect(self._thread.quit)
-            self._worker.finished.connect(self._worker.deleteLater)
-            self._thread.finished.connect(self._on_tail_thread_finished)
-            self._thread.finished.connect(self._thread.deleteLater)
-
-            self._thread.start()
-        except Exception as e:
-            log(f"Ошибка запуска log tail worker: {e}", "ERROR")
+        self._thread, self._worker = start_tail_worker(
+            current_log_file=self.current_log_file,
+            stop_worker_fn=self._stop_tail_worker,
+            build_tail_start_plan_fn=LogsPageController.build_tail_start_plan,
+            set_info_text_fn=self.info_label.setText,
+            clear_log_view_fn=self.log_text.clear,
+            thread_cls=QThread,
+            parent=self,
+            create_worker_fn=LogsPageController.create_log_tail_worker,
+            on_new_lines=self._append_text,
+            on_thread_finished=self._on_tail_thread_finished,
+            log_fn=log,
+        )
 
     def _on_tail_thread_finished(self):
         """Очищает ссылки на thread/worker после завершения, чтобы не дергать удалённые Qt-объекты."""
@@ -855,101 +846,44 @@ class LogsPage(BasePage):
             
     def _stop_tail_worker(self, blocking: bool = False):
         """Останавливает worker (неблокирующий по умолчанию)"""
-        worker = getattr(self, "_worker", None)
-        thread = getattr(self, "_thread", None)
-        stop_plan = LogsPageController.build_thread_stop_plan(
-            has_worker=worker is not None,
-            thread_running=bool(thread and self._thread and self._thread.isRunning()) if thread is not None else False,
+        self._worker, self._thread = handle_thread_stop(
+            worker=getattr(self, "_worker", None),
+            thread=getattr(self, "_thread", None),
+            build_stop_plan_fn=LogsPageController.build_thread_stop_plan,
             blocking=blocking,
+            log_fn=log,
+            warning_prefix="Log tail worker",
         )
-
-        if stop_plan.should_stop_worker and worker:
-            try:
-                worker.stop()
-            except RuntimeError:
-                # Qt-объект уже удалён
-                self._worker = None
-                worker = None
-
-        if not thread:
-            return
-
-        try:
-            running = bool(thread.isRunning())
-        except RuntimeError:
-            # Qt-объект уже удалён
-            self._thread = None
-            return
-
-        if not stop_plan.should_quit_thread or not running:
-            return
-
-        thread.quit()
-        if not stop_plan.should_wait:
-            return
-
-        # Блокирующий режим только при закрытии приложения
-        if not thread.wait(stop_plan.wait_timeout_ms):
-            log("⚠ Log tail worker не завершился, принудительно завершаем", "WARNING")
-            if stop_plan.should_terminate:
-                try:
-                    thread.terminate()
-                    thread.wait(stop_plan.terminate_wait_ms)
-                except Exception:
-                    pass
 
     def _start_winws_output_worker(self):
         """Запускает worker для чтения вывода winws"""
-        self._stop_winws_output_worker()
-        self._refresh_winws_title()
-
-        plan = LogsPageController.build_winws_output_plan(
+        self._winws_thread, self._winws_worker = start_winws_output_worker(
+            stop_worker_fn=self._stop_winws_output_worker,
+            refresh_title_fn=self._refresh_winws_title,
+            build_output_plan_fn=LogsPageController.build_winws_output_plan,
             launch_method=self._get_launch_method(),
             orchestra_runner=self._get_orchestra_runner(),
             language=self._ui_language,
+            set_status_fn=self._set_winws_status,
+            thread_cls=QThread,
+            parent=self,
+            create_worker_fn=LogsPageController.create_winws_output_worker,
+            on_new_output=self._append_winws_output,
+            on_process_ended=self._on_winws_process_ended,
+            log_fn=log,
         )
-        self._set_winws_status(plan.status_kind, plan.status_text)
-
-        if plan.action != "start_worker" or not plan.process:
-            return
-
-        try:
-            self._winws_thread = QThread(self)
-            self._winws_worker = LogsPageController.create_winws_output_worker(plan.process)
-            self._winws_worker.moveToThread(self._winws_thread)
-
-            self._winws_thread.started.connect(self._winws_worker.run)
-            self._winws_worker.new_output.connect(self._append_winws_output)
-            self._winws_worker.process_ended.connect(self._on_winws_process_ended)
-            self._winws_worker.finished.connect(self._winws_thread.quit)
-
-            self._winws_thread.start()
-        except Exception as e:
-            log(f"Ошибка запуска winws output worker: {e}", "ERROR")
 
     def _stop_winws_output_worker(self, blocking: bool = False):
         """Останавливает worker чтения вывода winws (неблокирующий по умолчанию)"""
         try:
-            stop_plan = LogsPageController.build_thread_stop_plan(
-                has_worker=self._winws_worker is not None,
-                thread_running=bool(self._winws_thread and self._winws_thread.isRunning()),
+            self._winws_worker, self._winws_thread = handle_thread_stop(
+                worker=self._winws_worker,
+                thread=self._winws_thread,
+                build_stop_plan_fn=LogsPageController.build_thread_stop_plan,
                 blocking=blocking,
+                log_fn=log,
+                warning_prefix="Winws output worker",
             )
-            if stop_plan.should_stop_worker and self._winws_worker:
-                self._winws_worker.stop()
-            if stop_plan.should_quit_thread and self._winws_thread and self._winws_thread.isRunning():
-                self._winws_thread.quit()
-                if stop_plan.should_wait:
-                    # Блокирующий режим только при закрытии приложения
-                    if not self._winws_thread.wait(stop_plan.wait_timeout_ms):
-                        log("⚠ Winws output worker не завершился, принудительно завершаем", "WARNING")
-                        if stop_plan.should_terminate:
-                            try:
-                                self._winws_thread.terminate()
-                                self._winws_thread.wait(stop_plan.terminate_wait_ms)
-                            except:
-                                pass
-                # Неблокирующий режим - поток остановится сам
         except Exception as e:
             log(f"Ошибка остановки winws output worker: {e}", "DEBUG")
 

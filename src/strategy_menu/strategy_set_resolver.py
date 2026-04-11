@@ -5,11 +5,10 @@ from typing import Optional
 
 def get_current_strategy_set() -> Optional[str]:
     """
-    Возвращает текущий набор стратегий без зависимости от legacy registry-пакета.
+    Возвращает текущий набор стратегий без привязки к старому launch/catalog слою.
 
-    Сейчас это нужно и новому direct/orchestra preset-слою, и старому
-    registry-driven слою. Поэтому источник истины должен жить в нейтральном
-    helper-модуле, а не внутри `legacy_registry_launch`.
+    Источник истины должен жить в нейтральном helper-модуле, а не внутри
+    переходных или legacy-пакетов.
     """
     try:
         from strategy_menu.launch_method_store import get_strategy_launch_method

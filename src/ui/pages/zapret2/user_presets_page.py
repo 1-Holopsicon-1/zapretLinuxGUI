@@ -99,13 +99,13 @@ def _tr_text(key: str, language: str, default: str, **kwargs) -> str:
     return text
 
 
-from ui.pages.user_presets_components import (
-    UserPresetsToolbarLayout,
-    _PresetListModel,
-    _LinkedWheelListView,
-    _PresetListDelegate,
-    _fluent_icon,
-    _make_menu_action,
+from ui.presets_menu import (
+    PresetsToolbarLayout,
+    PresetListModel,
+    LinkedWheelListView,
+    PresetListDelegate,
+    fluent_icon,
+    make_menu_action,
 )
 
 class _CreatePresetDialog(MessageBoxBase):
@@ -371,8 +371,8 @@ class BaseZapret2UserPresetsPage(BasePage):
             except Exception:
                 pass
 
-        self._presets_model: Optional[_PresetListModel] = None
-        self._presets_delegate: Optional[_PresetListDelegate] = None
+        self._presets_model: Optional[PresetListModel] = None
+        self._presets_delegate: Optional[PresetListDelegate] = None
         self._last_page_theme_key: tuple[str, str, str] | None = None
 
         self._bulk_reset_running = False
@@ -387,7 +387,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         self._preset_search_timer.setSingleShot(True)
         self._preset_search_timer.timeout.connect(self._apply_preset_search)
         self._preset_search_input: Optional[QLineEdit] = None
-        self._toolbar_layout: Optional[UserPresetsToolbarLayout] = None
+        self._toolbar_layout: Optional[PresetsToolbarLayout] = None
 
         self._ui_state_store: Optional[MainWindowStateStore] = None
         self._ui_state_unsubscribe = None
@@ -670,7 +670,7 @@ class BaseZapret2UserPresetsPage(BasePage):
 
         # Buttons: create + import (above the preset list)
         self.add_spacing(12)
-        toolbar_layout = UserPresetsToolbarLayout(self)
+        toolbar_layout = PresetsToolbarLayout(self)
         self._toolbar_layout = toolbar_layout
 
         # "Restore deleted presets" button
@@ -750,7 +750,7 @@ class BaseZapret2UserPresetsPage(BasePage):
         self._preset_search_input.textChanged.connect(self._on_preset_search_text_changed)
         self.add_widget(self._preset_search_input)
 
-        self.presets_list = _LinkedWheelListView(self)
+        self.presets_list = LinkedWheelListView(self)
         self.presets_list.setObjectName("userPresetsList")
         self.presets_list.setMouseTracking(True)
         self.presets_list.setSelectionMode(QListView.SelectionMode.SingleSelection)
@@ -773,8 +773,8 @@ class BaseZapret2UserPresetsPage(BasePage):
         self.presets_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.presets_list.setDragDropMode(QListView.DragDropMode.DragDrop)
 
-        self._presets_model = _PresetListModel(self.presets_list)
-        self._presets_delegate = _PresetListDelegate(self.presets_list)
+        self._presets_model = PresetListModel(self.presets_list)
+        self._presets_delegate = PresetListDelegate(self.presets_list)
         self._presets_delegate.set_ui_language(self._ui_language)
         self._presets_delegate.action_triggered.connect(self._on_preset_list_action)
         self.presets_list.setModel(self._presets_model)
@@ -1142,8 +1142,8 @@ class BaseZapret2UserPresetsPage(BasePage):
                 "reset": self._tr("page.z2_user_presets.menu.reset", "Сбросить"),
                 "delete": self._tr("page.z2_user_presets.menu.delete", "Удалить"),
             },
-            make_menu_action=_make_menu_action,
-            icon_resolver=_fluent_icon,
+            make_menu_action=make_menu_action,
+            icon_resolver=fluent_icon,
             round_menu_cls=RoundMenu if RoundMenu is not None and Action is not None else None,
         )
         if chosen:

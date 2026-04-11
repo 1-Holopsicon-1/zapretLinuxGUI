@@ -13,6 +13,12 @@ from ui.pages.blockcheck_domain_chip import DomainChip
 from ui.pages.blockcheck_page_domains_build import build_blockcheck_domains_ui
 from ui.pages.blockcheck_page_sections_build import build_actions_section, build_results_section
 from ui.pages.blockcheck_page_log_build import build_log_card_section
+from ui.pages.blockcheck_page_summary_content import (
+    DPI_BADGE_COLORS as _DPI_BADGE_COLORS,
+    DPI_LABELS_RU as _DPI_LABELS_RU,
+    build_dpi_summary_content,
+    generate_recommendations,
+)
 from ui.pages.blockcheck_page_summary_build import build_dpi_summary_section
 from ui.pages.blockcheck_page_helpers import (
     add_domain_chip,
@@ -1021,164 +1027,24 @@ class BlockcheckPage(BasePage):
 
     def _update_dpi_summary(self, report):
         """Show DPI summary card after tests complete."""
-        from blockcheck.models import DPIClassification
-
         self._dpi_card.setVisible(True)
-
-        # Find worst DPI classification
-        all_cls = [tr.classification for tr in report.targets]
-        dpi_types = [c for c in all_cls if c != DPIClassification.NONE]
-
-        if not dpi_types:
-            cls_value = "none"
-        else:
-            # Priority: full_block > tls_dpi > tls_mitm > isp_page > etc
-            priority = [
-                DPIClassification.FULL_BLOCK,
-                DPIClassification.TLS_MITM,
-                DPIClassification.TLS_DPI,
-                DPIClassification.ISP_PAGE,
-                DPIClassification.HTTP_INJECT,
-                DPIClassification.TCP_16_20,
-                DPIClassification.TCP_RESET,
-                DPIClassification.DNS_FAKE,
-                DPIClassification.STUN_BLOCK,
-            ]
-            worst = DPIClassification.NONE
-            for p in priority:
-                if p in dpi_types:
-                    worst = p
-                    break
-            cls_value = worst.value if worst != DPIClassification.NONE else dpi_types[0].value
-
-        # Badge
-        label = _DPI_LABELS_RU.get(cls_value, cls_value)
-        fg, bg = _DPI_BADGE_COLORS.get(cls_value, ("#e0a854", "#3a2e1a"))
-        dark = isDarkTheme()
-        badge_bg = bg if dark else fg
-        badge_fg = "#ffffff" if dark else "#ffffff"
-        self._dpi_badge.setText(label)
+        content = build_dpi_summary_content(
+            report=report,
+            is_dark=isDarkTheme(),
+            no_dpi_text=tr_catalog("page.blockcheck.no_dpi", default="DPI не обнаружен на проверенных ресурсах"),
+        )
+        self._dpi_badge.setText(content.badge_label)
         self._dpi_badge.setStyleSheet(
-            f"background: {badge_bg}; color: {badge_fg}; "
+            f"background: {content.badge_bg}; color: {content.badge_fg}; "
             f"font-weight: 600; font-size: 13px; border-radius: 8px; padding: 6px 16px;"
         )
-
-        # Detail
-        details = []
-        for tr in report.targets:
-            if tr.classification != DPIClassification.NONE:
-                details.append(f"{tr.name}: {_DPI_LABELS_RU.get(tr.classification.value, tr.classification.value)}")
-
-        # Preflight summary (append before setText)
-        if report.preflight:
-            pf_passed = sum(1 for p in report.preflight if p.verdict.value == "passed")
-            pf_warned = sum(1 for p in report.preflight if p.verdict.value == "warning")
-            pf_failed = sum(1 for p in report.preflight if p.verdict.value == "failed")
-            pf_text = f"Preflight: {pf_passed} OK"
-            if pf_warned:
-                pf_text += f", {pf_warned} предупр."
-            if pf_failed:
-                pf_text += f", {pf_failed} ошибок"
-                failed_domains = [
-                    p.domain for p in report.preflight if p.verdict.value == "failed"
-                ]
-                if failed_domains:
-                    pf_text += f"\nПроблемные: {', '.join(failed_domains[:5])}"
-                    if len(failed_domains) > 5:
-                        pf_text += f" (+{len(failed_domains) - 5})"
-            details.append(pf_text)
-
-        if details:
-            self._dpi_detail.setText("\n".join(details))
-        else:
-            self._dpi_detail.setText(
-                tr_catalog("page.blockcheck.no_dpi", default="DPI не обнаружен на проверенных ресурсах")
-            )
-
-        # DNS summary
-        if report.dns_integrity:
-            dns_total = len(report.dns_integrity)
-            comparable = [
-                d for d in report.dns_integrity
-                if d.is_comparable or bool(d.udp_ips and d.doh_ips)
-            ]
-            dns_ok = sum(1 for d in comparable if d.is_consistent and not d.is_stub)
-            dns_fake = [d for d in comparable if (not d.is_consistent) or d.is_stub]
-            dns_stubs = [d for d in report.dns_integrity if d.is_stub]
-            dns_unknown = dns_total - len(comparable)
-
-            if comparable:
-                dns_text = f"DNS: {dns_ok}/{len(comparable)} OK (сравнимо)"
-                if dns_fake:
-                    dns_text += f"\nDNS подмена/аномалия: {len(dns_fake)}"
-            else:
-                dns_text = "DNS: нет сравнимых результатов (DoH недоступен)"
-
-            if dns_unknown > 0:
-                dns_text += f"\nБез сравнения DoH: {dns_unknown}"
-            if dns_stubs:
-                dns_text += f"\nDNS заглушки: {', '.join(d.domain for d in dns_stubs)}"
-            self._dns_summary.setText(dns_text)
-        else:
-            self._dns_summary.setText("")
-
-        # Recommendations
-        recs = self._generate_recommendations(report)
-        self._recommendation.setText(recs)
+        self._dpi_detail.setText(content.detail_text)
+        self._dns_summary.setText(content.dns_summary_text)
+        self._recommendation.setText(content.recommendation_text)
 
     @staticmethod
     def _generate_recommendations(report) -> str:
-        """Generate recommendations based on test results."""
-        from blockcheck.models import DPIClassification, TestStatus, TestType
-
-        recs = []
-        cls_set = {tr.classification for tr in report.targets}
-
-        if DPIClassification.DNS_FAKE in cls_set:
-            recs.append("DNS подменяется — используйте DoH/DoT или шифрованный DNS")
-        if DPIClassification.TLS_DPI in cls_set:
-            recs.append("TLS DPI обнаружен — включите обход DPI (zapret)")
-        if DPIClassification.TLS_MITM in cls_set:
-            recs.append("MITM прокси — проверьте сертификаты и VPN/прокси настройки")
-        if DPIClassification.ISP_PAGE in cls_set or DPIClassification.HTTP_INJECT in cls_set:
-            recs.append("HTTP инъекция/страница ISP — используйте HTTPS и обход DPI")
-        if DPIClassification.TCP_16_20 in cls_set:
-            recs.append("TCP блок 16-20KB — включите фрагментацию пакетов")
-        if DPIClassification.STUN_BLOCK in cls_set:
-            recs.append("STUN/UDP заблокирован — голосовые звонки могут не работать")
-        if DPIClassification.FULL_BLOCK in cls_set:
-            recs.append("Полная блокировка — попробуйте VPN или прокси")
-
-        # Detect TLS 1.2 blocked + TLS 1.3 works pattern
-        tls12_fail_13_ok = False
-        for tr in report.targets:
-            t12 = [t for t in tr.tests if t.test_type == TestType.TLS_12]
-            t13 = [t for t in tr.tests if t.test_type == TestType.TLS_13]
-            if t12 and t13 and t12[0].status != TestStatus.OK and t13[0].status == TestStatus.OK:
-                tls12_fail_13_ok = True
-                break
-        if tls12_fail_13_ok:
-            recs.append("TLS 1.2 блокируется (DPI видит SNI), но TLS 1.3 работает — сайты доступны через современные браузеры")
-
-        if not recs:
-            core_https_has_failures = False
-            for tr in report.targets:
-                for t in tr.tests:
-                    if t.test_type in (TestType.HTTP, TestType.TLS_12, TestType.TLS_13) and t.status != TestStatus.OK:
-                        core_https_has_failures = True
-                        break
-                if core_https_has_failures:
-                    break
-
-            if core_https_has_failures:
-                recs.append(
-                    "Есть проблемы доступа (TIMEOUT/FAIL), но сигнатура DPI не определена — "
-                    "проверьте сеть/VPN/прокси и повторите тест"
-                )
-            else:
-                recs.append("Блокировки не обнаружены — всё работает нормально")
-
-        return "\n".join(f"• {r}" for r in recs)
+        return generate_recommendations(report)
 
     # ------------------------------------------------------------------
     # Custom domains

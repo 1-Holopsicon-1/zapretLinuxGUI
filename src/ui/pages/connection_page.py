@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
-    QLabel,
 )
 import qtawesome as qta
 
@@ -19,7 +18,7 @@ from qfluentwidgets import (
     PushButton,
 )
 
-from .base_page import BasePage, ScrollBlockingTextEdit
+from .base_page import BasePage
 from ui.compat_widgets import QuickActionsBar, SettingsCard
 from connection_test import ConnectionTestWorker
 from ui.connection_page_controller import ConnectionPageController
@@ -77,6 +76,8 @@ class ConnectionTestPage(BasePage):
         self._actions_bar = None
         self._controls_card = None
         self._pending_start_focus = False
+        self._finish_mode = "completed"
+        self._cleanup_in_progress = False
 
         # Контейнер с ограниченной шириной, чтобы не расползалось за края
         self.container = QWidget(self.content)
@@ -266,7 +267,13 @@ class ConnectionTestPage(BasePage):
             return
 
         selection = self.test_combo.currentText()
-        plan = ConnectionPageController.build_start_plan(selection=selection)
+        test_type = self.test_combo.currentData() or "all"
+        plan = ConnectionPageController.build_start_plan(
+            selection=selection,
+            test_type=str(test_type),
+        )
+        self._cleanup_in_progress = False
+        self._finish_mode = "completed"
 
         self.result_text.clear()
         for line in plan.start_lines:
@@ -299,11 +306,15 @@ class ConnectionTestPage(BasePage):
     def stop_test(self):
         if not self.worker or not self.worker_thread:
             return
+        if self.stop_check_timer is not None:
+            return
 
         plan = ConnectionPageController.build_stop_plan()
+        self._finish_mode = "stopped"
         for line in plan.append_lines:
             self._append(line)
         self._set_status(plan.status_text, plan.status_tone)
+        self.stop_btn.setEnabled(False)
         self.worker.stop_gracefully()
 
         self.stop_check_timer = QTimer(self)
@@ -338,9 +349,13 @@ class ConnectionTestPage(BasePage):
         self.stop_check_timer.start(plan.poll_interval_ms)
 
     def _finalize_stop(self):
+        if self._cleanup_in_progress:
+            return
         self._on_worker_finished()
 
     def _on_worker_update(self, message: str):
+        if self._cleanup_in_progress:
+            return
         for line in ConnectionPageController.build_worker_update_lines(message):
             self._append(line)
 
@@ -348,12 +363,25 @@ class ConnectionTestPage(BasePage):
         scrollbar.setValue(scrollbar.maximum())
 
     def _on_worker_finished(self):
+        if self._cleanup_in_progress:
+            return
+        if not self.is_testing and self.worker is None and self.worker_thread is None:
+            return
+
+        finish_mode = self._finish_mode
+        self._finish_mode = "completed"
+
+        if self.stop_check_timer is not None:
+            self.stop_check_timer.stop()
         self.is_testing = False
         self.worker = None
         self.worker_thread = None
         self.stop_check_timer = None
 
-        plan = ConnectionPageController.build_finish_plan()
+        if finish_mode == "stopped":
+            plan = ConnectionPageController.build_stopped_finish_plan()
+        else:
+            plan = ConnectionPageController.build_finish_plan()
         self._apply_interaction_state(
             start_enabled=plan.start_enabled,
             stop_enabled=plan.stop_enabled,
@@ -391,12 +419,23 @@ class ConnectionTestPage(BasePage):
     def _refresh_test_combo_items(self) -> None:
         current = self.test_combo.currentIndex() if hasattr(self, "test_combo") else 0
         items = [
-            tr_catalog("page.connection.test.all", language=self._ui_language, default="🌐 Все тесты (Discord + YouTube)"),
-            tr_catalog("page.connection.test.discord_only", language=self._ui_language, default="🎮 Только Discord"),
-            tr_catalog("page.connection.test.youtube_only", language=self._ui_language, default="🎬 Только YouTube"),
+            (
+                tr_catalog("page.connection.test.all", language=self._ui_language, default="🌐 Все тесты (Discord + YouTube)"),
+                "all",
+            ),
+            (
+                tr_catalog("page.connection.test.discord_only", language=self._ui_language, default="🎮 Только Discord"),
+                "discord",
+            ),
+            (
+                tr_catalog("page.connection.test.youtube_only", language=self._ui_language, default="🎬 Только YouTube"),
+                "youtube",
+            ),
         ]
         self.test_combo.clear()
-        self.test_combo.addItems(items)
+        for label, test_type in items:
+            self.test_combo.addItem(label)
+            self.test_combo.setItemData(self.test_combo.count() - 1, test_type)
         self.test_combo.setCurrentIndex(max(0, min(current, len(items) - 1)))
 
     def set_ui_language(self, language: str) -> None:
@@ -428,10 +467,6 @@ class ConnectionTestPage(BasePage):
         self.start_btn.setText(tr_catalog("page.connection.button.start", language=self._ui_language, default="Запустить тест"))
         self.stop_btn.setText(tr_catalog("page.connection.button.stop", language=self._ui_language, default="Стоп"))
         self.send_log_btn.setText(tr_catalog("page.connection.button.send_log", language=self._ui_language, default="Подготовить обращение"))
-        if self._actions_title_label is not None:
-            self._actions_title_label.setText(
-                tr_catalog("page.connection.actions.title", language=self._ui_language, default="Действия")
-            )
         self.start_btn.setToolTip(
             tr_catalog(
                 "page.connection.action.start.description",
@@ -458,6 +493,11 @@ class ConnectionTestPage(BasePage):
         """Очистка потоков при закрытии"""
         from log import log
         try:
+            self._cleanup_in_progress = True
+            self._finish_mode = "completed"
+            if self.stop_check_timer is not None:
+                self.stop_check_timer.stop()
+                self.stop_check_timer = None
             cleanup_plan = ConnectionPageController.build_cleanup_plan(
                 has_worker=self.worker is not None,
                 thread_running=bool(self.worker_thread and self.worker_thread.isRunning()),
@@ -472,6 +512,9 @@ class ConnectionTestPage(BasePage):
                     if cleanup_plan.should_terminate:
                         self.worker_thread.terminate()
                         self.worker_thread.wait(cleanup_plan.terminate_wait_ms)
+            self.is_testing = False
+            self.worker = None
+            self.worker_thread = None
             
         except Exception as e:
             log(f"Ошибка при очистке connection_page: {e}", "DEBUG")

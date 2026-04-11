@@ -1,8 +1,7 @@
 """Common utilities for Zapret launchers (V1 and V2).
 
-This package intentionally uses lazy wrappers so legacy builder modules can
-import submodules like ``launcher_common.blobs`` without triggering circular
-imports through ``builder_factory`` / ``runner_factory`` at package import time.
+This package intentionally uses lazy wrappers so launcher submodules can be
+imported on demand without pulling unrelated runtime helpers eagerly.
 """
 
 from .constants import *  # noqa: F401,F403
@@ -25,31 +24,6 @@ def invalidate_strategy_runner(*args, **kwargs):
 
 def get_current_runner(*args, **kwargs):
     from .runner_factory import get_current_runner as _impl
-    return _impl(*args, **kwargs)
-
-
-def combine_strategies(*args, **kwargs):
-    from .builder_factory import combine_strategies as _impl
-    return _impl(*args, **kwargs)
-
-
-def calculate_required_filters(*args, **kwargs):
-    from .builder_factory import calculate_required_filters as _impl
-    return _impl(*args, **kwargs)
-
-
-def get_strategy_display_name(*args, **kwargs):
-    from .builder_factory import get_strategy_display_name as _impl
-    return _impl(*args, **kwargs)
-
-
-def get_active_targets_count(*args, **kwargs):
-    from .builder_factory import get_active_targets_count as _impl
-    return _impl(*args, **kwargs)
-
-
-def validate_target_strategies(*args, **kwargs):
-    from .builder_factory import validate_target_strategies as _impl
     return _impl(*args, **kwargs)
 
 

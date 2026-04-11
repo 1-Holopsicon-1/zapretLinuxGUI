@@ -21,7 +21,9 @@ class ConnectionTestWorker(QObject):
         os.makedirs(LOGS_FOLDER, exist_ok=True)
         self.log_filename = os.path.join(LOGS_FOLDER, "connection_test_temp.log")
         self._stop_requested = False
-        self._curl_available = None
+        self._curl_path = None
+        self._curl_path_checked = False
+        self._curl_available_logged = False
         
         for handler in logging.root.handlers[:]:
             logging.root.removeHandler(handler)
@@ -199,10 +201,8 @@ class ConnectionTestWorker(QObject):
             elif is_failed:
                 self.log_message(f"{host}: Отправлено: {count}, Получено: 0")
             else:
-                # Если ничего не нашли, пытаемся найти хотя бы IP адрес в выводе
-                ip_pattern = re.search(r'?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})?', output)
+                ip_pattern = re.search(r'(\d{1,3}(?:\.\d{1,3}){3})', output)
                 if ip_pattern:
-                    # Если нашли IP, значит хост разрешился
                     self.log_message(f"{host}: DNS разрешен в {ip_pattern.group(1)}, статус пинга неизвестен")
                 else:
                     self.log_message(f"{host}: Отправлено: {count}, Статус неизвестен")
@@ -369,25 +369,7 @@ class ConnectionTestWorker(QObject):
             path = '/' + '/'.join(url.split('/')[3:])
             
             self.log_message(f"Тест реального endpoint: {domain}{path}")
-
-            curl_paths = [
-                os.path.join(get_system32_path(), "curl.exe"),
-                os.path.join(get_syswow64_path(), "curl.exe"),
-                "curl.exe",
-                "curl"
-            ]
-            
-            curl_exe = None
-            for path in curl_paths:
-                try:
-                    test_cmd = [path, "--version"]
-                    test_result = subprocess.run(test_cmd, capture_output=True, timeout=2, 
-                                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                    if test_result.returncode == 0:
-                        curl_exe = path
-                        break
-                except:
-                    continue
+            curl_exe = self._get_curl_path()
             
             if not curl_exe:
                 self.log_message(f"  ⚠️ curl не найден, пропускаем тест")
@@ -623,6 +605,9 @@ class ConnectionTestWorker(QObject):
 
     def _get_curl_path(self):
         """Находит путь к curl"""
+        if self._curl_path_checked:
+            return self._curl_path
+
         curl_paths = [
             os.path.join(get_system32_path(), "curl.exe"),
             os.path.join(get_syswow64_path(), "curl.exe"),
@@ -639,10 +624,14 @@ class ConnectionTestWorker(QObject):
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                 )
                 if test_result.returncode == 0:
-                    return path
+                    self._curl_path = path
+                    self._curl_path_checked = True
+                    return self._curl_path
             except:
                 continue
-        
+
+        self._curl_path_checked = True
+        self._curl_path = None
         return None
 
     def check_port_443(self, domain):
@@ -854,18 +843,15 @@ class ConnectionTestWorker(QObject):
     def is_curl_available(self):
         """Проверяет доступность curl в системе."""
         try:
-            if self._curl_available is None:
-                self._curl_available = (self._get_curl_path() is not None)
-                
-                if self._curl_available:
-                    self.log_message(f"Найден curl")
-                
-            return self._curl_available
+            curl_found = self._get_curl_path() is not None
+            if curl_found and not self._curl_available_logged:
+                self.log_message("Найден curl")
+                self._curl_available_logged = True
+            return curl_found
             
         except Exception as e:
             if hasattr(self, 'log_message'):
                 self.log_message(f"Ошибка проверки curl: {e}")
-            self._curl_available = False
             return False
     
     def run(self):

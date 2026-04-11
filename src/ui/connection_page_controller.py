@@ -68,18 +68,16 @@ class ConnectionSupportPlan:
 
 class ConnectionPageController:
     @staticmethod
-    def resolve_test_type(selection: str) -> str:
-        text = str(selection or "")
-        if "Discord" in text and "YouTube" not in text:
-            return "discord"
-        if "YouTube" in text and "Discord" not in text:
-            return "youtube"
+    def normalize_test_type(test_type: str) -> str:
+        normalized = str(test_type or "").strip().lower()
+        if normalized in {"discord", "youtube", "all"}:
+            return normalized
         return "all"
 
     @staticmethod
-    def build_start_plan(*, selection: str) -> ConnectionTestStartPlan:
+    def build_start_plan(*, selection: str, test_type: str) -> ConnectionTestStartPlan:
         return ConnectionTestStartPlan(
-            test_type=ConnectionPageController.resolve_test_type(selection),
+            test_type=ConnectionPageController.normalize_test_type(test_type),
             start_lines=(
                 f"🚀 Запуск тестирования: {selection}",
                 "=" * 50,
@@ -114,6 +112,24 @@ class ConnectionPageController:
             finish_lines=(
                 "\n" + "=" * 50,
                 "🎉 Тестирование завершено! Теперь можно одной кнопкой подготовить обращение в поддержку.",
+            ),
+            start_enabled=True,
+            stop_enabled=False,
+            combo_enabled=True,
+            send_log_enabled=True,
+            progress_visible=False,
+        )
+
+    @staticmethod
+    def build_stopped_finish_plan() -> ConnectionTestFinishPlan:
+        return ConnectionTestFinishPlan(
+            status_text="⏹️ Тест остановлен",
+            status_tone="warning",
+            status_badge_text="Тест остановлен",
+            progress_badge_text="Остановлено",
+            finish_lines=(
+                "\n" + "=" * 50,
+                "⏹️ Тест остановлен пользователем. Можно запустить его снова или подготовить обращение по уже собранным логам.",
             ),
             start_enabled=True,
             stop_enabled=False,
