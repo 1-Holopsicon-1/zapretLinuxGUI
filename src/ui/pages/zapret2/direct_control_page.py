@@ -2,7 +2,6 @@
 """Direct Zapret2 management page (Strategies landing for direct_zapret2)."""
 
 import os
-import re
 import time as _time
 import webbrowser
 
@@ -14,7 +13,6 @@ from PyQt6.QtWidgets import (
     QLabel,
     QSizePolicy,
 )
-import qtawesome as qta
 
 from ui.pages.base_page import BasePage
 from ui.compat_widgets import (
@@ -28,7 +26,7 @@ from ui.compat_widgets import (
     set_tooltip,
 )
 from ui.main_window_state import AppUiState, MainWindowStateStore
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.text_catalog import tr as tr_catalog
 from ui.window_action_controller import (
     open_connection_test,
@@ -147,11 +145,6 @@ def _accent_fg_for_tokens(tokens) -> str:
         return "rgba(0, 0, 0, 0.90)"
 
 
-_LIST_FILE_ARG_RE = re.compile(r"--(?:hostlist|ipset|hostlist-exclude|ipset-exclude)=([^\s]+)")
-# Display only hostlist files (not ipset) in the preset card widget
-_HOSTLIST_DISPLAY_RE = re.compile(r"--(?:hostlist|hostlist-exclude)=([^\s]+)")
-
-
 def _log_startup_z2_control_metric(section: str, elapsed_ms: float) -> None:
     try:
         rounded = int(round(float(elapsed_ms)))
@@ -205,7 +198,6 @@ class Zapret2DirectControlPage(BasePage):
         self._deferred_sections_built = False
         self._deferred_sections_hydrated = False
         self._refresh_runtime = Zapret2DirectControlPageController.create_refresh_runtime()
-        self._refresh_runtime.mark_preset_summary_applied()
         self.direct_mode_label = None
         self.direct_mode_caption = None
         self.direct_open_btn = None
@@ -230,7 +222,6 @@ class Zapret2DirectControlPage(BasePage):
         self.test_btn = None
         self.folder_btn = None
         self.docs_btn = None
-        self.strategy_label = None
         self.deferred_show_requested.connect(
             self._run_deferred_show_work,
             Qt.ConnectionType.QueuedConnection,
@@ -242,15 +233,6 @@ class Zapret2DirectControlPage(BasePage):
     def _after_ui_built(self) -> None:
         try:
             self._apply_selected_preset_name_fast()
-        except Exception:
-            pass
-        try:
-            should_mark_running, preset_name_text, preset_name_tooltip = self._load_optimistic_startup_state()
-            if should_mark_running:
-                self.update_status("running")
-            if preset_name_text and not str(self.preset_name_label.text() or "").strip():
-                self.preset_name_label.setText(preset_name_text)
-                set_tooltip(self.preset_name_label, preset_name_tooltip)
         except Exception:
             pass
         self._update_stop_winws_button_text()
@@ -288,32 +270,25 @@ class Zapret2DirectControlPage(BasePage):
             self._startup_showevent_profile_logged = True
             _log_startup_z2_control_metric("activation.total", (_time.perf_counter() - _t_show) * 1000)
 
-    def _load_optimistic_startup_state(self) -> tuple[bool, str, str]:
+    def _load_selected_preset_name(self) -> tuple[str, str]:
         try:
-            from strategy_menu import get_strategy_launch_method
-
-            method = str(get_strategy_launch_method() or "").strip().lower()
-        except Exception:
-            method = ""
-
-        try:
-            file_name = str(self._get_selection_service().get_selected_file_name("winws2") or "").strip()
+            file_name = str(self._require_app_context().preset_selection_service.get_selected_file_name("winws2") or "").strip()
         except Exception:
             file_name = ""
 
         if not file_name:
-            return method == "direct_zapret2", "", ""
+            return "", ""
 
         display_name = os.path.splitext(os.path.basename(file_name))[0].strip() or file_name
-        return method == "direct_zapret2", display_name, display_name
+        return display_name, display_name
 
     def _get_selection_service(self):
         app_context = getattr(self.window(), "app_context", None)
         service = getattr(app_context, "preset_selection_service", None)
         if service is None:
-            from core.services import get_selection_service
+            from app_context import require_app_context
 
-            service = get_selection_service()
+            service = require_app_context().preset_selection_service
         return service
 
     def _apply_selected_preset_name_fast(self) -> None:
@@ -324,7 +299,7 @@ class Zapret2DirectControlPage(BasePage):
         )
 
         try:
-            _is_running, preset_name_text, preset_name_tooltip = self._load_optimistic_startup_state()
+            preset_name_text, preset_name_tooltip = self._load_selected_preset_name()
         except Exception:
             preset_name_text = ""
             preset_name_tooltip = ""
@@ -477,7 +452,7 @@ class Zapret2DirectControlPage(BasePage):
         preset_row.setSpacing(12)
 
         preset_icon_lbl = QLabel()
-        preset_icon_lbl.setPixmap(qta.icon("fa5s.star", color="#ffc107").pixmap(20, 20))
+        preset_icon_lbl.setPixmap(get_cached_qta_pixmap("fa5s.star", color="#ffc107", size=20))
         preset_icon_lbl.setFixedSize(24, 24)
         preset_row.addWidget(preset_icon_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -516,7 +491,7 @@ class Zapret2DirectControlPage(BasePage):
         direct_row.setSpacing(12)
 
         direct_icon_lbl = QLabel()
-        direct_icon_lbl.setPixmap(qta.icon("fa5s.play", color="#60cdff").pixmap(20, 20))
+        direct_icon_lbl.setPixmap(get_cached_qta_pixmap("fa5s.play", color="#60cdff", size=20))
         direct_icon_lbl.setFixedSize(24, 24)
         direct_row.addWidget(direct_icon_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -631,7 +606,7 @@ class Zapret2DirectControlPage(BasePage):
         if callable(add_setting_card) and PushSettingCard is not None:
             self.reset_program_card = PushSettingCard(
                 tr_catalog("page.z2_control.button.reset", language=self._ui_language, default="Сбросить"),
-                qta.icon("fa5s.undo", color="#ff9800"),
+                get_themed_qta_icon("fa5s.undo", color="#ff9800"),
                 tr_catalog("page.z2_control.setting.reset.title", language=self._ui_language, default="Сбросить программу"),
                 tr_catalog(
                     "page.z2_control.setting.reset.desc",
@@ -728,7 +703,7 @@ class Zapret2DirectControlPage(BasePage):
 
         self.blobs_action_card = PushSettingCard(
             tr_catalog("page.z2_control.button.open", language=self._ui_language, default="Открыть"),
-            qta.icon("fa5s.file-archive", color=get_theme_tokens().accent_hex),
+            get_themed_qta_icon("fa5s.file-archive", color=get_theme_tokens().accent_hex),
             tr_catalog("page.z2_control.blobs.title", language=self._ui_language, default="Блобы"),
             tr_catalog("page.z2_control.blobs.desc", language=self._ui_language, default="Бинарные данные (.bin / hex) для стратегий"),
         )
@@ -827,13 +802,6 @@ class Zapret2DirectControlPage(BasePage):
         plan = Zapret2DirectControlPageController.build_advanced_settings_apply_plan(state if isinstance(state, dict) else {})
         self._apply_advanced_settings_plan(plan)
 
-    def _schedule_preset_summary_reload(self, *, force: bool = False) -> None:
-        _ = force
-
-    def _on_preset_summary_loaded(self, request_id: int, payload: dict) -> None:
-        _ = request_id
-        _ = payload
-
     def _on_discord_restart_changed(self, enabled: bool) -> None:
         self._refresh_runtime.mark_advanced_settings_written()
         Zapret2DirectControlPageController.save_discord_restart_setting(enabled)
@@ -931,7 +899,7 @@ class Zapret2DirectControlPage(BasePage):
         self._on_reset_program_clicked()
 
     def _sync_program_settings(self) -> None:
-        snapshot = self._get_program_settings_runtime_service().refresh()
+        snapshot = self._require_app_context().program_settings_runtime_service.refresh()
         self._apply_program_settings_snapshot(snapshot)
 
     def _attach_program_settings_runtime(self) -> None:
@@ -940,7 +908,7 @@ class Zapret2DirectControlPage(BasePage):
         if self.auto_dpi_toggle is None:
             return
         self._program_settings_runtime_attached = True
-        self._get_program_settings_runtime_service().subscribe(
+        self._require_app_context().program_settings_runtime_service.subscribe(
             self._apply_program_settings_snapshot,
             emit_initial=True,
         )
@@ -957,9 +925,9 @@ class Zapret2DirectControlPage(BasePage):
         app_context = getattr(self.window(), "app_context", None)
         service = getattr(app_context, "program_settings_runtime_service", None)
         if service is None:
-            from core.services import get_program_settings_runtime_service
+            from app_context import require_app_context
 
-            service = get_program_settings_runtime_service()
+            service = require_app_context().program_settings_runtime_service
         return service
 
     def _set_status(self, msg: str) -> None:

@@ -608,9 +608,9 @@ class Zapret2StrategiesPageNew(BasePage):
     def _build_empty_state_text(self) -> str:
         empty_state = None
         try:
-            from core.services import get_direct_ui_snapshot_service
+            from app_context import require_app_context
 
-            empty_state = get_direct_ui_snapshot_service().get_basic_ui_empty_state("direct_zapret2")
+            empty_state = require_app_context().direct_ui_snapshot_service.get_basic_ui_empty_state("direct_zapret2")
         except Exception as e:
             log(f"Zapret2StrategiesPageNew: не удалось определить причину пустого списка: {e}", "DEBUG")
 

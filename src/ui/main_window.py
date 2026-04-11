@@ -798,12 +798,6 @@ class MainWindowUI:
             return self._get_direct_strategy_summary()
         return strategy_name
 
-    def _notify_parent_strategy_selected(self, strategy_id: str, strategy_name: str) -> None:
-        parent_app = getattr(self, "parent_app", None)
-        handler = getattr(parent_app, "on_strategy_selected_from_dialog", None)
-        if callable(handler):
-            handler(strategy_id, strategy_name)
-
     def _on_strategy_selected_from_page(self, strategy_id: str, strategy_name: str):
         from log import log
 
@@ -826,7 +820,6 @@ class MainWindowUI:
 
         log(f"Стратегия выбрана из страницы: {strategy_id} - {strategy_name}", "INFO")
         self.update_current_strategy_display(strategy_name)
-        self._notify_parent_strategy_selected(strategy_id, strategy_name)
 
     def _on_open_target_detail(self, target_key: str, current_strategy_id: str):
         _ = current_strategy_id

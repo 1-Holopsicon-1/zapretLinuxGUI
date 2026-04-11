@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -36,45 +35,11 @@ class AdvancedSettingsLoadWorker(QThread):
         self.loaded.emit(self._request_id, state)
 
 
-class DirectPresetSummaryLoadWorker(QThread):
-    loaded = pyqtSignal(int, dict)
-
-    def __init__(self, request_id: int, parent=None):
-        super().__init__(parent)
-        self._request_id = int(request_id)
-
-    def run(self) -> None:
-        self.loaded.emit(self._request_id, load_direct_zapret2_preset_summary_payload())
-
-
-def load_direct_zapret2_preset_summary_payload() -> dict:
-    try:
-        from core.services import get_direct_ui_snapshot_service
-
-        return get_direct_ui_snapshot_service().load_preset_summary_payload("direct_zapret2")
-    except Exception:
-        return {
-            "active_preset_name": "",
-            "active_lists": [],
-        }
-
-
-_HOSTLIST_DISPLAY_RE = re.compile(r"--(?:hostlist|hostlist-exclude)=([^\s]+)")
-
-
 class DirectAdvancedSettingsApplyPlan:
     def __init__(self, *, discord_restart: bool, wssize_enabled: bool, debug_log_enabled: bool):
         self.discord_restart = bool(discord_restart)
         self.wssize_enabled = bool(wssize_enabled)
         self.debug_log_enabled = bool(debug_log_enabled)
-
-
-class DirectPresetSummaryPlan:
-    def __init__(self, *, preset_name_text: str, preset_name_tooltip: str, strategy_text: str, strategy_tooltip: str):
-        self.preset_name_text = preset_name_text
-        self.preset_name_tooltip = preset_name_tooltip
-        self.strategy_text = strategy_text
-        self.strategy_tooltip = strategy_tooltip
 
 
 class DirectModeLabelPlan:
@@ -95,24 +60,16 @@ class DirectControlRefreshRuntime:
         self.advanced_settings_worker = None
         self.advanced_settings_request_id = 0
         self.advanced_settings_dirty = True
-        self.preset_summary_worker = None
-        self.preset_summary_request_id = 0
-        self.preset_summary_dirty = True
 
     def has_pending_refresh(self) -> bool:
-        return bool(self.advanced_settings_dirty or self.preset_summary_dirty)
+        return bool(self.advanced_settings_dirty)
 
     def mark_presets_dirty(self) -> None:
         self.advanced_settings_dirty = True
-        self.preset_summary_dirty = True
 
     def mark_advanced_settings_applied(self) -> None:
         self.advanced_settings_dirty = False
         self.advanced_settings_worker = None
-
-    def mark_preset_summary_applied(self) -> None:
-        self.preset_summary_dirty = False
-        self.preset_summary_worker = None
 
     def mark_advanced_settings_written(self) -> None:
         self.advanced_settings_request_id += 1
@@ -123,20 +80,10 @@ class DirectControlRefreshRuntime:
         self.advanced_settings_request_id += 1
         return self.advanced_settings_request_id
 
-    def next_preset_summary_request_id(self) -> int:
-        self.preset_summary_request_id += 1
-        return self.preset_summary_request_id
-
     def accept_advanced_settings_result(self, request_id: int) -> bool:
         if int(request_id) != int(self.advanced_settings_request_id):
             return False
         self.mark_advanced_settings_applied()
-        return True
-
-    def accept_preset_summary_result(self, request_id: int) -> bool:
-        if int(request_id) != int(self.preset_summary_request_id):
-            return False
-        self.mark_preset_summary_applied()
         return True
 
 
@@ -148,23 +95,15 @@ class Zapret2DirectControlPageController(ControlPageController):
     @staticmethod
     def load_advanced_settings_state() -> dict:
         try:
-            from core.services import get_direct_ui_snapshot_service
+            from app_context import require_app_context
 
-            return get_direct_ui_snapshot_service().load_advanced_settings_state("direct_zapret2")
+            return require_app_context().direct_ui_snapshot_service.load_advanced_settings_state("direct_zapret2")
         except Exception:
             return {}
 
     @staticmethod
-    def load_preset_summary_payload() -> dict:
-        return load_direct_zapret2_preset_summary_payload()
-
-    @staticmethod
     def create_advanced_settings_worker(request_id: int, parent=None) -> AdvancedSettingsLoadWorker:
         return AdvancedSettingsLoadWorker(request_id, parent)
-
-    @staticmethod
-    def create_preset_summary_worker(request_id: int, parent=None) -> DirectPresetSummaryLoadWorker:
-        return DirectPresetSummaryLoadWorker(request_id, parent)
 
     @staticmethod
     def build_advanced_settings_apply_plan(state: dict | None) -> DirectAdvancedSettingsApplyPlan:
@@ -173,41 +112,6 @@ class Zapret2DirectControlPageController(ControlPageController):
             discord_restart=bool(state.get("discord_restart", True)),
             wssize_enabled=bool(state.get("wssize_enabled", False)),
             debug_log_enabled=bool(state.get("debug_log_enabled", False)),
-        )
-
-    @staticmethod
-    def build_preset_summary_plan(payload: dict | None, *, language: str) -> DirectPresetSummaryPlan:
-        payload = payload if isinstance(payload, dict) else {}
-        active_preset_name = str(payload.get("active_preset_name") or "").strip()
-        active_lists = list(payload.get("active_lists") or [])
-
-        if active_preset_name:
-            preset_name_text = active_preset_name
-            preset_name_tooltip = active_preset_name
-        else:
-            preset_name_text = tr_catalog(
-                "page.z2_control.preset.not_selected",
-                language=language,
-                default="Не выбран",
-            )
-            preset_name_tooltip = ""
-
-        if active_lists:
-            strategy_text = " • ".join(active_lists)
-            strategy_tooltip = "\n".join(active_lists)
-        else:
-            strategy_text = tr_catalog(
-                "page.z2_control.preset.no_active_lists",
-                language=language,
-                default="Нет активных листов",
-            )
-            strategy_tooltip = ""
-
-        return DirectPresetSummaryPlan(
-            preset_name_text=preset_name_text,
-            preset_name_tooltip=preset_name_tooltip,
-            strategy_text=strategy_text,
-            strategy_tooltip=strategy_tooltip,
         )
 
     @staticmethod
@@ -529,4 +433,3 @@ class Zapret2DirectControlPageController(ControlPageController):
             ),
             start_status="",
         )
-

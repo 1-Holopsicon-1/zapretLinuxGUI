@@ -176,10 +176,10 @@ class DirectFlowCoordinator:
 
     def get_selected_source_path(self, launch_method: str) -> Path:
         selected = self.get_selected_source_manifest(launch_method)
-        from core.services import get_app_paths
+        from app_context import require_app_context
 
         engine = self._METHOD_TO_ENGINE[self._normalize_method(launch_method)]
-        return get_app_paths().engine_paths(engine).ensure_directories().presets_dir / selected.file_name
+        return require_app_context().app_paths.engine_paths(engine).ensure_directories().presets_dir / selected.file_name
 
     def ensure_selected_source_path(self, launch_method: str) -> Path:
         return self.get_startup_snapshot(launch_method, require_filters=False).preset_path
@@ -197,9 +197,9 @@ class DirectFlowCoordinator:
         engine = self._METHOD_TO_ENGINE[method]
         self._ensure_support_files(method)
 
-        from core.services import get_selection_service
+        from app_context import require_app_context
 
-        selected_file_name = get_selection_service().select_preset_file_name_fast(engine, file_name)
+        selected_file_name = require_app_context().preset_selection_service.select_preset_file_name_fast(engine, file_name)
         selected_manifest = self._remember_manifest_from_file_name(method, engine, selected_file_name)
         selected_path = self._get_source_preset_path(engine, selected_file_name)
         display_name = str(getattr(selected_manifest, "name", "") or "").strip() or Path(selected_file_name).stem
@@ -241,10 +241,10 @@ class DirectFlowCoordinator:
         )
         self._emit_timing(timing_callback, f"{label}.support_files", t_support)
 
-        from core.services import get_selection_service
+        from app_context import require_app_context
 
         t_selection_service = time.perf_counter()
-        selection = get_selection_service()
+        selection = require_app_context().preset_selection_service
         self._emit_timing(timing_callback, f"{label}.selection_service", t_selection_service)
 
         t_selected_name = time.perf_counter()
@@ -375,9 +375,9 @@ class DirectFlowCoordinator:
         if not candidate:
             return None
 
-        from core.services import get_app_paths
+        from app_context import require_app_context
 
-        engine_paths = get_app_paths().engine_paths(engine).ensure_directories()
+        engine_paths = require_app_context().app_paths.engine_paths(engine).ensure_directories()
         preset_path = engine_paths.presets_dir / candidate
         if not preset_path.exists():
             return None
@@ -482,14 +482,14 @@ class DirectFlowCoordinator:
         return display_name, template_origin
 
     def _get_source_preset_path(self, engine: str, file_name: str) -> Path:
-        from core.services import get_app_paths
+        from app_context import require_app_context
 
-        return get_app_paths().engine_paths(engine).ensure_directories().presets_dir / str(file_name or "").strip()
+        return require_app_context().app_paths.engine_paths(engine).ensure_directories().presets_dir / str(file_name or "").strip()
 
     def _list_source_preset_paths(self, engine: str) -> list[Path]:
-        from core.services import get_app_paths
+        from app_context import require_app_context
 
-        presets_dir = get_app_paths().engine_paths(engine).ensure_directories().presets_dir
+        presets_dir = require_app_context().app_paths.engine_paths(engine).ensure_directories().presets_dir
         return sorted(
             (path for path in presets_dir.glob("*.txt") if path.is_file()),
             key=lambda path: path.name.lower(),
@@ -543,9 +543,9 @@ class DirectFlowCoordinator:
             return None
 
         try:
-            from core.services import get_app_paths
+            from app_context import require_app_context
 
-            index_path = get_app_paths().engine_paths(normalized_engine).ensure_directories().index_path
+            index_path = require_app_context().app_paths.engine_paths(normalized_engine).ensure_directories().index_path
         except Exception:
             return None
 

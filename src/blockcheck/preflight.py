@@ -220,7 +220,7 @@ def _check_http_get(domain: str) -> SingleTestResult:
 # Per-domain orchestration
 # ---------------------------------------------------------------------------
 
-def check_one_domain(domain: str) -> PreflightResult:
+def check_one_domain(domain: str, cancelled: Callable[[], bool] | None = None) -> PreflightResult:
     """Запускаем все 4 проверки для одного домена.
 
     Публичный API — используется и в run_preflight (массовый), и в
@@ -228,8 +228,23 @@ def check_one_domain(domain: str) -> PreflightResult:
     """
     pf = PreflightResult(domain=domain)
 
+    def _is_cancelled() -> bool:
+        if not callable(cancelled):
+            return False
+        try:
+            return bool(cancelled())
+        except Exception:
+            return False
+
+    def _mark_cancelled() -> PreflightResult:
+        pf.verdict = PreflightVerdict.WARNING
+        pf.verdict_detail = "проверка отменена"
+        return pf
+
     # Общий пул для DNS (таймаут через Future) + TCP/Ping/HTTP
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    cancelled_during_checks = False
+    pool = ThreadPoolExecutor(max_workers=4)
+    try:
         # 1. DNS резолвинг + IP blocklist (через пул для таймаута)
         dns_r = _check_dns(domain, _executor=pool)
         pf.dns_result = dns_r
@@ -254,13 +269,25 @@ def check_one_domain(domain: str) -> PreflightResult:
         )
         http_future = pool.submit(_check_http_get, domain)
 
+        if _is_cancelled():
+            cancelled_during_checks = True
+            return _mark_cancelled()
+
         pf.tcp_443 = tcp_future.result()
+        if _is_cancelled():
+            cancelled_during_checks = True
+            return _mark_cancelled()
 
         ping_result = ping_future.result()
         ping_result.test_type = TestType.PREFLIGHT_PING
         pf.ping = ping_result
+        if _is_cancelled():
+            cancelled_during_checks = True
+            return _mark_cancelled()
 
         pf.http_check = http_future.result()
+    finally:
+        pool.shutdown(wait=not cancelled_during_checks, cancel_futures=cancelled_during_checks)
 
     # Вычисляем verdict
     pf.verdict, pf.verdict_detail = _compute_verdict(pf)
@@ -433,15 +460,17 @@ def run_preflight(
     total = len(domains)
 
     workers = min(parallel, total)
-    with ThreadPoolExecutor(max_workers=workers) as pool:
+    cancelled_during_phase = False
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
         future_to_domain = {
-            pool.submit(check_one_domain, domain): domain
+            pool.submit(check_one_domain, domain, cancelled): domain
             for domain in domains
         }
 
         for future in as_completed(future_to_domain):
             if cancelled and cancelled():
-                pool.shutdown(wait=False, cancel_futures=True)
+                cancelled_during_phase = True
                 break
 
             domain = future_to_domain[future]
@@ -462,11 +491,27 @@ def run_preflight(
                 _log(format_domain_log(pf_result))
             if _progress:
                 _progress(done, total, f"Preflight: {domain}")
+    finally:
+        pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
 
     # Возвращаем в порядке входного списка
-    ordered = [results.get(d, PreflightResult(domain=d)) for d in domains]
+    ordered = []
+    for domain in domains:
+        if domain in results:
+            ordered.append(results[domain])
+            continue
+        if cancelled and cancelled():
+            ordered.append(
+                PreflightResult(
+                    domain=domain,
+                    verdict=PreflightVerdict.WARNING,
+                    verdict_detail="проверка отменена",
+                )
+            )
+        else:
+            ordered.append(PreflightResult(domain=domain))
 
-    if _log:
+    if _log and not (cancelled and cancelled()):
         passed = sum(1 for r in ordered if r.verdict == PreflightVerdict.PASSED)
         warned = sum(1 for r in ordered if r.verdict == PreflightVerdict.WARNING)
         failed = sum(1 for r in ordered if r.verdict == PreflightVerdict.FAILED)

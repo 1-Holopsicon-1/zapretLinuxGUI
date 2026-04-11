@@ -166,6 +166,10 @@ class StrategyScanner:
         self._work_dir = self._find_work_dir()
         self._winws2_exe = self._find_winws2()
 
+    @property
+    def cancelled(self) -> bool:
+        return bool(self._cancelled or self._cb.is_cancelled())
+
     @staticmethod
     def _normalize_scan_protocol(scan_protocol: str) -> str:
         """Normalize protocol aliases to scanner-supported values."""
@@ -272,16 +276,16 @@ class StrategyScanner:
         self._pre_scan_cleanup()
 
         # Preflight — быстрая проверка целевого хоста перед сканированием
-        if not self._cancelled:
+        if not self.cancelled:
             preflight_ok = self._run_preflight_check()
             if not preflight_ok:
                 self._cb.on_log("Preflight: обнаружены проблемы, но сканирование продолжится")
 
         # Baseline test: check if target is already accessible without winws2
-        baseline_accessible = self._run_baseline_test()
+        baseline_accessible = False if self.cancelled else self._run_baseline_test()
 
         for idx, strat in enumerate(strategies, start=start_index):
-            if self._cancelled:
+            if self.cancelled:
                 break
 
             name = strat.get("name", f"strategy_{idx}")
@@ -300,6 +304,9 @@ class StrategyScanner:
                 target=self._target,
             )
 
+            if self.cancelled and (not result.success and result.error == "Cancelled"):
+                break
+
             self._cb.on_strategy_result(result)
             if result.success:
                 working.append(result)
@@ -311,6 +318,7 @@ class StrategyScanner:
         tested_now = len(working) + len(failed)
         tested_total = start_index + tested_now
         elapsed = time.monotonic() - t0
+        was_cancelled = self.cancelled
         report = StrategyScanReport(
             target=self._target,
             total_tested=tested_total,
@@ -318,12 +326,12 @@ class StrategyScanner:
             working_strategies=working,
             failed_strategies=failed,
             elapsed_seconds=elapsed,
-            cancelled=self._cancelled,
+            cancelled=was_cancelled,
             baseline_accessible=baseline_accessible,
             scan_protocol=self._scan_protocol,
         )
 
-        if self._cancelled:
+        if was_cancelled:
             self._cb.on_phase("Отменено")
             self._cb.on_log(f"\nСканирование отменено. Протестировано: {report.total_tested}/{total_available}")
         else:
@@ -350,6 +358,8 @@ class StrategyScanner:
 
     def _run_baseline_test(self) -> bool:
         """Run baseline probe without winws2 for selected protocol."""
+        if self.cancelled:
+            return False
         if self._scan_protocol in {_PROTOCOL_STUN_VOICE, _PROTOCOL_UDP_GAMES}:
             return self._run_baseline_stun()
         return self._run_baseline_https()
@@ -369,6 +379,8 @@ class StrategyScanner:
 
     def _run_baseline_https(self) -> bool:
         """Baseline HTTPS check on IPv4/IPv6."""
+        if self.cancelled:
+            return False
         self._cb.on_phase("Baseline-тест (без обхода)")
         self._cb.on_log("\n--- Baseline HTTPS test (без winws2) ---")
 
@@ -376,6 +388,8 @@ class StrategyScanner:
         blocked_families: list[int] = []
 
         for af in (socket.AF_INET, socket.AF_INET6):
+            if self.cancelled:
+                return False
             label = self._af_label(af)
             if not self._target_has_family(self._target_host, 443, af, socket.SOCK_STREAM):
                 self._baseline_by_af[af] = None
@@ -412,6 +426,8 @@ class StrategyScanner:
 
     def _run_baseline_stun(self) -> bool:
         """Baseline STUN check on IPv4/IPv6."""
+        if self.cancelled:
+            return False
         self._cb.on_phase("Baseline-тест (без обхода)")
         self._cb.on_log("\n--- Baseline STUN test (без winws2) ---")
 
@@ -419,6 +435,8 @@ class StrategyScanner:
         blocked_families: list[int] = []
 
         for af in (socket.AF_INET, socket.AF_INET6):
+            if self.cancelled:
+                return False
             label = self._af_label(af)
             if not self._target_has_family(self._target_host, self._target_port, af, socket.SOCK_DGRAM):
                 self._baseline_by_af[af] = None
@@ -545,25 +563,57 @@ class StrategyScanner:
             raw_data=raw_data or {},
         )
 
+    def _make_cancelled_probe_result(
+        self,
+        *,
+        strategy_name: str,
+        strategy_id: str,
+        strategy_args: str,
+        target: str,
+    ) -> StrategyProbeResult:
+        return self._make_probe_result(
+            strategy_name=strategy_name,
+            strategy_id=strategy_id,
+            strategy_args=strategy_args,
+            target=target,
+            success=False,
+            time_ms=0,
+            error="Cancelled",
+        )
+
     def _probe_one_strategy(
         self, name: str, strat_id: str, args: str, target: str,
     ) -> StrategyProbeResult:
         """Test one strategy: write preset -> launch winws2 -> probe -> kill."""
+        if self.cancelled:
+            return self._make_cancelled_probe_result(
+                strategy_name=name,
+                strategy_id=strat_id,
+                strategy_args=args,
+                target=target,
+            )
         last_error = ""
         for attempt in range(1 + self._WINWS2_CRASH_RETRIES):
+            if self.cancelled:
+                return self._make_cancelled_probe_result(
+                    strategy_name=name,
+                    strategy_id=strat_id,
+                    strategy_args=args,
+                    target=target,
+                )
             try:
                 result = self._probe_one_attempt(name, strat_id, args, target)
                 # If winws2 crashed, retry (WinDivert may not have released yet)
                 if not result.success and "winws2 crashed" in result.error:
                     last_error = result.error
-                    if attempt < self._WINWS2_CRASH_RETRIES:
+                    if attempt < self._WINWS2_CRASH_RETRIES and not self.cancelled:
                         self._cb.on_log(f"  winws2 crashed, retrying ({attempt + 1})...")
                         time.sleep(1.0)
                         continue
                 return result
             except Exception as e:
                 last_error = str(e)
-                if attempt < self._WINWS2_CRASH_RETRIES:
+                if attempt < self._WINWS2_CRASH_RETRIES and not self.cancelled:
                     time.sleep(1.0)
                     continue
                 break
@@ -582,9 +632,23 @@ class StrategyScanner:
         self, name: str, strat_id: str, args: str, target: str,
     ) -> StrategyProbeResult:
         """Single attempt: write preset -> launch winws2 -> protocol probe -> kill."""
+        if self.cancelled:
+            return self._make_cancelled_probe_result(
+                strategy_name=name,
+                strategy_id=strat_id,
+                strategy_args=args,
+                target=target,
+            )
         try:
             # 1. Write temp files
             preset_path = self._write_temp_preset(args, self._target_host)
+            if self.cancelled:
+                return self._make_cancelled_probe_result(
+                    strategy_name=name,
+                    strategy_id=strat_id,
+                    strategy_args=args,
+                    target=target,
+                )
             self._cb.on_log(f"  preset: {preset_path}")
             if self._scan_protocol == _PROTOCOL_UDP_GAMES:
                 if self._games_ipset_sources:
@@ -609,6 +673,13 @@ class StrategyScanner:
 
             # 3. Wait for startup
             time.sleep(STRATEGY_STARTUP_WAIT)
+            if self.cancelled:
+                return self._make_cancelled_probe_result(
+                    strategy_name=name,
+                    strategy_id=strat_id,
+                    strategy_args=args,
+                    target=target,
+                )
 
             # 4. Check process alive
             if proc.poll() is not None:
@@ -634,12 +705,26 @@ class StrategyScanner:
             family_results: list[tuple[int, bool, float, str]] = []
             udp_pool_by_family: dict[str, list[dict[str, Any]]] = {}
             for af in (self._probe_families or [socket.AF_INET]):
+                if self.cancelled:
+                    return self._make_cancelled_probe_result(
+                        strategy_name=name,
+                        strategy_id=strat_id,
+                        strategy_args=args,
+                        target=target,
+                    )
                 if self._scan_protocol in {_PROTOCOL_STUN_VOICE, _PROTOCOL_UDP_GAMES}:
                     af_success, af_time_ms, af_detail, af_probes = self._test_udp_probe_pool(af)
                     udp_pool_by_family[self._af_label(af)] = af_probes
                 else:
                     af_success, af_time_ms, af_detail = self._test_https(self._target_host, af=af)
                 family_results.append((af, af_success, af_time_ms, af_detail))
+                if self.cancelled:
+                    return self._make_cancelled_probe_result(
+                        strategy_name=name,
+                        strategy_id=strat_id,
+                        strategy_args=args,
+                        target=target,
+                    )
                 af_label = "IPv6" if af == socket.AF_INET6 else "IPv4"
                 if af_success:
                     self._cb.on_log(f"  {af_label}: OK ({af_time_ms:.0f} ms)")
@@ -701,7 +786,8 @@ class StrategyScanner:
             self._kill_current_process()
             # Pause to let WinDivert driver release the filter handle.
             # Without enough time, next winws2 fails to acquire WinDivert.
-            time.sleep(0.5)
+            if not self.cancelled:
+                time.sleep(0.5)
 
     # ------------------------------------------------------------------
     # Probe tests
@@ -947,6 +1033,8 @@ class StrategyScanner:
         af: int,
     ) -> tuple[bool, float, str, list[dict[str, Any]]]:
         """Run UDP probe pool in parallel and aggregate verdict."""
+        if self.cancelled:
+            return False, 0.0, "Cancelled", []
         pool = self._build_udp_probe_pool()
         if not pool:
             ok, time_ms, detail = self._test_stun_probe(self._target_host, self._target_port, af=af)
@@ -954,13 +1042,31 @@ class StrategyScanner:
 
         max_workers = min(_UDP_POOL_MAX_WORKERS, max(1, len(pool)))
 
-        raw_results: list[tuple[bool, float, str]] = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for item in executor.map(lambda p: self._run_udp_probe_target(p, af), pool):
-                raw_results.append(item)
+        raw_results: list[tuple[bool, float, str] | None] = [None] * len(pool)
+        cancelled_during_pool = False
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        try:
+            futures = {
+                executor.submit(self._run_udp_probe_target, spec, af): idx
+                for idx, spec in enumerate(pool)
+            }
+            for future in concurrent.futures.as_completed(futures):
+                if self.cancelled:
+                    cancelled_during_pool = True
+                    break
+                idx = futures[future]
+                raw_results[idx] = future.result()
+        finally:
+            executor.shutdown(wait=not cancelled_during_pool, cancel_futures=cancelled_during_pool)
+
+        if self.cancelled:
+            return False, 0.0, "Cancelled", []
 
         probes: list[dict[str, Any]] = []
-        for spec, (ok, elapsed_ms, detail) in zip(pool, raw_results):
+        for spec, result in zip(pool, raw_results):
+            if result is None:
+                continue
+            ok, elapsed_ms, detail = result
             probes.append(
                 {
                     "name": str(spec.get("name", "probe")),
@@ -1509,7 +1615,7 @@ class StrategyScanner:
         self._cb.on_phase("Preflight проверка")
         self._cb.on_log(f"\n--- Preflight: {self._target_host} ---")
 
-        result = check_one_domain(self._target_host)
+        result = check_one_domain(self._target_host, cancelled=lambda: self.cancelled)
 
         # Подробный лог каждой проверки
         self._cb.on_log(format_domain_log(result))

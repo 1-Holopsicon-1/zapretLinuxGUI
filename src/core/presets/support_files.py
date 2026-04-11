@@ -24,9 +24,9 @@ def prepare_direct_support_files(launch_method: str) -> None:
 
 
 def _prepare_direct_zapret2_support_files() -> None:
-    from core.services import get_app_paths
+    from app_context import require_app_context
 
-    app_paths = get_app_paths()
+    app_paths = require_app_context().app_paths
     user_root = app_paths.user_root
     presets_dir = app_paths.engine_paths("winws2").ensure_directories().presets_dir
     templates_dir = user_root / "presets_v2_template"

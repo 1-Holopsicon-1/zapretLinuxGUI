@@ -47,7 +47,7 @@ from ui.pages.logs_page_worker_workflow import (
     start_winws_output_worker,
 )
 from ui.text_catalog import tr as tr_catalog
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from log import log
 from log.logs_page_controller import LogsPageController
 
@@ -101,6 +101,7 @@ class LogsPage(BasePage):
         
         self._thread = None
         self._worker = None
+        self._cleanup_in_progress = False
         self.current_log_file = LogsPageController.get_current_log_file()
         self._error_pattern = re.compile('|'.join(ERROR_PATTERNS))
         self._exclude_pattern = re.compile('|'.join(EXCLUDE_PATTERNS), re.IGNORECASE)
@@ -174,7 +175,7 @@ class LogsPage(BasePage):
         # Tabs — Pivot handles its own theme
 
         if hasattr(self, "refresh_btn"):
-            self._refresh_icon_normal = qta.icon('fa5s.sync-alt', color=tokens.fg)
+            self._refresh_icon_normal = get_themed_qta_icon('fa5s.sync-alt', color=tokens.fg)
             if not bool(getattr(self, "_refresh_spin_active", False)):
                 self.refresh_btn.setIcon(self._refresh_icon_normal)
 
@@ -206,7 +207,9 @@ class LogsPage(BasePage):
 
         if self._warning_icon_label is not None:
             try:
-                self._warning_icon_label.setPixmap(qta.icon('fa5s.exclamation-triangle', color=err_fg).pixmap(16, 16))
+                self._warning_icon_label.setPixmap(
+                    get_cached_qta_pixmap('fa5s.exclamation-triangle', color=err_fg, size=16)
+                )
             except Exception:
                 pass
 
@@ -228,7 +231,9 @@ class LogsPage(BasePage):
         # winws panel
         if self._terminal_icon_label is not None:
             try:
-                self._terminal_icon_label.setPixmap(qta.icon('fa5s.terminal', color=tokens.accent_hex).pixmap(16, 16))
+                self._terminal_icon_label.setPixmap(
+                    get_cached_qta_pixmap('fa5s.terminal', color=tokens.accent_hex, size=16)
+                )
             except Exception:
                 pass
 
@@ -255,7 +260,9 @@ class LogsPage(BasePage):
         # Send tab (exists only after lazy init)
         if self._info_icon_label is not None:
             try:
-                self._info_icon_label.setPixmap(qta.icon('fa5s.info-circle', color=tokens.accent_hex).pixmap(14, 14))
+                self._info_icon_label.setPixmap(
+                    get_cached_qta_pixmap('fa5s.info-circle', color=tokens.accent_hex, size=14)
+                )
             except Exception:
                 pass
 
@@ -281,7 +288,9 @@ class LogsPage(BasePage):
         bg = "rgba(124, 58, 237, 0.12)" if theme_tokens.is_light else "rgba(168, 85, 247, 0.15)"
 
         if self._orchestra_icon_label is not None:
-            self._orchestra_icon_label.setPixmap(qta.icon('fa5s.brain', color=accent).pixmap(16, 16))
+            self._orchestra_icon_label.setPixmap(
+                get_cached_qta_pixmap('fa5s.brain', color=accent, size=16)
+            )
         if self._orchestra_text_label is not None:
             self._orchestra_text_label.setStyleSheet(
                 f"color: {accent}; font-size: 12px; font-weight: 600; background: transparent;"
@@ -576,6 +585,7 @@ class LogsPage(BasePage):
         self.controls_card = logs_widgets.controls_card
         self.log_combo = logs_widgets.log_combo
         self.refresh_btn = logs_widgets.refresh_btn
+        self.info_label = logs_widgets.info_label
         self._controls_actions_title = logs_widgets.controls_actions_title
         self._controls_actions_bar = logs_widgets.controls_actions_bar
         self.copy_btn = logs_widgets.copy_btn
@@ -800,7 +810,7 @@ class LogsPage(BasePage):
         self._spin_angle = (self._spin_angle + 12) % 360
         try:
             tokens = get_theme_tokens()
-            src = qta.icon('fa5s.sync-alt', color=tokens.accent_hex).pixmap(22, 22)
+            src = get_cached_qta_pixmap('fa5s.sync-alt', color=tokens.accent_hex, size=22)
             dst = QPixmap(22, 22)
             dst.fill(Qt.GlobalColor.transparent)
             painter = QPainter(dst)
@@ -870,8 +880,13 @@ class LogsPage(BasePage):
             create_worker_fn=LogsPageController.create_winws_output_worker,
             on_new_output=self._append_winws_output,
             on_process_ended=self._on_winws_process_ended,
+            on_thread_finished=self._on_winws_thread_finished,
             log_fn=log,
         )
+
+    def _on_winws_thread_finished(self):
+        self._winws_thread = None
+        self._winws_worker = None
 
     def _stop_winws_output_worker(self, blocking: bool = False):
         """Останавливает worker чтения вывода winws (неблокирующий по умолчанию)"""
@@ -889,6 +904,8 @@ class LogsPage(BasePage):
 
     def _append_winws_output(self, text: str, stream_type: str):
         """Добавляет вывод winws в текстовое поле"""
+        if self._cleanup_in_progress:
+            return
         self._winws_lines_count += 1
 
         formatted = format_winws_output_line(
@@ -906,6 +923,8 @@ class LogsPage(BasePage):
 
     def _on_winws_process_ended(self, exit_code: int):
         """Обработчик завершения процесса winws"""
+        if self._cleanup_in_progress:
+            return
         if exit_code == 0:
             self._set_winws_status(
                 "neutral",
@@ -927,6 +946,8 @@ class LogsPage(BasePage):
 
     def _update_winws_status(self):
         """Периодически проверяет статус процесса winws"""
+        if self._cleanup_in_progress:
+            return
         self._refresh_winws_title()
         source, runner = self._get_running_runner_source()
 
@@ -967,6 +988,8 @@ class LogsPage(BasePage):
 
     def _append_text(self, text: str):
         """Добавляет текст в лог"""
+        if self._cleanup_in_progress:
+            return
         if not text:
             return
 
@@ -1101,6 +1124,8 @@ class LogsPage(BasePage):
             
     def cleanup(self):
         """Очистка при закрытии - блокирующий режим"""
+        self._cleanup_in_progress = True
+        self._spin_timer.stop()
         self._winws_status_timer.stop()
         self._stop_tail_worker(blocking=True)
         self._stop_winws_output_worker(blocking=True)

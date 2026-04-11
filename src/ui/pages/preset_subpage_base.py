@@ -413,14 +413,6 @@ class PresetSubpageBase(BasePage):
             self._preset_name = updated.name
             self._preset_file_name = updated.file_name
             self._preset_path = facade.get_source_path_by_file_name(self._preset_file_name)
-            active_name = self._current_selected_name()
-            active_file_name = self._current_selected_file_name()
-            if (
-                self._preset_file_name and active_file_name.lower() == self._preset_file_name.lower()
-            ) or (
-                not self._preset_file_name and active_name.lower() == self._preset_name.lower()
-            ):
-                self._notify_preset_switched()
             if self._preset_file_name:
                 self._notify_preset_saved(self._preset_file_name)
             self._set_footer(f"Сохранено {datetime.now().strftime('%H:%M:%S')}")
@@ -507,7 +499,7 @@ class PresetSubpageBase(BasePage):
             self._notify_preset_structure_changed()
             self.set_preset_file_name(updated.file_name)
             if self._preset_file_name and facade.is_selected_file_name(self._preset_file_name):
-                self._notify_preset_switched()
+                self._notify_preset_identity_changed()
             self._show_success(f"Пресет переименован: {new_name}")
         except Exception as e:
             self._show_error(str(e))
@@ -575,8 +567,6 @@ class PresetSubpageBase(BasePage):
             self._refresh_header()
             if self._preset_file_name:
                 self._notify_preset_saved(self._preset_file_name)
-            if self._preset_file_name and facade.is_selected_file_name(self._preset_file_name):
-                self._notify_preset_switched()
             self._show_success(f"Пресет «{self._preset_name}» сброшен")
         except Exception as e:
             self._show_error(str(e))
@@ -613,7 +603,7 @@ class PresetSubpageBase(BasePage):
     def _current_selected_name(self) -> str:
         try:
             method = self._direct_launch_method()
-            selected = self._get_direct_flow_coordinator().get_selected_source_manifest(method)
+            selected = self._require_app_context().direct_flow_coordinator.get_selected_source_manifest(method)
             return (selected.name if selected is not None else "").strip()
         except Exception:
             return ""
@@ -621,7 +611,7 @@ class PresetSubpageBase(BasePage):
     def _current_selected_file_name(self) -> str:
         try:
             method = self._direct_launch_method()
-            return (self._get_direct_flow_coordinator().get_selected_source_file_name(method) or "").strip()
+            return (self._require_app_context().direct_flow_coordinator.get_selected_source_file_name(method) or "").strip()
         except Exception:
             return ""
 
@@ -629,9 +619,9 @@ class PresetSubpageBase(BasePage):
         app_context = getattr(self.window(), "app_context", None)
         coordinator = getattr(app_context, "direct_flow_coordinator", None)
         if coordinator is None:
-            from core.services import get_direct_flow_coordinator
+            from app_context import require_app_context
 
-            coordinator = get_direct_flow_coordinator()
+            coordinator = require_app_context().direct_flow_coordinator
         return coordinator
 
     def _activate_selected_preset(self) -> bool:
@@ -646,14 +636,14 @@ class PresetSubpageBase(BasePage):
         except Exception:
             return False
 
-    def _notify_preset_switched(self) -> None:
+    def _notify_preset_identity_changed(self) -> None:
         method = self._direct_launch_method()
         if not self._preset_file_name:
             return
         try:
-            from core.presets.direct_runtime_events import notify_direct_preset_switched
+            from core.presets.direct_runtime_events import notify_direct_preset_identity_changed
 
-            notify_direct_preset_switched(method, self._preset_file_name)
+            notify_direct_preset_identity_changed(method, self._preset_file_name)
         except Exception:
             pass
 

@@ -10,9 +10,9 @@ class Zapret1PresetDetailPage(PresetSubpageBase):
         return "Пресет Zapret 1"
 
     def _get_preset_path(self, name: str) -> Path:
-        from core.services import get_app_paths
+        from app_context import require_app_context
 
-        return get_app_paths().engine_paths("winws1").ensure_directories().presets_dir / str(name or "").strip()
+        return require_app_context().app_paths.engine_paths("winws1").ensure_directories().presets_dir / str(name or "").strip()
 
     def _direct_launch_method(self) -> str | None:
         return "direct_zapret1"

@@ -446,9 +446,9 @@ class Zapret1StrategiesPage(BasePage):
             return
 
         if payload is None:
-            from core.services import get_direct_ui_snapshot_service
+            from app_context import require_app_context
 
-            payload = get_direct_ui_snapshot_service().load_basic_ui_payload("direct_zapret1", refresh=True)
+            payload = require_app_context().direct_ui_snapshot_service.load_basic_ui_payload("direct_zapret1", refresh=True)
         self.target_selections = payload.strategy_selections or {}
         self.target_selections = {
             key: self.target_selections.get(key, "none")

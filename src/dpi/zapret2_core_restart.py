@@ -71,9 +71,9 @@ def _has_active_strategies() -> bool:
         True если есть хотя бы один активный фильтр
     """
     try:
-        from core.services import get_direct_flow_coordinator
+        from app_context import require_app_context
 
-        preset_path = get_direct_flow_coordinator().get_selected_source_path("direct_zapret2")
+        preset_path = require_app_context().direct_flow_coordinator.get_selected_source_path("direct_zapret2")
         if not preset_path.exists():
             return False
 

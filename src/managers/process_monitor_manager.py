@@ -1,6 +1,8 @@
 from PyQt6.QtCore import QObject
 from log import log
 
+from dpi.runtime import get_canonical_winws_process_pids
+
 
 class ProcessMonitorManager(QObject):
     """Менеджер для мониторинга процессов DPI"""
@@ -28,14 +30,30 @@ class ProcessMonitorManager(QObject):
         
         log("Process Monitor инициализирован", "INFO")
 
+    def _apply_process_details(self, details: dict | None) -> dict[str, list[int]]:
+        normalized = details or {}
+        self._process_details = normalized
+        self.app.process_details = normalized
+
+        runtime_service = getattr(self.app, "dpi_runtime_service", None)
+        if runtime_service is not None:
+            runtime_service.observe_process_details(normalized)
+
+        return normalized
+
+    def refresh_now(self) -> dict[str, list[int]]:
+        """Синхронно перечитывает канонические winws-процессы тем же путём, что и monitor."""
+        try:
+            details = get_canonical_winws_process_pids()
+        except Exception as e:
+            log(f"Ошибка канонического probe при refresh_now: {e}", level="DEBUG")
+            details = {}
+        return self._apply_process_details(details)
+
     def _on_process_details_changed(self, details: dict):
         """Получает детали процессов (PID) от мониторинга и кэширует для UI"""
         try:
-            self._process_details = details or {}
-            self.app.process_details = self._process_details
-            runtime_service = getattr(self.app, "dpi_runtime_service", None)
-            if runtime_service is not None:
-                runtime_service.observe_process_details(self._process_details)
+            self._apply_process_details(details)
         except Exception as e:
             log(f"Ошибка в _on_process_details_changed: {e}", level="❌ ERROR")
 

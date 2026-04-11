@@ -6,7 +6,6 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QFileDialog, QSizePolicy
 )
-import qtawesome as qta
 import os
 
 from .base_page import BasePage
@@ -19,7 +18,7 @@ from ui.compat_widgets import (
     insert_widget_into_setting_card_group,
     set_tooltip,
 )
-from ui.theme import get_theme_tokens, get_card_gradient_qss
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon, get_card_gradient_qss
 from ui.theme_refresh import ThemeRefreshController
 from ui.text_catalog import tr as tr_catalog
 from log import log
@@ -156,7 +155,7 @@ class BlobItemWidget(QFrame):
         # Кнопка удаления (только для пользовательских)
         if self.blob_info.get("is_user"):
             self._delete_btn = TransparentToolButton()
-            self._delete_btn.setIcon(qta.icon('fa5s.trash-alt', color='#ff6b6b'))
+            self._delete_btn.setIcon(get_themed_qta_icon('fa5s.trash-alt', color='#ff6b6b'))
             self._delete_btn.setFixedSize(28, 28)
             self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             self._delete_btn.clicked.connect(self._on_delete)
@@ -218,9 +217,9 @@ class BlobItemWidget(QFrame):
                 icon_name = "fa5s.file"
                 icon_color = tokens.accent_hex
             try:
-                self._icon_label.setPixmap(qta.icon(icon_name, color=icon_color).pixmap(16, 16))
+                self._icon_label.setPixmap(get_cached_qta_pixmap(icon_name, color=icon_color, size=16))
             except Exception:
-                self._icon_label.setPixmap(qta.icon("fa5s.file", color=tokens.accent_hex).pixmap(16, 16))
+                self._icon_label.setPixmap(get_cached_qta_pixmap("fa5s.file", color=tokens.accent_hex, size=16))
             
     def _on_delete(self):
         """Запрос на удаление блоба"""
@@ -276,7 +275,7 @@ class AddBlobDialog(MessageBoxBase):
         self.value_edit.setPlaceholderText(self._tr("page.blobs.dialog.add.value.path_placeholder", "Путь к файлу"))
         value_layout.addWidget(self.value_edit, 1)
         self.browse_btn = TransparentToolButton(self._value_container)
-        self.browse_btn.setIcon(qta.icon("fa5s.folder-open", color="#888"))
+        self.browse_btn.setIcon(get_themed_qta_icon("fa5s.folder-open", color="#888"))
         self.browse_btn.setFixedSize(32, 32)
         set_tooltip(self.browse_btn, self._tr("page.blobs.dialog.add.browse.tooltip", "Выбрать файл"))
         self.browse_btn.clicked.connect(self._browse_file)
@@ -435,7 +434,7 @@ class BlobsPage(BasePage):
             back_btn = TransparentPushButton(parent=self)
             back_btn.setText(self._tr("page.blobs.button.back", "Управление"))
             self._back_btn = back_btn
-            back_btn.setIcon(qta.icon("fa5s.chevron-left", color="#888"))
+            back_btn.setIcon(get_themed_qta_icon("fa5s.chevron-left", color="#888"))
             back_btn.setIconSize(QSize(12, 12))
             back_btn.clicked.connect(self.back_clicked.emit)
             back_row_widget = QWidget()
@@ -600,7 +599,7 @@ class BlobsPage(BasePage):
 
         if self._filter_icon_label is not None:
             self._filter_icon_label.setPixmap(
-                qta.icon('fa5s.search', color=tokens.fg_faint).pixmap(14, 14)
+                get_cached_qta_pixmap('fa5s.search', color=tokens.fg_faint, size=14)
             )
 
         # filter_edit is a qfluentwidgets LineEdit — it styles itself.

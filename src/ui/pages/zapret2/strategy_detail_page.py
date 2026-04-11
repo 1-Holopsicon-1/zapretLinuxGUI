@@ -12,9 +12,9 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QWidget,
     QFrame, QMenu,
 )
-import qtawesome as qta
 
 from core.runtime.direct_ui_snapshot_service import DirectTargetDetailSnapshotWorker
+from core.services import get_strategy_favorites_store, get_strategy_marks_store
 try:
     from qfluentwidgets import (
         BodyLabel, CaptionLabel, StrongBodyLabel, SubtitleLabel,
@@ -64,8 +64,7 @@ from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTre
 from ui.popup_menu import exec_popup_menu
 from strategy_menu.args_preview_dialog import ArgsPreviewDialog
 from launcher_common.blobs import get_blobs_info
-from strategy_menu.marks_store_bridge import DirectZapret2MarksStore, DirectZapret2FavoritesStore
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from log import log
 from ui.pages.zapret2.strategy_detail_page_controller import StrategyDetailPageController
 from ui.pages.zapret2.strategy_detail_apply import (
@@ -254,8 +253,8 @@ class StrategyDetailPage(BasePage):
             "direct_zapret2",
             on_dpi_reload_needed=self._on_dpi_reload_needed,
         )
-        self._marks_store = DirectZapret2MarksStore.default()
-        self._favorites_store = DirectZapret2FavoritesStore.default()
+        self._marks_store = get_strategy_marks_store()
+        self._favorites_store = get_strategy_favorites_store()
         self._favorite_strategy_ids = set()
         self._preview_dialog = None
         self._preview_pinned = False
@@ -365,7 +364,7 @@ class StrategyDetailPage(BasePage):
             if getattr(self, "_parent_link", None) is not None:
                 parent_color = str(tokens.fg_muted)
                 if parent_color != self._last_parent_link_icon_color:
-                    self._parent_link.setIcon(qta.icon('fa5s.chevron-left', color=parent_color))
+                    self._parent_link.setIcon(get_themed_qta_icon('fa5s.chevron-left', color=parent_color))
                     self._last_parent_link_icon_color = parent_color
         except Exception:
             pass
@@ -374,7 +373,7 @@ class StrategyDetailPage(BasePage):
             if not _HAS_FLUENT and getattr(self, "_edit_args_btn", None) is not None:
                 edit_color = str(tokens.fg_faint)
                 if edit_color != self._last_edit_args_icon_color:
-                    self._edit_args_btn.setIcon(qta.icon('fa5s.edit', color=edit_color))
+                    self._edit_args_btn.setIcon(get_themed_qta_icon('fa5s.edit', color=edit_color))
                     self._last_edit_args_icon_color = edit_color
         except Exception:
             pass
@@ -584,7 +583,7 @@ class StrategyDetailPage(BasePage):
             back_row.setSpacing(4)
             self._parent_link = TransparentPushButton(parent=self)
             self._parent_link.setText(self._tr("page.z2_strategy_detail.back.strategies", "Стратегии DPI"))
-            self._parent_link.setIcon(qta.icon('fa5s.chevron-left', color=tokens.fg_muted))
+            self._parent_link.setIcon(get_themed_qta_icon('fa5s.chevron-left', color=tokens.fg_muted))
             self._parent_link.setIconSize(QSize(12, 12))
             self._parent_link.clicked.connect(self.back_clicked.emit)
             back_row.addWidget(self._parent_link)
@@ -1178,7 +1177,7 @@ class StrategyDetailPage(BasePage):
         if not key:
             return None
         try:
-            payload = self._get_direct_ui_snapshot_service().load_target_detail_payload(
+            payload = self._require_app_context().direct_ui_snapshot_service.load_target_detail_payload(
                 "direct_zapret2",
                 key,
                 refresh=refresh,
@@ -1193,18 +1192,18 @@ class StrategyDetailPage(BasePage):
         app_context = getattr(self.window(), "app_context", None)
         service = getattr(app_context, "direct_ui_snapshot_service", None)
         if service is None:
-            from core.services import get_direct_ui_snapshot_service
+            from app_context import require_app_context
 
-            service = get_direct_ui_snapshot_service()
+            service = require_app_context().direct_ui_snapshot_service
         return service
 
     def _get_direct_flow_coordinator(self):
         app_context = getattr(self.window(), "app_context", None)
         coordinator = getattr(app_context, "direct_flow_coordinator", None)
         if coordinator is None:
-            from core.services import get_direct_flow_coordinator
+            from app_context import require_app_context
 
-            coordinator = get_direct_flow_coordinator()
+            coordinator = require_app_context().direct_flow_coordinator
         return coordinator
 
     def _read_target_raw_args_text(self, target_key: str) -> str:
@@ -2032,7 +2031,7 @@ class StrategyDetailPage(BasePage):
     def _on_rename_preset_clicked(self):
         """Открывает WinUI-диалог переименования текущего активного пресета."""
         try:
-            coordinator = self._get_direct_flow_coordinator()
+            coordinator = self._require_app_context().direct_flow_coordinator
             old_file_name = (
                 coordinator.get_selected_source_file_name("direct_zapret2") or ""
             ).strip()
@@ -2262,7 +2261,7 @@ class StrategyDetailPage(BasePage):
             self._spinner,
             self._success_icon,
             success=True,
-            success_pixmap=qta.icon('fa5s.check-circle', color='#4ade80').pixmap(16, 16),
+            success_pixmap=get_cached_qta_pixmap('fa5s.check-circle', color='#4ade80', size=16),
         )
 
     def _connect_process_monitor(self):
@@ -2876,7 +2875,7 @@ class StrategyDetailPage(BasePage):
             apply_sort_combo_state_fn=apply_sort_combo_state,
             apply_sort_button_state_fn=apply_sort_button_state,
             set_tooltip_fn=set_tooltip,
-            icon_builder=lambda icon_color: qta.icon('fa5s.sort-alpha-down', color=icon_color),
+            icon_builder=lambda icon_color: get_themed_qta_icon('fa5s.sort-alpha-down', color=icon_color),
         )
 
     def _on_sort_combo_changed(self, index: int) -> None:

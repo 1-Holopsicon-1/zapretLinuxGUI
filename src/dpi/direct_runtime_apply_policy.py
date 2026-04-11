@@ -31,9 +31,9 @@ def _get_selected_direct_preset_path(launch_method: str) -> Path | None:
     if method not in {"direct_zapret1", "direct_zapret2"}:
         return None
     try:
-        from core.services import get_direct_flow_coordinator
+        from app_context import require_app_context
 
-        snapshot = get_direct_flow_coordinator().get_startup_snapshot(method, require_filters=False)
+        snapshot = require_app_context().direct_flow_coordinator.get_startup_snapshot(method, require_filters=False)
         return Path(snapshot.preset_path)
     except Exception:
         return None

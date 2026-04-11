@@ -8,13 +8,31 @@ import logging
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QAction
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QHeaderView, QMenu
-import qtawesome as qta
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QMenu
 
 from blockcheck.strategy_scan_page_controller import StrategyScanPageController
 from blockcheck.strategy_scan_worker import StrategyScanWorker
-from ui.pages.base_page import BasePage, ScrollBlockingTextEdit
+from ui.pages.base_page import BasePage
+from ui.pages.strategy_scan_page_build import (
+    build_strategy_scan_control_section,
+    build_strategy_scan_log_section,
+    build_strategy_scan_results_section,
+)
+from ui.pages.strategy_scan_page_results_workflow import (
+    add_strategy_result_row,
+    append_scan_log,
+    apply_finished_scan,
+    apply_force_stop_status,
+    apply_phase_change,
+    apply_strategy_started_progress,
+)
+from ui.pages.strategy_scan_page_runtime_helpers import (
+    apply_language_plan_ui,
+    apply_log_expand_state,
+    prepare_strategy_scan_support,
+    set_support_status,
+)
 from ui.popup_menu import exec_popup_menu
 from ui.text_catalog import tr as tr_catalog
 
@@ -37,7 +55,7 @@ except ImportError:
     )
 
 from ui.compat_widgets import (
-    SettingsCard, ActionButton, InfoBarHelper, QuickActionsBar,
+    SettingsCard, ActionButton, InfoBarHelper,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,164 +133,40 @@ class StrategyScanPage(BasePage):
             self.add_widget(self._wrap_layout(back_row))
 
         # ── Control Card ──
-        self._control_card = SettingsCard(
-            tr_catalog("page.strategy_scan.control", default="Управление сканированием")
+        control_widgets = build_strategy_scan_control_section(
+            tr_fn=lambda key, default: tr_catalog(key, default=default),
+            has_fluent=HAS_FLUENT,
+            combo_cls=ComboBox,
+            caption_label_cls=CaptionLabel,
+            body_label_cls=BodyLabel,
+            progress_bar_cls=ProgressBar,
+            push_button_cls=PushButton,
+            line_edit_cls=LineEdit,
+            parent=self.content,
+            on_protocol_changed=self._on_protocol_changed,
+            on_udp_games_scope_changed=self._on_udp_games_scope_changed,
+            on_show_quick_domains_menu=self._show_quick_domains_menu,
+            on_start=self._on_start,
+            on_stop=self._on_stop,
         )
-
-        # Row 1: protocol + mode + target
-        settings_row = QHBoxLayout()
-        settings_row.setSpacing(12)
-
-        protocol_label = CaptionLabel(
-            tr_catalog("page.strategy_scan.protocol", default="Протокол:")
-        ) if HAS_FLUENT else QLabel(tr_catalog("page.strategy_scan.protocol", default="Протокол:"))
-        settings_row.addWidget(protocol_label)
-
-        self._protocol_combo = ComboBox()
-        self._protocol_combo.addItem(
-            tr_catalog("page.strategy_scan.protocol_tcp", default="TCP/HTTPS"),
-            userData="tcp_https",
-        )
-        self._protocol_combo.addItem(
-            tr_catalog("page.strategy_scan.protocol_stun", default="STUN Voice (Discord/Telegram)"),
-            userData="stun_voice",
-        )
-        self._protocol_combo.addItem(
-            tr_catalog("page.strategy_scan.protocol_games", default="UDP Games (Roblox/Amazon/Steam)"),
-            userData="udp_games",
-        )
-        self._protocol_combo.setCurrentIndex(0)
-        self._protocol_combo.setFixedWidth(150)
-        self._protocol_combo.currentIndexChanged.connect(self._on_protocol_changed)
-        settings_row.addWidget(self._protocol_combo)
-
-        self._games_scope_label = CaptionLabel(
-            tr_catalog("page.strategy_scan.udp_scope", default="Охват UDP:")
-        ) if HAS_FLUENT else QLabel(tr_catalog("page.strategy_scan.udp_scope", default="Охват UDP:"))
-        settings_row.addWidget(self._games_scope_label)
-
-        self._games_scope_combo = ComboBox()
-        self._games_scope_combo.addItem(
-            tr_catalog("page.strategy_scan.udp_scope_all", default="Все ipset (по умолчанию)"),
-            userData="all",
-        )
-        self._games_scope_combo.addItem(
-            tr_catalog("page.strategy_scan.udp_scope_games_only", default="Только игровые ipset"),
-            userData="games_only",
-        )
-        self._games_scope_combo.setCurrentIndex(0)
-        self._games_scope_combo.setFixedWidth(220)
-        self._games_scope_combo.currentIndexChanged.connect(self._on_udp_games_scope_changed)
-        settings_row.addWidget(self._games_scope_combo)
-
-        settings_row.addSpacing(16)
-
-        mode_label = CaptionLabel(
-            tr_catalog("page.strategy_scan.mode", default="Режим:")
-        ) if HAS_FLUENT else QLabel(tr_catalog("page.strategy_scan.mode", default="Режим:"))
-        settings_row.addWidget(mode_label)
-
-        self._mode_combo = ComboBox()
-        self._mode_combo.addItem(
-            tr_catalog("page.strategy_scan.mode_quick", default="Быстрый (30)"), "quick"
-        )
-        self._mode_combo.addItem(
-            tr_catalog("page.strategy_scan.mode_standard", default="Стандартный (80)"), "standard"
-        )
-        self._mode_combo.addItem(
-            tr_catalog("page.strategy_scan.mode_full", default="Полный (все)"), "full"
-        )
-        self._mode_combo.setCurrentIndex(0)
-        self._mode_combo.setFixedWidth(180)
-        settings_row.addWidget(self._mode_combo)
-
-        settings_row.addSpacing(16)
-
-        target_label = CaptionLabel(
-            tr_catalog("page.strategy_scan.target", default="Цель:")
-        ) if HAS_FLUENT else QLabel(tr_catalog("page.strategy_scan.target", default="Цель:"))
-        self._target_label = target_label
-        settings_row.addWidget(target_label)
-
-        self._target_input = LineEdit()
-        self._target_input.setText(
-            tr_catalog("page.strategy_scan.target.default", default="discord.com")
-        )
-        self._target_input.setPlaceholderText(
-            tr_catalog("page.strategy_scan.target.placeholder", default="discord.com")
-        )
-        self._target_input.setFixedWidth(200)
-        self._target_input.setFixedHeight(33)
-        settings_row.addWidget(self._target_input)
-
-        self._quick_domain_btn = ActionButton(
-            tr_catalog("page.strategy_scan.quick_domains", default="Быстрый выбор"),
-            icon_name="fa5s.list",
-        )
-        self._quick_domain_btn.setToolTip(
-            tr_catalog(
-                "page.strategy_scan.quick_domains_hint",
-                default="Выберите домен из готового списка",
-            )
-        )
-        self._quick_domain_btn.clicked.connect(self._show_quick_domains_menu)
-        settings_row.addWidget(self._quick_domain_btn)
-
-        settings_row.addStretch()
-        self._control_card.add_layout(settings_row)
-
-        self._udp_scope_hint_label = CaptionLabel("") if HAS_FLUENT else QLabel("")
-        self._udp_scope_hint_label.setWordWrap(True)
-        self._control_card.add_widget(self._udp_scope_hint_label)
-
-        # Progress bar (determinate)
-        self._progress_bar = ProgressBar()
-        self._progress_bar.setVisible(False)
-        self._progress_bar.setFixedHeight(4)
-        self._progress_bar.setRange(0, 100)
-        self._progress_bar.setValue(0)
-        self._control_card.add_widget(self._progress_bar)
-
-        # Status label
-        self._status_label = CaptionLabel(
-            tr_catalog("page.strategy_scan.ready", default="Готово к сканированию")
-        ) if HAS_FLUENT else QLabel(tr_catalog("page.strategy_scan.ready", default="Готово к сканированию"))
-        self._control_card.add_widget(self._status_label)
+        self._control_card = control_widgets.control_card
+        self._protocol_combo = control_widgets.protocol_combo
+        self._games_scope_label = control_widgets.games_scope_label
+        self._games_scope_combo = control_widgets.games_scope_combo
+        self._mode_combo = control_widgets.mode_combo
+        self._target_label = control_widgets.target_label
+        self._target_input = control_widgets.target_input
+        self._quick_domain_btn = control_widgets.quick_domain_btn
+        self._udp_scope_hint_label = control_widgets.udp_scope_hint_label
+        self._progress_bar = control_widgets.progress_bar
+        self._status_label = control_widgets.status_label
+        self._actions_title_label = control_widgets.actions_title_label
+        self._actions_bar = control_widgets.actions_bar
+        self._start_btn = control_widgets.start_btn
+        self._stop_btn = control_widgets.stop_btn
 
         self.add_widget(self._control_card)
-
-        self._actions_title_label = BodyLabel(
-            tr_catalog("page.strategy_scan.actions.title", default="Действия")
-        )
         self.add_widget(self._actions_title_label)
-
-        self._actions_bar = QuickActionsBar(self.content)
-
-        self._start_btn = PushButton()
-        self._start_btn.setText(tr_catalog("page.strategy_scan.start", default="Начать сканирование"))
-        self._start_btn.setIcon(qta.icon("fa5s.search", color="#4CAF50"))
-        self._start_btn.setToolTip(
-            tr_catalog(
-                "page.strategy_scan.action.start.description",
-                default="Запустить автоматический перебор стратегий обхода DPI для выбранной цели.",
-            )
-        )
-        self._start_btn.clicked.connect(self._on_start)
-        self._actions_bar.add_button(self._start_btn)
-
-        self._stop_btn = PushButton()
-        self._stop_btn.setText(tr_catalog("page.strategy_scan.stop", default="Остановить"))
-        self._stop_btn.setIcon(qta.icon("fa5s.stop", color="#ff9800"))
-        self._stop_btn.setToolTip(
-            tr_catalog(
-                "page.strategy_scan.action.stop.description",
-                default="Остановить текущее сканирование стратегий и вернуть страницу в обычный режим.",
-            )
-        )
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self._on_stop)
-        self._actions_bar.add_button(self._stop_btn)
-
         self.add_widget(self._actions_bar)
 
         # ── Warning Card ──
@@ -291,73 +185,29 @@ class StrategyScanPage(BasePage):
         self.add_widget(self._warning_card)
 
         # ── Results Table Card ──
-        self._results_card = SettingsCard(
-            tr_catalog("page.strategy_scan.results", default="Результаты")
+        results_widgets = build_strategy_scan_results_section(
+            tr_fn=lambda key, default: tr_catalog(key, default=default),
+            table_cls=TableWidget,
         )
-
-        self._table = TableWidget()
-        self._table.setColumnCount(5)
-        headers = [
-            "#",
-            tr_catalog("page.strategy_scan.col_strategy", default="Стратегия"),
-            tr_catalog("page.strategy_scan.col_status", default="Статус"),
-            tr_catalog("page.strategy_scan.col_time", default="Время (мс)"),
-            tr_catalog("page.strategy_scan.col_action", default="Действие"),
-        ]
-        self._table.setHorizontalHeaderLabels(headers)
-        self._table.setEditTriggers(TableWidget.EditTrigger.NoEditTriggers)
-        self._table.setSelectionBehavior(TableWidget.SelectionBehavior.SelectRows)
-        self._table.setMinimumHeight(250)
-        self._table.verticalHeader().setVisible(False)
-
-        try:
-            header = self._table.horizontalHeader()
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-            self._table.setColumnWidth(0, 50)
-        except Exception:
-            pass
-
-        self._results_card.add_widget(self._table)
+        self._results_card = results_widgets.results_card
+        self._table = results_widgets.table
         self.add_widget(self._results_card)
 
         # ── Log Card ──
-        self._log_card = SettingsCard(
-            tr_catalog("page.strategy_scan.log", default="Подробный лог")
-        )
-
-        # Кнопка "Развернуть / Свернуть" в заголовке лог-карточки
         self._log_expanded = False
-        self._expand_log_btn = PushButton()
-        self._expand_log_btn.setText("Развернуть")
-        self._expand_log_btn.setFixedWidth(120)
-        self._expand_log_btn.clicked.connect(self._toggle_log_expand)
-        log_header = QHBoxLayout()
-        self._support_status_label = CaptionLabel("") if HAS_FLUENT else QLabel("")
-        self._support_status_label.setWordWrap(True)
-        log_header.addWidget(self._support_status_label, 1)
-        log_header.addStretch()
-        self._prepare_support_btn = ActionButton(
-            tr_catalog(
-                "page.strategy_scan.prepare_support",
-                default="Подготовить обращение",
-            ),
-            icon_name="fa5b.github",
+        log_widgets = build_strategy_scan_log_section(
+            tr_fn=lambda key, default: tr_catalog(key, default=default),
+            has_fluent=HAS_FLUENT,
+            push_button_cls=PushButton,
+            parent=self.content,
+            on_toggle_log_expand=self._toggle_log_expand,
+            on_prepare_support=self._prepare_support_from_strategy_scan,
         )
-        self._prepare_support_btn.clicked.connect(self._prepare_support_from_strategy_scan)
-        log_header.addWidget(self._prepare_support_btn)
-        log_header.addWidget(self._expand_log_btn)
-        self._log_card.add_layout(log_header)
-
-        self._log_edit = ScrollBlockingTextEdit()
-        self._log_edit.setReadOnly(True)
-        self._log_edit.setMinimumHeight(180)
-        self._log_edit.setMaximumHeight(300)
-        self._log_edit.setFont(QFont("Consolas", 9))
-        self._log_card.add_widget(self._log_edit)
+        self._log_card = log_widgets.log_card
+        self._expand_log_btn = log_widgets.expand_log_btn
+        self._support_status_label = log_widgets.support_status_label
+        self._prepare_support_btn = log_widgets.prepare_support_btn
+        self._log_edit = log_widgets.log_edit
         self.add_widget(self._log_card)
 
         self._on_protocol_changed(self._protocol_combo.currentIndex())
@@ -369,17 +219,15 @@ class StrategyScanPage(BasePage):
     def _toggle_log_expand(self):
         """Развернуть/свернуть лог на всю страницу."""
         self._log_expanded = not self._log_expanded
-        plan = StrategyScanPageController.build_log_expand_plan(
+        apply_log_expand_state(
             expanded=self._log_expanded,
             language=self._ui_language,
+            control_card=self._control_card,
+            warning_card=self._warning_card,
+            results_card=self._results_card,
+            log_edit=self._log_edit,
+            expand_log_btn=self._expand_log_btn,
         )
-
-        self._control_card.setVisible(plan.control_visible)
-        self._warning_card.setVisible(plan.warning_visible)
-        self._results_card.setVisible(plan.results_visible)
-        self._log_edit.setMinimumHeight(plan.log_min_height)
-        self._log_edit.setMaximumHeight(plan.log_max_height)
-        self._expand_log_btn.setText(plan.button_text)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -503,44 +351,23 @@ class StrategyScanPage(BasePage):
         pass  # Table colors are set per-cell, no global refresh needed
 
     def _apply_language_plan(self, language: str) -> None:
-        plan = StrategyScanPageController.build_language_plan(
+        apply_language_plan_ui(
             language=language,
             log_expanded=self._log_expanded,
+            control_card=self._control_card,
+            results_card=self._results_card,
+            log_card=self._log_card,
+            expand_log_btn=self._expand_log_btn,
+            warning_card=self._warning_card,
+            start_btn=self._start_btn,
+            stop_btn=self._stop_btn,
+            actions_title_label=self._actions_title_label,
+            prepare_support_btn=self._prepare_support_btn,
+            protocol_combo=self._protocol_combo,
+            games_scope_label=self._games_scope_label,
+            games_scope_combo=self._games_scope_combo,
+            quick_domain_btn=self._quick_domain_btn,
         )
-        self._control_card.set_title(plan.control_title)
-        self._results_card.set_title(plan.results_title)
-        self._log_card.set_title(plan.log_title)
-        self._expand_log_btn.setText(plan.expand_log_text)
-        self._warning_card.set_title(plan.warning_title)
-        self._start_btn.setText(plan.start_text)
-        self._stop_btn.setText(plan.stop_text)
-        if self._actions_title_label is not None:
-            self._actions_title_label.setText(tr_catalog("page.strategy_scan.actions.title", default="Действия"))
-        self._start_btn.setToolTip(
-            tr_catalog(
-                "page.strategy_scan.action.start.description",
-                default="Запустить автоматический перебор стратегий обхода DPI для выбранной цели.",
-            )
-        )
-        self._stop_btn.setToolTip(
-            tr_catalog(
-                "page.strategy_scan.action.stop.description",
-                default="Остановить текущее сканирование стратегий и вернуть страницу в обычный режим.",
-            )
-        )
-        if self._prepare_support_btn is not None:
-            self._prepare_support_btn.setText(plan.prepare_support_text)
-        self._protocol_combo.setItemText(0, plan.protocol_items[0])
-        self._protocol_combo.setItemText(1, plan.protocol_items[1])
-        self._protocol_combo.setItemText(2, plan.protocol_items[2])
-        if self._games_scope_label is not None:
-            self._games_scope_label.setText(plan.udp_scope_label)
-        if self._games_scope_combo is not None:
-            self._games_scope_combo.setItemText(0, plan.udp_scope_items[0])
-            self._games_scope_combo.setItemText(1, plan.udp_scope_items[1])
-        if self._quick_domain_btn is not None:
-            self._quick_domain_btn.setText(plan.quick_domains_text)
-            self._quick_domain_btn.setToolTip(plan.quick_domains_tooltip)
 
     # ------------------------------------------------------------------
     # Navigation cleanup
@@ -633,21 +460,13 @@ class StrategyScanPage(BasePage):
         QTimer.singleShot(5000, lambda worker=expected_worker: self._force_stop(worker))
 
     def _force_stop(self, expected_worker=None):
-        if expected_worker is None:
-            return
-        if self._worker is expected_worker and self._worker.is_running:
-            warning_text = tr_catalog(
-                "page.strategy_scan.stopping_slow",
-                default="Остановка занимает больше времени, ждём завершения фонового сканирования...",
-            )
-            self._status_label.setText(warning_text)
-            StrategyScanPageController.append_run_log(self._run_log_file, f"WARNING: {warning_text}")
-            self._set_support_status(
-                tr_catalog(
-                    "page.strategy_scan.support_wait_stop",
-                    default="Подождите завершения остановки перед новым запуском",
-                )
-            )
+        apply_force_stop_status(
+            worker=self._worker,
+            expected_worker=expected_worker,
+            status_label=self._status_label,
+            run_log_file=self._run_log_file,
+            set_support_status=self._set_support_status,
+        )
 
     # ------------------------------------------------------------------
     # Signal handlers
@@ -656,75 +475,29 @@ class StrategyScanPage(BasePage):
     def _on_strategy_started(self, name: str, index: int, total: int):
         if self._cleanup_in_progress:
             return
-        progress_plan = StrategyScanPageController.build_progress_plan(
+        apply_strategy_started_progress(
             strategy_name=name,
             index=index,
             total=total,
             result_rows=self._result_rows,
+            progress_bar=self._progress_bar,
+            status_label=self._status_label,
+            scan_cursor=self._scan_cursor,
         )
-        if progress_plan.total > 0:
-            self._progress_bar.setRange(0, progress_plan.total)
-        if self._progress_bar.value() < self._scan_cursor:
-            self._progress_bar.setValue(self._scan_cursor)
-        self._status_label.setText(progress_plan.status_text)
 
     def _on_strategy_result(self, result):
         """Add a row to the results table."""
         if self._cleanup_in_progress:
             return
-        from PyQt6.QtWidgets import QTableWidgetItem
-
-        row_plan = StrategyScanPageController.build_result_presentation(
-            result,
+        stored_row = add_strategy_result_row(
+            table=self._table,
+            result=result,
             scan_cursor=self._scan_cursor,
+            tr_fn=lambda key, default: tr_catalog(key, default=default),
+            push_button_cls=PushButton,
+            on_apply_strategy=self._on_apply_strategy,
         )
-        row_idx = self._table.rowCount()
-        self._table.insertRow(row_idx)
-
-        # #
-        num_item = QTableWidgetItem(row_plan.number_text)
-        num_item.setFlags(num_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._table.setItem(row_idx, 0, num_item)
-
-        # Strategy name
-        name_item = QTableWidgetItem(row_plan.strategy_name)
-        name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        name_item.setToolTip(row_plan.strategy_tooltip)
-        self._table.setItem(row_idx, 1, name_item)
-
-        # Status
-        status_item = QTableWidgetItem(row_plan.status_text)
-        if row_plan.status_tone == "success":
-            status_item.setForeground(QColor("#52c477"))
-        elif row_plan.status_tone == "timeout":
-            status_item.setForeground(QColor("#888888"))
-        else:
-            status_item.setForeground(QColor("#e05454"))
-        status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        status_item.setToolTip(row_plan.status_tooltip)
-        self._table.setItem(row_idx, 2, status_item)
-
-        # Time
-        time_item = QTableWidgetItem(row_plan.time_text)
-        time_item.setFlags(time_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-        time_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._table.setItem(row_idx, 3, time_item)
-
-        # Action button (only for successful strategies)
-        if row_plan.can_apply:
-            apply_btn = PushButton()
-            apply_btn.setText(tr_catalog("page.strategy_scan.apply", default="Применить"))
-            apply_btn.setFixedHeight(26)
-            apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            apply_btn.clicked.connect(
-                lambda checked=False, args=result.strategy_args, name=result.strategy_name:
-                    self._on_apply_strategy(args, name)
-            )
-            self._table.setCellWidget(row_idx, 4, apply_btn)
-
-        # Track result and update progress after test completes
-        self._result_rows.append(dict(row_plan.stored_row))
+        self._result_rows.append(dict(stored_row))
         self._scan_cursor += 1
         self._progress_bar.setValue(self._scan_cursor)
         StrategyScanPageController.save_resume_state(
@@ -734,20 +507,23 @@ class StrategyScanPage(BasePage):
             self._scan_udp_games_scope,
         )
 
-        # Scroll to latest
-        self._table.scrollToBottom()
-
     def _on_log(self, message: str):
         if self._cleanup_in_progress:
             return
-        self._log_edit.append(message)
-        StrategyScanPageController.append_run_log(self._run_log_file, message)
+        append_scan_log(
+            log_edit=self._log_edit,
+            run_log_file=self._run_log_file,
+            message=message,
+        )
 
     def _on_phase_changed(self, phase: str):
         if self._cleanup_in_progress:
             return
-        self._status_label.setText(phase)
-        StrategyScanPageController.append_run_log(self._run_log_file, f"[PHASE] {phase}")
+        apply_phase_change(
+            status_label=self._status_label,
+            run_log_file=self._run_log_file,
+            phase=phase,
+        )
 
     def _on_finished(self, report):
         """Handle scan completion."""
@@ -755,88 +531,22 @@ class StrategyScanPage(BasePage):
             return
         worker = self._worker
         self._worker = None
-        if worker is not None:
-            try:
-                worker.deleteLater()
-            except Exception:
-                pass
-        self._reset_ui()
-        finish_plan = StrategyScanPageController.finalize_scan_report(
+        apply_finished_scan(
             report,
+            worker=worker,
+            reset_ui=self._reset_ui,
             scan_target=self._scan_target,
             scan_protocol=self._scan_protocol,
             scan_udp_games_scope=self._scan_udp_games_scope,
             scan_mode=self._scan_mode,
             scan_cursor=self._scan_cursor,
             result_rows=self._result_rows,
+            progress_bar=self._progress_bar,
+            status_label=self._status_label,
+            run_log_file=self._run_log_file,
+            set_support_status=self._set_support_status,
+            window=self.window(),
         )
-
-        if finish_plan.total_available > 0:
-            self._progress_bar.setRange(0, finish_plan.total_available)
-
-        self._status_label.setText(finish_plan.status_text)
-        self._progress_bar.setValue(min(finish_plan.total_count, self._progress_bar.maximum()))
-        if finish_plan.log_message:
-            StrategyScanPageController.append_run_log(self._run_log_file, finish_plan.log_message)
-
-        if finish_plan.support_status_code == "ready_after_error":
-            self._set_support_status(
-                tr_catalog(
-                    "page.strategy_scan.support_ready_after_error",
-                    default="Можно подготовить обращение по логам ошибки",
-                )
-            )
-            return
-
-        if finish_plan.cancelled:
-            self._set_support_status(
-                tr_catalog(
-                    "page.strategy_scan.support_ready_after_cancel",
-                    default="Можно подготовить обращение по частичным логам отменённого сканирования",
-                )
-            )
-            return
-
-        self._set_support_status(
-            tr_catalog(
-                "page.strategy_scan.support_ready",
-                default="Можно подготовить обращение по этому сканированию",
-            )
-        )
-
-        try:
-            notification_plan = StrategyScanPageController.build_finish_notification_plan(
-                finish_plan,
-                scan_protocol=self._scan_protocol,
-            )
-            if notification_plan.kind == "warning" and notification_plan.title_key:
-                title_text = tr_catalog(
-                    notification_plan.title_key,
-                    default=notification_plan.title_default,
-                )
-                body_text = (
-                    notification_plan.body_text
-                    or tr_catalog(
-                        notification_plan.body_key,
-                        default=notification_plan.body_default,
-                    )
-                )
-                InfoBarHelper.warning(
-                    self.window(),
-                    title_text,
-                    body_text,
-                )
-            elif notification_plan.kind == "success" and notification_plan.title_key:
-                InfoBarHelper.success(
-                    self.window(),
-                    tr_catalog(
-                        notification_plan.title_key,
-                        default=notification_plan.title_default,
-                    ),
-                    notification_plan.body_text,
-                )
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     # Apply strategy
@@ -899,14 +609,12 @@ class StrategyScanPage(BasePage):
         )
 
     def _set_support_status(self, text: str) -> None:
-        if self._support_status_label is None:
-            return
-        self._support_status_label.setText(str(text or "").strip())
+        set_support_status(self._support_status_label, text)
 
     def _prepare_support_from_strategy_scan(self) -> None:
-        if self._cleanup_in_progress:
-            return
-        support_context = StrategyScanPageController.build_support_context(
+        prepare_strategy_scan_support(
+            cleanup_in_progress=self._cleanup_in_progress,
+            run_log_file=self._run_log_file,
             stored_scan_protocol=self._scan_protocol,
             stored_scan_target=self._scan_target,
             raw_protocol_value=self._protocol_combo.currentData() if self._protocol_combo is not None else None,
@@ -914,43 +622,9 @@ class StrategyScanPage(BasePage):
             raw_protocol_label=self._protocol_combo.currentText() if self._protocol_combo is not None else "",
             raw_mode_label=self._mode_combo.currentText() if self._mode_combo is not None else "",
             stored_mode=self._scan_mode,
+            window=self.window(),
+            support_status_label=self._support_status_label,
         )
-
-        try:
-            feedback = StrategyScanPageController.prepare_support(
-                run_log_file=self._run_log_file,
-                target=support_context.target,
-                protocol_label=support_context.protocol_label,
-                mode_label=support_context.mode_label,
-                scan_protocol=support_context.scan_protocol,
-            )
-            result = feedback.result
-            if result.zip_path:
-                logger.info("Prepared Strategy Scan support archive: %s", result.zip_path)
-
-            message_plan = StrategyScanPageController.build_support_success_plan(feedback)
-            self._set_support_status(message_plan.status_text)
-
-            try:
-                InfoBarHelper.success(
-                    self.window(),
-                    tr_catalog(message_plan.title_key, default=message_plan.title_default),
-                    message_plan.body_text,
-                )
-            except Exception:
-                pass
-        except Exception as exc:
-            logger.warning("Failed to prepare strategy-scan support bundle: %s", exc)
-            message_plan = StrategyScanPageController.build_support_error_plan(str(exc))
-            self._set_support_status(message_plan.status_text)
-            try:
-                InfoBarHelper.warning(
-                    self.window(),
-                    tr_catalog(message_plan.title_key, default=message_plan.title_default),
-                    message_plan.body_text,
-                )
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # Language

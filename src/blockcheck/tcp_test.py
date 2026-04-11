@@ -1,8 +1,5 @@
 """TCP 16-20KB block detection — tests for DPI that drops connections at specific byte counts."""
 
-from __future__ import annotations
-
-import logging
 import time
 
 from blockcheck.config import (
@@ -12,8 +9,6 @@ from blockcheck.config import (
     TCP_BLOCK_RANGE_MIN,
 )
 from blockcheck.models import SingleTestResult, TestStatus, TestType
-
-logger = logging.getLogger(__name__)
 
 
 def probe_tcp_target_health(url: str, timeout: int = 4) -> tuple[bool, str, float]:

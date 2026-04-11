@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import QToolButton
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 
+from core.services import get_strategy_favorites_store
 from .widgets import CompactStrategyItem
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
@@ -120,9 +121,8 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
     def __init__(self, strategy_id, strategy_data, target_key=None, parent=None):
         self.target_key = target_key
         self._current_fav_style = None  # Кэш стиля кнопки избранного
-
-        from .marks_store_bridge import is_favorite_strategy
-        self.is_favorite = is_favorite_strategy(strategy_id, target_key)
+        self._favorites_store = get_strategy_favorites_store()
+        self.is_favorite = self._favorites_store.is_favorite(target_key, strategy_id)
 
         super().__init__(strategy_id, strategy_data, parent)
         self._add_favorite_button()
@@ -134,9 +134,8 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
 
     def _get_rating_style(self):
         """Возвращает стиль на основе рейтинга стратегии"""
-        from .marks_store_bridge import get_strategy_rating
         # Используем target_key для правильной привязки рейтинга
-        rating = get_strategy_rating(self.strategy_id, self.target_key)
+        rating = self._marks_store.get_rating(self.strategy_id, self.target_key)
         if rating == 'working':
             return _STYLE_RATING_WORKING
         elif rating == 'broken':
@@ -203,9 +202,7 @@ class FavoriteCompactStrategyItem(CompactStrategyItem):
     
     def _toggle_favorite(self):
         """Переключает избранное"""
-        from .marks_store_bridge import toggle_favorite_strategy
-        
-        self.is_favorite = toggle_favorite_strategy(self.strategy_id, self.target_key)
+        self.is_favorite = self._favorites_store.toggle_favorite(self.target_key, self.strategy_id)
         self.favorite_btn.setChecked(self.is_favorite)
         self._update_favorite_style()
         self._apply_style(self.is_selected)

@@ -745,13 +745,13 @@ def _service_has_proxy_ips(cat: HostsCatalog, service_name: str) -> bool:
     return False
 
 
-def get_service_has_geohide_ips(service_name: str) -> bool:
+def service_has_proxy_profiles(service_name: str) -> bool:
     """
-    Back-compat API for UI: returns True if service has proxy/hide IPs.
+    Возвращает True, если у сервиса есть proxy/hide IP-профили.
 
-    Note: historically this was tied to GeoHide DNS naming, but now detection is name-agnostic
-    to support user-renamed DNS profile titles. Explicit mode sections in hosts.ini
-    ([SERVICES_DNS]/[SERVICES_DIRECT]) have priority over inferred detection.
+    Исторически название было привязано к GeoHide DNS, но сейчас проверка
+    уже не зависит от имени профиля. Приоритет у явных секций hosts.ini
+    (`[SERVICES_DNS]` / `[SERVICES_DIRECT]`), а не у угадывания по названию.
     """
     return _service_has_proxy_ips(_load_catalog(), service_name)
 

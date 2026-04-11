@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import time as _time
 from datetime import datetime
 
@@ -27,6 +25,13 @@ class ServerCheckWorker(QThread):
         self._telegram_only = telegram_only
         self._ui_language = language
         self._first_online_server_id = None
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def is_stop_requested(self) -> bool:
+        return self._stop_requested
 
     def _tr(self, key: str, default: str) -> str:
         return tr_catalog(key, language=self._ui_language, default=default)
@@ -79,9 +84,14 @@ class ServerCheckWorker(QThread):
 
         pool = get_server_pool()
         self._first_online_server_id = None
+        self._stop_requested = False
 
         try:
             from updater.telegram_updater import get_telegram_version_info, is_telegram_available
+
+            if self.is_stop_requested():
+                self.all_complete.emit()
+                return
 
             if is_telegram_available():
                 start_time = _time.time()
@@ -141,8 +151,14 @@ class ServerCheckWorker(QThread):
                 },
             )
 
+        if self.is_stop_requested():
+            self.all_complete.emit()
+            return
+
         if self._telegram_only:
             for server in pool.servers:
+                if self.is_stop_requested():
+                    break
                 self.server_checked.emit(
                     server["name"],
                     {
@@ -157,6 +173,9 @@ class ServerCheckWorker(QThread):
             return
 
         dpi_was_stopped = False
+        if self.is_stop_requested():
+            self.all_complete.emit()
+            return
         if pool.servers:
             first = pool.servers[0]
             test_url = f"https://{first['host']}:{first['https_port']}/api/all_versions.json"
@@ -175,6 +194,8 @@ class ServerCheckWorker(QThread):
                     dpi_was_stopped = True
 
         for server in pool.servers:
+            if self.is_stop_requested():
+                break
             server_id = server["id"]
             server_name = f"{server['name']}"
 
@@ -267,6 +288,10 @@ class ServerCheckWorker(QThread):
             self.server_checked.emit(server_name, status)
             _time.sleep(0.02)
 
+        if self.is_stop_requested():
+            self.all_complete.emit()
+            return
+
         try:
             rate_info = check_rate_limit()
             github_status = {
@@ -295,6 +320,16 @@ class VersionCheckWorker(QThread):
     version_found = pyqtSignal(str, dict)
     complete = pyqtSignal()
 
+    def __init__(self):
+        super().__init__()
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def is_stop_requested(self) -> bool:
+        return self._stop_requested
+
     def run(self):
         from updater.release_manager import get_latest_release
         from updater.server_pool import get_server_pool
@@ -306,6 +341,7 @@ class VersionCheckWorker(QThread):
 
         all_versions = get_cached_all_versions()
         source_name = get_all_versions_source() if all_versions else None
+        self._stop_requested = False
 
         if not all_versions:
             pool = get_server_pool()
@@ -314,6 +350,9 @@ class VersionCheckWorker(QThread):
             monitor_timeout = (min(CONNECT_TIMEOUT, 3), min(READ_TIMEOUT, 5))
 
             for protocol, base_url in [("HTTPS", server_urls["https"]), ("HTTP", server_urls["http"])]:
+                if self.is_stop_requested():
+                    self.complete.emit()
+                    return
                 verify_ssl = should_verify_ssl() if protocol == "HTTPS" else False
                 data, _, route = ServerCheckWorker._request_versions_json(
                     f"{base_url}/api/all_versions.json",
@@ -328,6 +367,8 @@ class VersionCheckWorker(QThread):
 
         if not all_versions:
             for channel in ["stable", "test"]:
+                if self.is_stop_requested():
+                    break
                 try:
                     release = get_latest_release(channel, use_cache=False)
                     if release:
@@ -340,6 +381,8 @@ class VersionCheckWorker(QThread):
             return
 
         for ui_channel, api_channel in {"stable": "stable", "test": "test"}.items():
+            if self.is_stop_requested():
+                break
             data = all_versions.get(api_channel, {})
             if data and data.get("version"):
                 result = {

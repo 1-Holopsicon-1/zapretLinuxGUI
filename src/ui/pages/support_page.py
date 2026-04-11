@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import qtawesome as qta
 from PyQt6.QtWidgets import QLabel
 
 try:
@@ -23,7 +22,7 @@ except ImportError:
 
 from ui.about_page_controller import AboutPageController
 from ui.text_catalog import tr as tr_catalog
-from ui.theme import get_theme_tokens
+from ui.theme import get_theme_tokens, get_themed_qta_icon
 
 from .base_page import BasePage
 
@@ -64,7 +63,7 @@ class SupportPage(BasePage):
         )
         self._support_card = PrimaryPushSettingCard(
             self._tr("page.support.discussions.button", "Открыть"),
-            qta.icon("fa5b.github", color=tokens.accent_hex),
+            get_themed_qta_icon("fa5b.github", color=tokens.accent_hex),
             self._tr("page.support.discussions.title", "GitHub Discussions")
         ,
             self._tr(
@@ -85,7 +84,7 @@ class SupportPage(BasePage):
 
         self._tg_card = PushSettingCard(
             self._tr("page.support.channel.open", "Открыть"),
-            qta.icon("fa5b.telegram", color="#229ED9"),
+            get_themed_qta_icon("fa5b.telegram", color="#229ED9"),
             self._tr("page.support.channel.telegram.title", "Telegram"),
             self._tr("page.support.channel.telegram.desc", "Быстрые вопросы и общение с сообществом"),
         )
@@ -93,7 +92,7 @@ class SupportPage(BasePage):
 
         self._dc_card = PushSettingCard(
             self._tr("page.support.channel.open", "Открыть"),
-            qta.icon("fa5b.discord", color="#5865F2"),
+            get_themed_qta_icon("fa5b.discord", color="#5865F2"),
             self._tr("page.support.channel.discord.title", "Discord"),
             self._tr("page.support.channel.discord.desc", "Обсуждение и живое общение"),
         )
@@ -107,17 +106,17 @@ class SupportPage(BasePage):
         tokens = tokens or get_theme_tokens()
         if self._support_card is not None:
             try:
-                self._support_card.iconLabel.setIcon(qta.icon("fa5b.github", color=tokens.accent_hex))
+                self._support_card.iconLabel.setIcon(get_themed_qta_icon("fa5b.github", color=tokens.accent_hex))
             except Exception:
                 pass
         if self._tg_card is not None:
             try:
-                self._tg_card.iconLabel.setIcon(qta.icon("fa5b.telegram", color="#229ED9"))
+                self._tg_card.iconLabel.setIcon(get_themed_qta_icon("fa5b.telegram", color="#229ED9"))
             except Exception:
                 pass
         if self._dc_card is not None:
             try:
-                self._dc_card.iconLabel.setIcon(qta.icon("fa5b.discord", color="#5865F2"))
+                self._dc_card.iconLabel.setIcon(get_themed_qta_icon("fa5b.discord", color="#5865F2"))
             except Exception:
                 pass
 

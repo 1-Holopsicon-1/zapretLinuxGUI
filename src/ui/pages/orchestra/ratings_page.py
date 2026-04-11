@@ -22,12 +22,11 @@ except ImportError:
     CardWidget = QFrame
     StrongBodyLabel = QLabel
     _HAS_FLUENT = False
-import qtawesome as qta
 
 from ..base_page import BasePage
 from ui.compat_widgets import set_tooltip
 from ui.smooth_scroll import apply_editor_smooth_scroll_preference
-from ui.theme import get_theme_tokens
+from ui.theme import get_theme_tokens, get_themed_qta_icon
 from ui.text_catalog import tr as tr_catalog
 from log import log
 
@@ -157,7 +156,7 @@ class OrchestraRatingsPage(BasePage):
         if hasattr(self, "refresh_btn") and self.refresh_btn is not None:
             icon_name = "mdi.loading" if self._refresh_loading else "mdi.refresh"
             icon_color = tokens.fg_faint if self._refresh_loading else tokens.fg
-            self.refresh_btn.setIcon(qta.icon(icon_name, color=icon_color))
+            self.refresh_btn.setIcon(get_themed_qta_icon(icon_name, color=icon_color))
 
     def _get_runner(self):
         """Получает orchestra_runner из главного окна"""

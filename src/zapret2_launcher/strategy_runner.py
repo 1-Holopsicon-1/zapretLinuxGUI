@@ -27,7 +27,7 @@ from launcher_common.preset_runner_support import (
     is_process_alive_with_expected_name,
     launch_args_from_preset_text,
     notify_ui_launch_error,
-    publish_runner_runtime_state,
+    publish_runner_failure,
     preset_cache_key,
     remember_cache_entry,
     wait_for_process_exit,
@@ -216,13 +216,11 @@ class StrategyRunnerV2(StrategyRunnerBase):
             f"(gen={snapshot.generation}, reason={snapshot.reason}, preset={snapshot.preset_path})",
             "DEBUG",
         )
-        publish_runner_runtime_state(
-            launch_method="direct_zapret2",
-            state=state,
-            preset_path=preset_path,
-            pid=pid,
-            error=error,
-        )
+        if state == PresetRunnerState.FAILED:
+            publish_runner_failure(
+                launch_method="direct_zapret2",
+                error=error,
+            )
         return snapshot
 
     def validate_preset_file(self, preset_path: str) -> tuple[bool, str]:

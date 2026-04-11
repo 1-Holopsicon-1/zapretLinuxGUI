@@ -1,7 +1,5 @@
 """STUN/UDP tester — extracted from blockcheck2.py (RFC 5389)."""
 
-from __future__ import annotations
-
 import secrets
 import socket
 import struct

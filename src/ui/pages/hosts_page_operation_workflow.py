@@ -1,7 +1,5 @@
 """Helper-слой фоновых операций Hosts page."""
 
-from __future__ import annotations
-
 from collections.abc import Callable
 
 from PyQt6.QtCore import QThread
@@ -16,18 +14,21 @@ def start_hosts_operation(
     operation: str,
     payload,
     on_operation_complete: Callable[[bool, str], None],
+    on_thread_finished: Callable[[], None],
+    parent,
 ):
     if not hosts_manager or applying:
         return None
 
     worker = HostsPageController.create_operation_worker(hosts_manager, operation, payload)
-    thread = QThread()
+    thread = QThread(parent)
 
     worker.moveToThread(thread)
     thread.started.connect(worker.run)
     worker.finished.connect(on_operation_complete)
     worker.finished.connect(thread.quit)
     worker.finished.connect(worker.deleteLater)
+    thread.finished.connect(on_thread_finished)
     thread.finished.connect(thread.deleteLater)
     thread.start()
 

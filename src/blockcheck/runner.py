@@ -172,6 +172,7 @@ class BlockcheckRunner:
             report.dns_integrity = check_dns_integrity(
                 dns_domains,
                 callback=lambda msg: self.cb.on_log(msg),
+                cancelled=lambda: self.cancelled,
             )
             for d in report.dns_integrity:
                 status = self._dns_status_text(d)
@@ -239,10 +240,16 @@ class BlockcheckRunner:
                 self.cb.on_log(f"  {tr.name}: {classification.value} — {detail}")
 
         # ── Summary ──
+        was_cancelled = self.cancelled
         report.elapsed_seconds = time.time() - start_time
+        report.cancelled = was_cancelled
         report.summary = self._build_summary(report)
-        self.cb.on_phase_change("Готово")
-        self.cb.on_log(f"\nCompleted in {report.elapsed_seconds:.1f}s")
+        if was_cancelled:
+            self.cb.on_phase_change("Отменено")
+            self.cb.on_log(f"\nCancelled after {report.elapsed_seconds:.1f}s")
+        else:
+            self.cb.on_phase_change("Готово")
+            self.cb.on_log(f"\nCompleted in {report.elapsed_seconds:.1f}s")
         return report
 
     # ------------------------------------------------------------------
@@ -296,10 +303,13 @@ class BlockcheckRunner:
             )
 
         completed_targets = set()
-        with ThreadPoolExecutor(max_workers=self.parallel) as pool:
+        cancelled_during_phase = False
+        pool = ThreadPoolExecutor(max_workers=self.parallel)
+        try:
             futures = []
             for name, data in target_map.items():
                 if self.cancelled:
+                    cancelled_during_phase = True
                     break
                 idx = int(data["index"])
                 host = str(data["host"])
@@ -311,7 +321,7 @@ class BlockcheckRunner:
 
             for future in as_completed(futures):
                 if self.cancelled:
-                    pool.shutdown(wait=False, cancel_futures=True)
+                    cancelled_during_phase = True
                     break
                 name, tls_v, ip_family, r = future.result()
                 target_data = target_map[name]
@@ -330,6 +340,8 @@ class BlockcheckRunner:
                 if len(tr.tests) >= expected and name not in completed_targets:
                     completed_targets.add(name)
                     self.cb.on_target_complete(tr)
+        finally:
+            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
 
         # Emit for targets that finished partially (cancelled)
         for name, data in target_map.items():
@@ -363,15 +375,20 @@ class BlockcheckRunner:
 
             return tr, http_result, "http"
 
-        with ThreadPoolExecutor(max_workers=self.parallel) as pool:
+        cancelled_during_phase = False
+        pool = ThreadPoolExecutor(max_workers=self.parallel)
+        try:
             futures = [pool.submit(_isp_one, tr) for tr in target_results]
             for future in as_completed(futures):
                 if self.cancelled:
+                    cancelled_during_phase = True
                     break
                 tr, r, source = future.result()
                 tr.tests.append(r)
                 self.cb.on_test_result(r)
                 self.cb.on_log(f"  ISP {tr.name} ({source.upper()}): {r.status.value} {r.detail}")
+        finally:
+            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
 
     def _run_tcp_phase(self) -> list[SingleTestResult]:
         """Run TCP 16-20KB tests (parallel, diverse provider subset)."""
@@ -427,15 +444,20 @@ class BlockcheckRunner:
                 r.raw_data.setdefault("url", url)
             return target_name, r
 
-        with ThreadPoolExecutor(max_workers=self.parallel) as pool:
+        cancelled_during_phase = False
+        pool = ThreadPoolExecutor(max_workers=self.parallel)
+        try:
             futures = [pool.submit(_tcp_one, t) for t in tcp_targets]
             for future in as_completed(futures):
                 if self.cancelled:
+                    cancelled_during_phase = True
                     break
                 target_name, r = future.result()
                 tcp_results.append(r)
                 self.cb.on_test_result(r)
                 self.cb.on_log(f"  TCP 16-20KB {target_name}: {r.status.value} {r.detail}")
+        finally:
+            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
 
         return tcp_results
 
@@ -462,13 +484,18 @@ class BlockcheckRunner:
             return key, (ok, detail, elapsed)
 
         workers = min(max(2, self.parallel * 2), 16)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
+        cancelled_during_phase = False
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
             futures = [pool.submit(_probe_one, t) for t in targets]
             for future in as_completed(futures):
                 if self.cancelled:
+                    cancelled_during_phase = True
                     break
                 key, result = future.result()
                 health[key] = result
+        finally:
+            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
 
         return health
 
@@ -607,10 +634,13 @@ class BlockcheckRunner:
             r.target_name = target["name"]
             return target, r
 
-        with ThreadPoolExecutor(max_workers=self.parallel) as pool:
+        cancelled_during_phase = False
+        pool = ThreadPoolExecutor(max_workers=self.parallel)
+        try:
             futures = [pool.submit(_test_one_stun, t) for t in stun_targets]
             for future in as_completed(futures):
                 if self.cancelled:
+                    cancelled_during_phase = True
                     break
                 target, r = future.result()
                 tr = TargetResult(name=target["name"], value=target["value"], tests=[r])
@@ -618,6 +648,8 @@ class BlockcheckRunner:
                 self.cb.on_target_complete(tr)
                 self.cb.on_log(f"  STUN {target['name']}: {r.status.value} {r.detail}")
                 results.append(tr)
+        finally:
+            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
 
         return results
 
@@ -645,10 +677,13 @@ class BlockcheckRunner:
             r.target_name = name
             return name, r
 
-        with ThreadPoolExecutor(max_workers=self.parallel) as pool:
+        cancelled_during_phase = False
+        pool = ThreadPoolExecutor(max_workers=self.parallel)
+        try:
             futures = {pool.submit(_ping_one, name, host): (name, host, tr_ref) for name, host, tr_ref in jobs}
             for future in as_completed(futures):
                 if self.cancelled:
+                    cancelled_during_phase = True
                     break
                 name, host, tr_ref = futures[future]
                 _name, r = future.result()
@@ -663,6 +698,8 @@ class BlockcheckRunner:
                     value = ping_t["value"] if ping_t else f"PING:{host}"
                     tr = TargetResult(name=name, value=value, tests=[r])
                     target_results.append(tr)
+        finally:
+            pool.shutdown(wait=not cancelled_during_phase, cancel_futures=cancelled_during_phase)
 
     def _attach_dns_stub_tests(
         self,

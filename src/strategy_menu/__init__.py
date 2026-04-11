@@ -4,7 +4,7 @@
 
 Важно:
 - для direct_zapret1/direct_zapret2 источник истины теперь selected source preset;
-- этот модуль — фасад launch method / UI prefs / marks / direct source-preset helpers;
+- этот модуль — фасад launch method / UI prefs / direct source-preset helpers;
 - registry/orchestra helpers должны импортироваться явно из legacy модулей, а не через этот общий фасад.
 """
 
@@ -21,23 +21,6 @@ from .ui_prefs_store import (
     set_tabs_pinned,
     get_keep_dialog_open,
     set_keep_dialog_open,
-)
-from .marks_store_bridge import (
-    get_favorites_for_target,
-    invalidate_favorites_cache,
-    get_favorite_strategies,
-    add_favorite_strategy,
-    remove_favorite_strategy,
-    is_favorite_strategy,
-    toggle_favorite_strategy,
-    clear_favorite_strategies,
-    get_all_favorite_strategies_flat,
-    invalidate_ratings_cache,
-    get_all_strategy_ratings,
-    get_strategy_rating,
-    set_strategy_rating,
-    toggle_strategy_rating,
-    clear_all_strategy_ratings,
 )
 # ==================== НАСТРОЙКИ DIRECT SOURCE PRESET ====================
 
@@ -121,23 +104,6 @@ __all__ = [
     "set_tabs_pinned",
     "get_keep_dialog_open",
     "set_keep_dialog_open",
-
-    # Marks / favorites / ratings bridge
-    "get_favorites_for_target",
-    "invalidate_favorites_cache",
-    "get_favorite_strategies",
-    "add_favorite_strategy",
-    "remove_favorite_strategy",
-    "is_favorite_strategy",
-    "toggle_favorite_strategy",
-    "clear_favorite_strategies",
-    "get_all_favorite_strategies_flat",
-    "invalidate_ratings_cache",
-    "get_all_strategy_ratings",
-    "get_strategy_rating",
-    "set_strategy_rating",
-    "toggle_strategy_rating",
-    "clear_all_strategy_ratings",
 
     # Direct helpers
     "get_wssize_enabled",

@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
 )
-import qtawesome as qta
 
 try:
     from qfluentwidgets import (
@@ -38,7 +37,7 @@ except ImportError:
     HAS_FLUENT_LABELS = False
 
 from ui.compat_widgets import SettingsCard
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
 from ui.text_catalog import tr as tr_catalog
 
@@ -136,10 +135,13 @@ class DNSProviderCard(SettingsCard):
         icon_color = self.data.get('color') or tokens.accent_hex
         icon_label = QLabel()
         self._icon_label = icon_label
-        icon_label.setPixmap(qta.icon(
-            self.data.get('icon', 'fa5s.server'),
-            color=icon_color
-        ).pixmap(18, 18))
+        icon_label.setPixmap(
+            get_cached_qta_pixmap(
+                self.data.get('icon', 'fa5s.server'),
+                color=icon_color,
+                size=18,
+            )
+        )
         icon_label.setFixedSize(20, 20)
         layout.addWidget(icon_label)
 
@@ -184,7 +186,11 @@ class DNSProviderCard(SettingsCard):
             if self._icon_label is not None:
                 icon_color = self.data.get('color') or theme_tokens.accent_hex
                 self._icon_label.setPixmap(
-                    qta.icon(self.data.get('icon', 'fa5s.server'), color=icon_color).pixmap(18, 18)
+                    get_cached_qta_pixmap(
+                        self.data.get('icon', 'fa5s.server'),
+                        color=icon_color,
+                        size=18,
+                    )
                 )
         except Exception:
             pass
@@ -289,7 +295,7 @@ class AdapterCard(SettingsCard):
 
         icon_label = QLabel()
         self._network_icon_label = icon_label
-        icon_label.setPixmap(qta.icon('fa5s.network-wired', color=tokens.accent_hex).pixmap(16, 16))
+        icon_label.setPixmap(get_cached_qta_pixmap('fa5s.network-wired', color=tokens.accent_hex, size=16))
         layout.addWidget(icon_label)
 
         if HAS_FLUENT_LABELS:
@@ -319,7 +325,7 @@ class AdapterCard(SettingsCard):
         try:
             if getattr(self, '_network_icon_label', None) is not None:
                 self._network_icon_label.setPixmap(
-                    qta.icon('fa5s.network-wired', color=theme_tokens.accent_hex).pixmap(16, 16)
+                    get_cached_qta_pixmap('fa5s.network-wired', color=theme_tokens.accent_hex, size=16)
                 )
         except Exception:
             pass
@@ -390,6 +396,6 @@ class AdapterCard(SettingsCard):
         _ = state
         tokens = get_theme_tokens()
         if self.checkbox.isChecked():
-            self.check_icon.setPixmap(qta.icon('mdi.checkbox-marked', color=tokens.accent_hex).pixmap(18, 18))
+            self.check_icon.setPixmap(get_cached_qta_pixmap('mdi.checkbox-marked', color=tokens.accent_hex, size=18))
         else:
-            self.check_icon.setPixmap(qta.icon('mdi.checkbox-blank-outline', color=tokens.fg_faint).pixmap(18, 18))
+            self.check_icon.setPixmap(get_cached_qta_pixmap('mdi.checkbox-blank-outline', color=tokens.fg_faint, size=18))

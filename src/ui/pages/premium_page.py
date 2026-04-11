@@ -73,6 +73,7 @@ class PremiumPage(BasePage):
         self.checker = None
         self.RegistryManager = None
         self.current_thread = None
+        self._cleanup_in_progress = False
         self._activation_in_progress = False
         self._connection_test_in_progress = False
         self._server_status_mode = "checking"
@@ -315,6 +316,7 @@ class PremiumPage(BasePage):
         self._stop_pairing_status_autopoll()
 
     def closeEvent(self, event):
+        self._cleanup_in_progress = True
         plan = PremiumPageController.build_close_plan(
             thread_running=bool(self.current_thread and self.current_thread.isRunning()),
         )
@@ -323,7 +325,22 @@ class PremiumPage(BasePage):
         if plan.should_quit_thread and self.current_thread and self.current_thread.isRunning():
             self.current_thread.quit()
             self.current_thread.wait(plan.wait_timeout_ms)
+            if self.current_thread.isRunning():
+                self.current_thread.terminate()
+                self.current_thread.wait(500)
+        self.current_thread = None
         event.accept()
+
+    def cleanup(self) -> None:
+        self._cleanup_in_progress = True
+        self._stop_pairing_status_autopoll()
+        if self.current_thread and self.current_thread.isRunning():
+            self.current_thread.quit()
+            self.current_thread.wait(1000)
+            if self.current_thread.isRunning():
+                self.current_thread.terminate()
+                self.current_thread.wait(500)
+        self.current_thread = None
 
     # ── initialization ───────────────────────────────────────────────────────
 
@@ -560,6 +577,7 @@ class PremiumPage(BasePage):
     # ── pair code ────────────────────────────────────────────────────────────
 
     def _create_pair_code(self):
+        self._cleanup_in_progress = False
         gate_plan = PremiumPageController.build_worker_gate_plan(
             thread_running=bool(self.current_thread and self.current_thread.isRunning()),
         )
@@ -583,12 +601,15 @@ class PremiumPage(BasePage):
         )
         self._activation_in_progress = plan.activation_in_progress
 
-        self.current_thread = PremiumPageController.create_worker_thread(self.checker.pair_start)
-        self.current_thread.result_ready.connect(self._on_pair_code_created)
-        self.current_thread.error_occurred.connect(self._on_activation_error)
-        self.current_thread.start()
+        self._start_worker_thread(
+            PremiumPageController.create_worker_thread(self.checker.pair_start),
+            self._on_pair_code_created,
+            self._on_activation_error,
+        )
 
     def _on_pair_code_created(self, result):
+        if self._cleanup_in_progress:
+            return
         plan = apply_pair_code_result_ui(
             result,
             activate_btn=self.activate_btn,
@@ -602,6 +623,8 @@ class PremiumPage(BasePage):
         self._activation_in_progress = plan.activation_in_progress
 
     def _on_activation_error(self, error):
+        if self._cleanup_in_progress:
+            return
         plan = apply_pair_code_error_ui(
             error,
             activate_btn=self.activate_btn,
@@ -616,6 +639,7 @@ class PremiumPage(BasePage):
     # ── status check ─────────────────────────────────────────────────────────
 
     def _check_status(self):
+        self._cleanup_in_progress = False
         gate_plan = PremiumPageController.build_worker_gate_plan(
             thread_running=bool(self.current_thread and self.current_thread.isRunning()),
         )
@@ -638,12 +662,15 @@ class PremiumPage(BasePage):
             set_status_badge=self._set_status_badge,
         )
 
-        self.current_thread = PremiumPageController.create_worker_thread(self.checker.check_device_activation)
-        self.current_thread.result_ready.connect(self._on_status_complete)
-        self.current_thread.error_occurred.connect(self._on_status_error)
-        self.current_thread.start()
+        self._start_worker_thread(
+            PremiumPageController.create_worker_thread(self.checker.check_device_activation),
+            self._on_status_complete,
+            self._on_status_error,
+        )
 
     def _on_status_complete(self, result):
+        if self._cleanup_in_progress:
+            return
         try:
             days_kind, days_value = apply_status_check_success(
                 result,
@@ -671,6 +698,8 @@ class PremiumPage(BasePage):
             self._set_activation_section_visible(True)
 
     def _on_status_error(self, error):
+        if self._cleanup_in_progress:
+            return
         apply_status_check_exception(
             error,
             tr=self._tr,
@@ -682,6 +711,7 @@ class PremiumPage(BasePage):
     # ── connection test ───────────────────────────────────────────────────────
 
     def _test_connection(self):
+        self._cleanup_in_progress = False
         gate_plan = PremiumPageController.build_worker_gate_plan(
             thread_running=bool(self.current_thread and self.current_thread.isRunning()),
         )
@@ -702,12 +732,15 @@ class PremiumPage(BasePage):
         if not self.checker:
             return
 
-        self.current_thread = PremiumPageController.create_worker_thread(self.checker.test_connection)
-        self.current_thread.result_ready.connect(self._on_connection_test_complete)
-        self.current_thread.error_occurred.connect(self._on_connection_test_error)
-        self.current_thread.start()
+        self._start_worker_thread(
+            PremiumPageController.create_worker_thread(self.checker.test_connection),
+            self._on_connection_test_complete,
+            self._on_connection_test_error,
+        )
 
     def _on_connection_test_complete(self, result):
+        if self._cleanup_in_progress:
+            return
         plan = PremiumPageController.build_connection_test_result_plan(result)
         self._connection_test_in_progress = apply_connection_test_plan(
             plan,
@@ -718,6 +751,8 @@ class PremiumPage(BasePage):
         )
 
     def _on_connection_test_error(self, error):
+        if self._cleanup_in_progress:
+            return
         plan = PremiumPageController.build_connection_test_error_plan(str(error or ""))
         self._connection_test_in_progress = apply_connection_test_plan(
             plan,
@@ -726,6 +761,17 @@ class PremiumPage(BasePage):
             render_server_status=self._render_server_status,
             set_server_status_state=self._set_server_status_state,
         )
+
+    def _start_worker_thread(self, thread, result_handler, error_handler) -> None:
+        self.current_thread = thread
+        self.current_thread.result_ready.connect(result_handler)
+        self.current_thread.error_occurred.connect(error_handler)
+        self.current_thread.finished.connect(self._on_worker_thread_finished)
+        self.current_thread.finished.connect(self.current_thread.deleteLater)
+        self.current_thread.start()
+
+    def _on_worker_thread_finished(self) -> None:
+        self.current_thread = None
 
     # ── reset activation ──────────────────────────────────────────────────────
 

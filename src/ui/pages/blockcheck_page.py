@@ -43,10 +43,11 @@ from qfluentwidgets import (
     TableWidget,
     PushButton,
     LineEdit,
+    CheckBox,
     SegmentedWidget,
 )
 
-from ui.compat_widgets import SettingsCard, InfoBarHelper, CheckBox, QuickActionsBar
+from ui.compat_widgets import SettingsCard, InfoBarHelper, QuickActionsBar
 
 # ---------------------------------------------------------------------------
 # DPI badge colors
@@ -714,6 +715,7 @@ class BlockcheckPage(BasePage):
                 pass
         self._last_report = report
         self._reset_ui()
+        was_cancelled = bool(report is not None and getattr(report, "cancelled", False))
 
         if report is None:
             self._append_run_log("ERROR: Blockcheck execution failed")
@@ -729,20 +731,46 @@ class BlockcheckPage(BasePage):
             return
 
         elapsed = report.elapsed_seconds
-        self._append_run_log(f"\nCompleted in {elapsed:.1f}s")
-        self._status_label.setText(
-            tr_catalog("page.blockcheck.done", default="Готово") + f" ({elapsed:.1f}s)"
-        )
-        self._set_support_status(
-            tr_catalog(
-                "page.blockcheck.support_ready",
-                default="Можно подготовить обращение по этому запуску",
+        if was_cancelled:
+            self._status_label.setText(
+                tr_catalog("page.blockcheck.cancelled", default="Отменено") + f" ({elapsed:.1f}s)"
             )
-        )
+            self._set_support_status(
+                tr_catalog(
+                    "page.blockcheck.support_ready_after_cancel",
+                    default="Можно подготовить обращение по частичным логам отменённого запуска",
+                )
+            )
+        else:
+            self._append_run_log(f"\nCompleted in {elapsed:.1f}s")
+            self._status_label.setText(
+                tr_catalog("page.blockcheck.done", default="Готово") + f" ({elapsed:.1f}s)"
+            )
+            self._set_support_status(
+                tr_catalog(
+                    "page.blockcheck.support_ready",
+                    default="Можно подготовить обращение по этому запуску",
+                )
+            )
 
         # Re-update all targets with final classifications
         for tr in report.targets:
             self._on_target_complete(tr)
+
+        if was_cancelled:
+            self._dpi_card.setVisible(False)
+            try:
+                InfoBarHelper.warning(
+                    self.window(),
+                    tr_catalog("page.blockcheck.cancelled", default="Отменено"),
+                    tr_catalog(
+                        "page.blockcheck.cancelled.info",
+                        default="Проверка остановлена пользователем. Показаны частичные результаты.",
+                    ),
+                )
+            except Exception:
+                pass
+            return
 
         # Show DPI summary
         self._update_dpi_summary(report)

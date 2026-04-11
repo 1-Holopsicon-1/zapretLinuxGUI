@@ -4123,10 +4123,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Не выбран",
         "en": "Not selected",
     },
-    "page.z2_control.preset.no_active_lists": {
-        "ru": "Нет активных листов",
-        "en": "No active lists",
-    },
     "page.z2_control.preset.current": {
         "ru": "Текущий выбранный source-пресет",
         "en": "Current selected source preset",

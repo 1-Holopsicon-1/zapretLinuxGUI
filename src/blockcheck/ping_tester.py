@@ -1,7 +1,5 @@
 """ICMP ping tester — extracted from blockcheck2.py."""
 
-from __future__ import annotations
-
 import re
 import subprocess
 

@@ -5,11 +5,12 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 )
-import qtawesome as qta
 from .base_page import BasePage
 from ui.compat_widgets import SettingsCard, ActionButton
 from ui.theme import (
+    get_cached_qta_pixmap,
     get_theme_tokens,
+    get_themed_qta_icon,
     get_card_gradient_qss,
     get_card_disabled_gradient_qss,
     get_success_surface_gradient_qss,
@@ -112,7 +113,7 @@ class AutostartOptionCard(SimpleCardWidget):
 
         if self._is_active:
             icon_color = semantic.success
-            arrow_icon = qta.icon("fa5s.check-circle", color=semantic.success)
+            arrow_icon = get_themed_qta_icon("fa5s.check-circle", color=semantic.success)
             self.setCursor(Qt.CursorShape.ArrowCursor)
             card_bg = get_success_surface_gradient_qss(tokens.theme_name)
             card_border = semantic.success
@@ -123,7 +124,7 @@ class AutostartOptionCard(SimpleCardWidget):
             self.setEnabled(True)
         elif self._disabled:
             icon_color = tokens.fg_faint
-            arrow_icon = qta.icon("fa5s.chevron-right", color=tokens.fg_faint)
+            arrow_icon = get_themed_qta_icon("fa5s.chevron-right", color=tokens.fg_faint)
             self.setCursor(Qt.CursorShape.ForbiddenCursor)
             card_bg = get_card_disabled_gradient_qss(tokens.theme_name)
             card_border = get_neutral_card_border_qss(tokens.theme_name, disabled=True)
@@ -135,7 +136,7 @@ class AutostartOptionCard(SimpleCardWidget):
             self.setEnabled(False)
         else:
             icon_color = tokens.accent_hex if self._accent else tokens.fg
-            arrow_icon = qta.icon("fa5s.chevron-right", color=tokens.fg_faint)
+            arrow_icon = get_themed_qta_icon("fa5s.chevron-right", color=tokens.fg_faint)
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             card_bg = get_card_gradient_qss(tokens.theme_name)
             card_border = get_neutral_card_border_qss(tokens.theme_name)
@@ -163,7 +164,7 @@ class AutostartOptionCard(SimpleCardWidget):
             self._current_qss = card_qss
             self.setStyleSheet(card_qss)
 
-        self._icon_label.setPixmap(qta.icon(self._icon_name, color=icon_color).pixmap(28, 28))
+        self._icon_label.setPixmap(get_cached_qta_pixmap(self._icon_name, color=icon_color, size=28))
 
         self._arrow.setPixmap(arrow_icon.pixmap(18 if self._is_active else 16, 18 if self._is_active else 16))
 
@@ -236,6 +237,7 @@ class AutostartPage(BasePage):
         self._detector_worker = None
         self._detection_pending = False
         self._runtime_initialized = False
+        self._cleanup_in_progress = False
 
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
@@ -265,6 +267,8 @@ class AutostartPage(BasePage):
         )
 
     def _start_autostart_detection(self):
+        if self._cleanup_in_progress:
+            return
         if not self.isVisible():
             self.run_when_page_ready(self._start_autostart_detection)
             return
@@ -276,10 +280,14 @@ class AutostartPage(BasePage):
 
         self._detection_pending = True
         self._detector_worker = AutostartDetectorWorker()
+        self._detector_worker.finished.connect(self._detector_worker.deleteLater)
         self._detector_worker.finished.connect(self._on_autostart_detected)
         self._detector_worker.start()
 
     def _on_autostart_detected(self, enabled: bool):
+        self._detector_worker = None
+        if self._cleanup_in_progress:
+            return
         self._detection_pending = False
         enabled = bool(enabled)
         log(f"Detected canonical autostart: enabled={enabled}", "DEBUG")
@@ -333,7 +341,7 @@ class AutostartPage(BasePage):
         status_layout.setSpacing(14)
 
         self.status_icon = QLabel()
-        self.status_icon.setPixmap(qta.icon("fa5s.circle", color=tokens.fg_faint).pixmap(20, 20))
+        self.status_icon.setPixmap(get_cached_qta_pixmap("fa5s.circle", color=tokens.fg_faint, size=20))
         self.status_icon.setFixedSize(24, 24)
         status_layout.addWidget(self.status_icon)
 
@@ -441,7 +449,7 @@ class AutostartPage(BasePage):
         tip_layout.setSpacing(10)
 
         tip_icon = QLabel()
-        tip_icon.setPixmap(qta.icon("fa5s.lightbulb", color=get_semantic_palette().warning).pixmap(18, 18))
+        tip_icon.setPixmap(get_cached_qta_pixmap("fa5s.lightbulb", color=get_semantic_palette().warning, size=18))
         tip_icon.setFixedSize(22, 22)
         tip_layout.addWidget(tip_icon)
 
@@ -486,14 +494,14 @@ class AutostartPage(BasePage):
             return
 
         tokens = get_theme_tokens()
-        self.mode_arrow.setPixmap(qta.icon("fa5s.chevron-right", color=tokens.fg_faint).pixmap(14, 14))
+        self.mode_arrow.setPixmap(get_cached_qta_pixmap("fa5s.chevron-right", color=tokens.fg_faint, size=14))
 
     def _apply_page_theme(self, tokens=None, force: bool = False) -> None:
         _ = force
         tokens = tokens or get_theme_tokens()
 
         if hasattr(self, "_mode_icon_label"):
-            self._mode_icon_label.setPixmap(qta.icon("fa5s.cog", color=tokens.accent_hex).pixmap(18, 18))
+            self._mode_icon_label.setPixmap(get_cached_qta_pixmap("fa5s.cog", color=tokens.accent_hex, size=18))
 
         if hasattr(self, "mode_label"):
             self.mode_label.setStyleSheet(
@@ -510,10 +518,10 @@ class AutostartPage(BasePage):
         if hasattr(self, "status_icon"):
             if self._current_autostart_state():
                 self.status_icon.setPixmap(
-                    qta.icon("fa5s.check-circle", color=get_semantic_palette().success).pixmap(20, 20)
+                    get_cached_qta_pixmap("fa5s.check-circle", color=get_semantic_palette().success, size=20)
                 )
             else:
-                self.status_icon.setPixmap(qta.icon("fa5s.circle", color=tokens.fg_faint).pixmap(20, 20))
+                self.status_icon.setPixmap(get_cached_qta_pixmap("fa5s.circle", color=tokens.fg_faint, size=20))
 
         if hasattr(self, "gui_option") and hasattr(self.gui_option, "refresh_theme"):
             try:
@@ -564,7 +572,7 @@ class AutostartPage(BasePage):
                 )
             )
             self.status_icon.setPixmap(
-                qta.icon("fa5s.check-circle", color=get_semantic_palette().success).pixmap(20, 20)
+                get_cached_qta_pixmap("fa5s.check-circle", color=get_semantic_palette().success, size=20)
             )
             self.disable_btn.setVisible(True)
         else:
@@ -573,7 +581,7 @@ class AutostartPage(BasePage):
                 self._tr("page.autostart.status.disabled.desc", "Zapret не запускается автоматически")
             )
             tokens = get_theme_tokens()
-            self.status_icon.setPixmap(qta.icon("fa5s.circle", color=tokens.fg_faint).pixmap(20, 20))
+            self.status_icon.setPixmap(get_cached_qta_pixmap("fa5s.circle", color=tokens.fg_faint, size=20))
             self.disable_btn.setVisible(False)
 
         self.current_strategy_label.setText(strategy_text)
@@ -598,9 +606,9 @@ class AutostartPage(BasePage):
 
     def _on_disable_clicked(self):
         try:
-            from autostart.autostart_remove import AutoStartCleaner
+            from autostart.autostart_remove import clear_existing_autostart
 
-            removed_count = int(AutoStartCleaner().run(remove_canonical=True, remove_legacy=True) or 0)
+            removed_count = int(clear_existing_autostart() or 0)
             self._push_autostart_state(False)
             self.autostart_disabled.emit()
             if removed_count > 0:
@@ -622,3 +630,19 @@ class AutostartPage(BasePage):
             self.autostart_enabled.emit()
         except Exception as exc:
             log(f"Ошибка автозапуска GUI: {exc}", "ERROR")
+
+    def cleanup(self):
+        self._cleanup_in_progress = True
+        self._detection_pending = False
+        if self._detector_worker is not None:
+            try:
+                if self._detector_worker.isRunning():
+                    self._detector_worker.quit()
+                    self._detector_worker.wait(1000)
+                    if self._detector_worker.isRunning():
+                        self._detector_worker.terminate()
+                        self._detector_worker.wait(500)
+                self._detector_worker.deleteLater()
+            except Exception:
+                pass
+            self._detector_worker = None

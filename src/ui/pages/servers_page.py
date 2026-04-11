@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
 import qtawesome as qta
 
 from .base_page import BasePage
-from ui.compat_widgets import SettingsCard, ActionButton, SwitchButton
+from ui.compat_widgets import SettingsCard, ActionButton
 from ui.theme import get_theme_tokens
 from ui.text_catalog import tr as tr_catalog
 from updater.update_page_controller import UpdatePageController
@@ -35,6 +35,7 @@ try:
     from qfluentwidgets import (
         BodyLabel, CaptionLabel,
         PushButton,
+        SwitchButton,
         PushSettingCard, SettingCardGroup,
     )
     _HAS_FLUENT = True
@@ -43,6 +44,7 @@ except ImportError:
     BodyLabel = QLabel
     CaptionLabel = QLabel
     PushButton = QPushButton
+    SwitchButton = None  # type: ignore[assignment]
     PushSettingCard = None  # type: ignore[assignment]
     SettingCardGroup = None  # type: ignore[assignment]
     _HAS_FLUENT = False

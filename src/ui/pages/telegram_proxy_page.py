@@ -7,22 +7,54 @@ port configuration, and quick-setup deep link for Telegram.
 
 from __future__ import annotations
 
-import os
 import threading
-from typing import TYPE_CHECKING
 
-import qtawesome as qta
-
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QStackedWidget, QLineEdit,
+    QWidget, QVBoxLayout,
 )
 
-from .base_page import BasePage, ScrollBlockingPlainTextEdit
+from .base_page import BasePage
+from ui.pages.telegram_proxy_page_build import (
+    build_telegram_proxy_diag_panel,
+    build_telegram_proxy_logs_panel,
+    build_telegram_proxy_shell,
+)
+from ui.pages.telegram_proxy_page_diagnostics_workflow import (
+    finish_diagnostics,
+    poll_diagnostics,
+    start_diagnostics,
+)
+from ui.pages.telegram_proxy_page_proxy_runtime_workflow import (
+    apply_relay_result,
+    apply_stats_updated,
+    apply_status_changed,
+    finish_proxy_start,
+    handle_toggle_proxy,
+    restart_proxy_if_running,
+    start_proxy_runtime,
+    start_relay_check,
+    stop_proxy_runtime,
+)
+from ui.pages.telegram_proxy_page_runtime_helpers import (
+    apply_ui_texts,
+    apply_upstream_preset_ui,
+    load_settings_into_ui,
+    refresh_pivot_texts,
+    refresh_status_texts,
+    refresh_upstream_preset_combo,
+)
+from ui.pages.telegram_proxy_page_upstream_workflow import (
+    handle_upstream_preset_changed,
+    handle_upstream_toggle,
+    save_upstream_fields,
+    save_upstream_mode,
+    schedule_upstream_restart,
+)
+from ui.pages.telegram_proxy_page_settings_build import (
+    build_telegram_proxy_settings_panel,
+)
 from ui.compat_widgets import (
-    SettingsCard,
-    QuickActionsBar,
     enable_setting_card_group_auto_height,
     insert_widget_into_setting_card_group,
 )
@@ -31,8 +63,6 @@ from telegram_proxy.page_actions_controller import TelegramProxyPageActionsContr
 from telegram_proxy.diagnostics_controller import TelegramProxyDiagnosticsController
 from telegram_proxy.page_runtime_controller import TelegramProxyRuntimeController
 from telegram_proxy.page_settings_controller import TelegramProxySettingsController
-from telegram_proxy.upstream_catalog import UpstreamCatalog
-
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -41,16 +71,12 @@ from qfluentwidgets import (
     InfoBar,
     InfoBarPosition,
     SegmentedWidget,
-    ComboBox,
     LineEdit,
     PasswordLineEdit,
     SettingCardGroup,
     PushButton,
     PrimaryPushButton,
 )
-
-if TYPE_CHECKING:
-    from main import LupiDPIApp
 
 def _get_proxy_manager():
     from telegram_proxy.manager import get_proxy_manager
@@ -97,6 +123,10 @@ class TelegramProxyPage(BasePage):
         )
         self.parent_app = parent
         self._log_timer = None
+        self._diag_poll_timer = None
+        self._upstream_restart_timer = None
+        self._relay_check_gen = 0
+        self._cleanup_in_progress = False
         self._runtime_initialized = False
         self._setup_ui()
         self._after_ui_built()
@@ -122,45 +152,41 @@ class TelegramProxyPage(BasePage):
         self._ensure_telegram_hosts()
 
     def _setup_ui(self):
-        # ── Tabs (SegmentedWidget) ──
-        self._pivot = SegmentedWidget(self)
+        shell = build_telegram_proxy_shell(
+            segmented_widget_cls=SegmentedWidget,
+            parent=self,
+            on_switch_tab=self._switch_tab,
+        )
+        self._pivot = shell.pivot
+        self._stacked = shell.stacked
 
-        self._stacked = QStackedWidget(self)
+        self._build_settings_panel(shell.settings_layout)
+        logs_widgets = build_telegram_proxy_logs_panel(
+            shell.logs_layout,
+            push_button_cls=PushButton,
+            on_copy_all_logs=self._on_copy_all_logs,
+            on_open_log_file=self._on_open_log_file,
+            on_clear_logs=self._on_clear_logs,
+        )
+        self._btn_copy_logs = logs_widgets.btn_copy_logs
+        self._btn_open_log_file = logs_widgets.btn_open_log_file
+        self._btn_clear_logs = logs_widgets.btn_clear_logs
+        self._log_edit = logs_widgets.log_edit
 
-        # -- Panel 0: Settings --
-        settings_panel = QWidget(self._stacked)
-        settings_layout = QVBoxLayout(settings_panel)
-        settings_layout.setContentsMargins(0, 0, 0, 0)
-        settings_layout.setSpacing(12)
+        diag_widgets = build_telegram_proxy_diag_panel(
+            shell.diag_layout,
+            caption_label_cls=CaptionLabel,
+            primary_push_button_cls=PrimaryPushButton,
+            push_button_cls=PushButton,
+            on_run_diagnostics=self._on_run_diagnostics,
+            on_copy_diag=self._on_copy_diag,
+        )
+        self._diag_desc_label = diag_widgets.diag_desc_label
+        self._btn_run_diag = diag_widgets.btn_run_diag
+        self._btn_copy_diag = diag_widgets.btn_copy_diag
+        self._diag_edit = diag_widgets.diag_edit
 
-        self._build_settings_panel(settings_layout)
-        self._stacked.addWidget(settings_panel)
-
-        # -- Panel 1: Logs --
-        logs_panel = QWidget(self._stacked)
-        logs_layout = QVBoxLayout(logs_panel)
-        logs_layout.setContentsMargins(0, 0, 0, 0)
-        logs_layout.setSpacing(8)
-
-        self._build_logs_panel(logs_layout)
-        self._stacked.addWidget(logs_panel)
-
-        # -- Panel 2: Diagnostics --
-        diag_panel = QWidget(self._stacked)
-        diag_layout = QVBoxLayout(diag_panel)
-        diag_layout.setContentsMargins(0, 0, 0, 0)
-        diag_layout.setSpacing(8)
-
-        self._build_diag_panel(diag_layout)
-        self._stacked.addWidget(diag_panel)
-
-        # Wire up tabs
-        self._pivot.addItem("settings", "Настройки", lambda: self._switch_tab(0))
-        self._pivot.addItem("logs", "Логи", lambda: self._switch_tab(1))
-        self._pivot.addItem("diag", "Диагностика", lambda: self._switch_tab(2))
-        self._pivot.setCurrentItem("settings")
         self.add_widget(self._pivot)
-
         self.add_widget(self._stacked)
         self._switch_tab(0)
 
@@ -190,347 +216,128 @@ class TelegramProxyPage(BasePage):
             add_widget(label)
 
     def _build_settings_panel(self, layout: QVBoxLayout):
-        # -- Status card --
-        self._status_card = SettingsCard()
-
-        status_header = QHBoxLayout()
-        self._status_dot = _StatusDot()
-        self._status_label = StrongBodyLabel("Остановлен")
-        status_header.addWidget(self._status_dot)
-        status_header.addWidget(self._status_label)
-        status_header.addStretch()
-
-        self._btn_toggle = PushButton()
-        self._btn_toggle.setText("Запустить")
-        self._btn_toggle.setFixedWidth(140)
-        self._btn_toggle.clicked.connect(self._on_toggle_proxy)
-        status_header.addWidget(self._btn_toggle)
-        self._status_card.add_layout(status_header)
-
-        self._stats_label = CaptionLabel("")
-        self._status_card.add_widget(self._stats_label)
-        layout.addWidget(self._status_card)
-
-        # -- Quick setup actions --
-        self._setup_section_label = StrongBodyLabel("Быстрая настройка Telegram")
-        layout.addWidget(self._setup_section_label)
-
-        setup_desc = CaptionLabel(
-            "Нажмите кнопку ниже - Telegram автоматически добавит прокси. "
-            "Настройка требуется один раз.\nЕсли Telegram не открывается попробуйте скопировать ссылку и отправить в любой чат Telegram или кому-то в ЛС — после чего нажмите на отправленную ссылку и подтвердите добавление прокси в Telegram клиент.\nРекомендуем полностью ПЕРЕЗАПУСТИТЬ клиент для более корректного работа прокси после включения Zapret 2 GUI!"
-        )
-        self._setup_desc_label = setup_desc
-        setup_desc.setWordWrap(True)
-        layout.addWidget(setup_desc)
-
-        self._setup_card = QuickActionsBar(self.content)
-
-        self._setup_open_btn = PrimaryPushButton()
-        self._setup_open_btn.setText("Открыть")
-        self._setup_open_btn.setIcon(qta.icon("mdi.telegram", color="#229ED9"))
-        self._setup_open_btn.setToolTip("Открыть ссылку для автоматической настройки прокси внутри Telegram.")
-        self._setup_open_btn.clicked.connect(self._on_open_in_telegram)
-        self._setup_card.add_button(self._setup_open_btn)
-
-        self._setup_copy_btn = PushButton()
-        self._setup_copy_btn.setText("Копировать")
-        self._setup_copy_btn.setIcon(qta.icon("mdi.content-copy", color="#60cdff"))
-        self._setup_copy_btn.setToolTip("Сохранить ссылку в буфер обмена, если Telegram не открылся автоматически.")
-        self._setup_copy_btn.clicked.connect(self._on_copy_link)
-        self._setup_card.add_button(self._setup_copy_btn)
-
-        layout.addWidget(self._setup_card)
-
-        # -- Settings card --
-        self._settings_card = SettingCardGroup("Настройки", self.content)
-        self._settings_host_row = QWidget(self._settings_card)
-
-        # Host + Port setting
-        host_port_row = QHBoxLayout(self._settings_host_row)
-        host_port_row.setContentsMargins(16, 8, 16, 6)
-        host_port_row.setSpacing(12)
-        host_label = BodyLabel("Адрес:")
-        self._host_label = host_label
-        host_port_row.addWidget(host_label)
-        self._host_edit = LineEdit()
-        self._host_edit.setMinimumWidth(200)
-        self._host_edit.setText("127.0.0.1")
-        self._host_edit.setPlaceholderText("127.0.0.1")
-        self._host_edit.setClearButtonEnabled(True)
-        self._host_edit.setToolTip(
-            "IP-адрес для прослушивания. 127.0.0.1 — только локально, "
-            "0.0.0.0 или IP вашей сети — доступ с других устройств (телефон и т.д.)"
-        )
-        host_port_row.addWidget(self._host_edit)
-
-        host_port_row.addSpacing(16)
-
-        port_label = BodyLabel("Порт:")
-        self._port_label = port_label
-        host_port_row.addWidget(port_label)
-        self._port_spin = SpinBox()
-        self._port_spin.setRange(1024, 65535)
-        self._port_spin.setValue(1353)
-        self._port_spin.setFixedWidth(140)
-        host_port_row.addWidget(self._port_spin)
-        host_port_row.addStretch()
-        insert_widget_into_setting_card_group(self._settings_card, 1, self._settings_host_row)
-
-        # Auto-start toggle
         from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow
-        self._autostart_toggle = Win11ToggleRow(
-            "mdi.play-circle-outline",
-            "Автозапуск прокси",
-            "Запускать прокси автоматически при старте программы",
+        widgets = build_telegram_proxy_settings_panel(
+            layout,
+            content_parent=self.content,
+            status_dot_cls=_StatusDot,
+            strong_body_label_cls=StrongBodyLabel,
+            caption_label_cls=CaptionLabel,
+            body_label_cls=BodyLabel,
+            push_button_cls=PushButton,
+            primary_push_button_cls=PrimaryPushButton,
+            setting_card_group_cls=SettingCardGroup,
+            line_edit_cls=LineEdit,
+            spin_box_cls=SpinBox,
+            password_line_edit_cls=PasswordLineEdit,
+            win11_toggle_row_cls=Win11ToggleRow,
+            win11_combo_row_cls=Win11ComboRow,
+            on_toggle_proxy=self._on_toggle_proxy,
+            on_open_in_telegram=self._on_open_in_telegram,
+            on_copy_link=self._on_copy_link,
+            on_open_mtproxy=self._on_open_mtproxy,
         )
-        self._autostart_toggle.toggle.setChecked(True)
-        self._add_settings_item(self._settings_card, self._autostart_toggle)
-
-        # Auto-open deep link toggle
-        self._auto_deeplink_toggle = Win11ToggleRow(
-            "mdi.telegram",
-            "Авто-настройка Telegram",
-            "При первом запуске прокси автоматически открыть ссылку настройки в Telegram",
-        )
-        self._auto_deeplink_toggle.toggle.setChecked(True)
-        self._add_settings_item(self._settings_card, self._auto_deeplink_toggle)
-        enable_setting_card_group_auto_height(self._settings_card)
-
-        layout.addWidget(self._settings_card)
-
-        # -- Upstream proxy card --
-        self._upstream_card = SettingCardGroup("Внешний прокси (upstream)", self.content)
-
-        upstream_desc = CaptionLabel(
-            "SOCKS5 прокси-сервер для DC заблокированных вашим провайдером.\n"
-            "Используется как резервный канал когда WSS relay и прямое подключение не работают."
-        )
-        self._upstream_desc_label = upstream_desc
-        upstream_desc.setWordWrap(True)
-        self._insert_group_label(self._upstream_card, upstream_desc, 1)
-
-        # Enable toggle (reuse Win11ToggleRow already imported above)
-        self._upstream_toggle = Win11ToggleRow(
-            "mdi.server-network",
-            "Использовать внешний прокси",
-            "Маршрутизировать заблокированные DC через внешний SOCKS5 прокси",
-        )
-        self._upstream_toggle.toggle.setChecked(False)
-        self._add_settings_item(self._upstream_card, self._upstream_toggle)
-
-        # Upstream server selector: manual + bundled presets from source secrets
-        self._upstream_catalog = UpstreamCatalog.load_from_runtime()
-        self._upstream_preset_row = Win11ComboRow(
-            icon_name="mdi.server-network",
-            title="Сервер",
-            description="Выберите сервер из списка или переключитесь на ручной ввод",
-            items=self._upstream_catalog.items(),
-        )
-        self._upstream_preset_row.combo.setFixedWidth(250)
-        self._add_settings_item(self._upstream_card, self._upstream_preset_row)
-        self._upstream_catalog_hint = CaptionLabel(
-            "В этой сборке список предустановленных прокси не загружен. "
-            "Доступен только ручной ввод."
-        )
-        self._upstream_catalog_hint.setWordWrap(True)
-        self._upstream_catalog_hint.setVisible(False)
-        self._insert_group_label(self._upstream_card, self._upstream_catalog_hint, 2)
-
-        # Manual input container: shown only for "Ручной ввод"
-        self._upstream_manual_widget = QWidget(self._upstream_card)
-        manual_layout = QVBoxLayout(self._upstream_manual_widget)
-        manual_layout.setContentsMargins(0, 0, 0, 0)
-        manual_layout.setSpacing(8)
-
-        # Host + Port row
-        upstream_hp_row = QHBoxLayout()
-        self._upstream_host_label = BodyLabel("Хост:")
-        upstream_hp_row.addWidget(self._upstream_host_label)
-        self._upstream_host_edit = LineEdit()
-        self._upstream_host_edit.setMinimumWidth(250)
-        self._upstream_host_edit.setPlaceholderText("192.168.1.100 или proxy.example.com")
-        self._upstream_host_edit.setClearButtonEnabled(True)
-        upstream_hp_row.addWidget(self._upstream_host_edit)
-        upstream_hp_row.addSpacing(16)
-        self._upstream_port_label = BodyLabel("Порт:")
-        upstream_hp_row.addWidget(self._upstream_port_label)
-        self._upstream_port_spin = SpinBox()
-        self._upstream_port_spin.setRange(1, 65535)
-        self._upstream_port_spin.setValue(1080)
-        self._upstream_port_spin.setFixedWidth(140)
-        upstream_hp_row.addWidget(self._upstream_port_spin)
-        upstream_hp_row.addStretch()
-        manual_layout.addLayout(upstream_hp_row)
-
-        # Username + Password row
-        upstream_auth_row = QHBoxLayout()
-        self._upstream_user_label = BodyLabel("Логин:")
-        upstream_auth_row.addWidget(self._upstream_user_label)
-        self._upstream_user_edit = LineEdit()
-        self._upstream_user_edit.setMinimumWidth(200)
-        self._upstream_user_edit.setPlaceholderText("username")
-        upstream_auth_row.addWidget(self._upstream_user_edit)
-        upstream_auth_row.addSpacing(16)
-        self._upstream_pass_label = BodyLabel("Пароль:")
-        upstream_auth_row.addWidget(self._upstream_pass_label)
-        self._upstream_pass_edit = PasswordLineEdit()
-        self._upstream_pass_edit.setMinimumWidth(200)
-        self._upstream_pass_edit.setPlaceholderText("password")
-        upstream_auth_row.addWidget(self._upstream_pass_edit)
-        upstream_auth_row.addStretch()
-        manual_layout.addLayout(upstream_auth_row)
-
-        self._upstream_manual_widget.setVisible(True)
-        self._add_settings_item(self._upstream_card, self._upstream_manual_widget)
-
-        # MTProxy action (visible only when MTProxy preset selected)
-        self._mtproxy_action_btn = PushButton()
-        self._mtproxy_action_btn.setText("Открыть")
-        self._mtproxy_action_btn.setIcon(qta.icon("mdi.telegram", color="#229ED9"))
-        self._mtproxy_action_btn.setToolTip("MTProxy настраивается в Telegram напрямую. Нажмите для добавления.")
-        self._mtproxy_action_btn.clicked.connect(self._on_open_mtproxy)
-        self._mtproxy_action_widget = self._mtproxy_action_btn
-        self._mtproxy_action_widget.setVisible(False)
-        self._add_settings_item(self._upstream_card, self._mtproxy_action_widget)
+        self._status_card = widgets.status_card
+        self._status_dot = widgets.status_dot
+        self._status_label = widgets.status_label
+        self._btn_toggle = widgets.btn_toggle
+        self._stats_label = widgets.stats_label
+        self._setup_section_label = widgets.setup_section_label
+        self._setup_desc_label = widgets.setup_desc_label
+        self._setup_card = widgets.setup_card
+        self._setup_open_btn = widgets.setup_open_btn
+        self._setup_copy_btn = widgets.setup_copy_btn
+        self._settings_card = widgets.settings_card
+        self._settings_host_row = widgets.settings_host_row
+        self._host_label = widgets.host_label
+        self._host_edit = widgets.host_edit
+        self._port_label = widgets.port_label
+        self._port_spin = widgets.port_spin
+        self._autostart_toggle = widgets.autostart_toggle
+        self._auto_deeplink_toggle = widgets.auto_deeplink_toggle
+        self._upstream_card = widgets.upstream_card
+        self._upstream_desc_label = widgets.upstream_desc_label
+        self._upstream_toggle = widgets.upstream_toggle
+        self._upstream_catalog = widgets.upstream_catalog
+        self._upstream_preset_row = widgets.upstream_preset_row
+        self._upstream_catalog_hint = widgets.upstream_catalog_hint
+        self._upstream_manual_widget = widgets.upstream_manual_widget
+        self._upstream_host_label = widgets.upstream_host_label
+        self._upstream_host_edit = widgets.upstream_host_edit
+        self._upstream_port_label = widgets.upstream_port_label
+        self._upstream_port_spin = widgets.upstream_port_spin
+        self._upstream_user_label = widgets.upstream_user_label
+        self._upstream_user_edit = widgets.upstream_user_edit
+        self._upstream_pass_label = widgets.upstream_pass_label
+        self._upstream_pass_edit = widgets.upstream_pass_edit
+        self._mtproxy_action_btn = widgets.mtproxy_action_btn
+        self._mtproxy_action_widget = widgets.mtproxy_action_widget
         self._current_mtproxy_link = ""
-
-        # Mode toggle (fallback vs always) — default ON
-        self._upstream_mode_toggle = Win11ToggleRow(
-            "mdi.swap-horizontal",
-            "Весь трафик через прокси",
-            "Если выключено — только заблокированные DC. Если включено — весь трафик Telegram.",
-        )
-        self._upstream_mode_toggle.toggle.setChecked(True)
-        self._add_settings_item(self._upstream_card, self._upstream_mode_toggle)
-        enable_setting_card_group_auto_height(self._upstream_card)
+        self._upstream_mode_toggle = widgets.upstream_mode_toggle
+        self._manual_section_label = widgets.manual_section_label
+        self._instructions_card = widgets.instructions_card
+        self._instr1_label = widgets.instr1_label
+        self._instr2_label = widgets.instr2_label
+        self._manual_host_port_label = widgets.manual_host_port_label
 
         self._refresh_upstream_preset_combo(select_index=0)
 
-        layout.addWidget(self._upstream_card)
-
-        # -- Instructions card --
-        self._manual_section_label = StrongBodyLabel("Ручная настройка")
-        layout.addWidget(self._manual_section_label)
-        self._instructions_card = SettingsCard()
-
-        instr1 = CaptionLabel("Если автоматическая настройка не сработала:")
-        self._instr1_label = instr1
-        instr1.setWordWrap(True)
-        self._instructions_card.add_widget(instr1)
-
-        instr2 = CaptionLabel("  Telegram -> Настройки -> Продвинутые -> Тип соединения -> Прокси")
-        self._instr2_label = instr2
-        instr2.setWordWrap(True)
-        self._instructions_card.add_widget(instr2)
-
-        self._manual_host_port_label = CaptionLabel("  Тип: SOCKS5  |  Хост: 127.0.0.1  |  Порт: 1353")
-        self._manual_host_port_label.setWordWrap(True)
-        self._instructions_card.add_widget(self._manual_host_port_label)
-
-        layout.addWidget(self._instructions_card)
-        layout.addStretch()
-
     def _build_logs_panel(self, layout: QVBoxLayout):
-        # Toolbar row
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
-
-        self._btn_copy_logs = PushButton()
-        self._btn_copy_logs.setText("Копировать все")
-        self._btn_copy_logs.setIcon(qta.icon("mdi.content-copy", color="#60cdff"))
-        self._btn_copy_logs.clicked.connect(self._on_copy_all_logs)
-        toolbar.addWidget(self._btn_copy_logs)
-
-        self._btn_open_log_file = PushButton()
-        self._btn_open_log_file.setText("Открыть файл лога")
-        self._btn_open_log_file.setIcon(qta.icon("fa5s.file-alt", color="#60cdff"))
-        self._btn_open_log_file.clicked.connect(self._on_open_log_file)
-        toolbar.addWidget(self._btn_open_log_file)
-
-        self._btn_clear_logs = PushButton()
-        self._btn_clear_logs.setText("Очистить")
-        self._btn_clear_logs.setIcon(qta.icon("fa5s.eraser", color="#ff9800"))
-        self._btn_clear_logs.clicked.connect(self._on_clear_logs)
-        toolbar.addWidget(self._btn_clear_logs)
-
-        toolbar.addStretch()
-        layout.addLayout(toolbar)
-
-        # Log text widget — no height limit, no trimming
-        self._log_edit = ScrollBlockingPlainTextEdit()
-        self._log_edit.setReadOnly(True)
-        self._log_edit.setPlaceholderText("Лог подключений появится здесь...")
-        layout.addWidget(self._log_edit)
+        widgets = build_telegram_proxy_logs_panel(
+            layout,
+            push_button_cls=PushButton,
+            on_copy_all_logs=self._on_copy_all_logs,
+            on_open_log_file=self._on_open_log_file,
+            on_clear_logs=self._on_clear_logs,
+        )
+        self._btn_copy_logs = widgets.btn_copy_logs
+        self._btn_open_log_file = widgets.btn_open_log_file
+        self._btn_clear_logs = widgets.btn_clear_logs
+        self._log_edit = widgets.log_edit
 
     def _build_diag_panel(self, layout: QVBoxLayout):
-        desc = CaptionLabel(
-            "Проверка соединений к Telegram DC, WSS relay эндпоинтов (kws1-kws5), "
-            "SOCKS5 прокси и определение типа блокировки."
+        widgets = build_telegram_proxy_diag_panel(
+            layout,
+            caption_label_cls=CaptionLabel,
+            primary_push_button_cls=PrimaryPushButton,
+            push_button_cls=PushButton,
+            on_run_diagnostics=self._on_run_diagnostics,
+            on_copy_diag=self._on_copy_diag,
         )
-        self._diag_desc_label = desc
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
-
-        toolbar = QHBoxLayout()
-        toolbar.setSpacing(8)
-
-        self._btn_run_diag = PrimaryPushButton()
-        self._btn_run_diag.setText("Запустить диагностику")
-        self._btn_run_diag.setIcon(qta.icon("fa5s.stethoscope", color="#60cdff"))
-        self._btn_run_diag.clicked.connect(self._on_run_diagnostics)
-        toolbar.addWidget(self._btn_run_diag)
-
-        self._btn_copy_diag = PushButton()
-        self._btn_copy_diag.setText("Копировать результат")
-        self._btn_copy_diag.setIcon(qta.icon("mdi.content-copy", color="#60cdff"))
-        self._btn_copy_diag.clicked.connect(self._on_copy_diag)
-        toolbar.addWidget(self._btn_copy_diag)
-
-        toolbar.addStretch()
-        layout.addLayout(toolbar)
-
-        self._diag_edit = ScrollBlockingPlainTextEdit()
-        self._diag_edit.setReadOnly(True)
-        self._diag_edit.setPlaceholderText("Нажмите 'Запустить диагностику'...")
-        layout.addWidget(self._diag_edit)
+        self._diag_desc_label = widgets.diag_desc_label
+        self._btn_run_diag = widgets.btn_run_diag
+        self._btn_copy_diag = widgets.btn_copy_diag
+        self._diag_edit = widgets.diag_edit
 
     def _on_run_diagnostics(self):
         """Run network diagnostics in a background thread."""
-        plan = TelegramProxyPageActionsController.build_diagnostics_start_plan()
-        self._btn_run_diag.setEnabled(plan.button_enabled)
-        self._btn_run_diag.setText(plan.button_text)
-        self._diag_edit.clear()
-        self._diag_edit.appendPlainText(plan.initial_text)
-
-        self._diag_result = None  # shared with thread
-        self._diag_thread_done = False
-        # Capture proxy port from UI before spawning thread
+        started = start_diagnostics(
+            page=self,
+            cleanup_in_progress=self._cleanup_in_progress,
+            btn_run_diag=self._btn_run_diag,
+            diag_edit=self._diag_edit,
+            existing_poll_timer=self._diag_poll_timer,
+            proxy_port=self._port_spin.value(),
+            publish_diag_result=self._publish_diag_result,
+            set_diag_result=lambda value: setattr(self, "_diag_result", value),
+            set_thread_done=lambda value: setattr(self, "_diag_thread_done", value),
+            poll_diag_callback=self._poll_diag,
+        )
+        if started is None:
+            return
+        self._diag_poll_timer = started
         self._diag_proxy_port = self._port_spin.value()
-
-        import threading
-        t = threading.Thread(target=self._run_diag_tests, daemon=True)
-        t.start()
-
-        # Poll for result every 200ms
-        self._diag_poll_timer = QTimer(self)
-        self._diag_poll_timer.timeout.connect(self._poll_diag)
-        self._diag_poll_timer.start(plan.poll_interval_ms)
 
     def _poll_diag(self):
         """Check if diag thread has new results."""
-        plan = TelegramProxyPageActionsController.build_diagnostics_poll_plan(
-            result_text=self._diag_result,
-            thread_done=self._diag_thread_done,
+        poll_diagnostics(
+            cleanup_in_progress=self._cleanup_in_progress,
+            diag_poll_timer=self._diag_poll_timer,
+            diag_result=self._diag_result,
+            diag_thread_done=self._diag_thread_done,
+            update_diag=self._update_diag,
+            finish_diag=self._diag_finished,
         )
-        if plan.updated_text is not None:
-            self._diag_edit.setPlainText(plan.updated_text)
-            sb = self._diag_edit.verticalScrollBar()
-            if sb:
-                sb.setValue(sb.maximum())
-        if plan.should_stop_timer:
-            self._diag_poll_timer.stop()
-        if plan.should_finish:
-            self._diag_finished()
 
     def _run_diag_tests(self):
         self._diag_result = TelegramProxyDiagnosticsController.run_all(
@@ -540,6 +347,8 @@ class TelegramProxyPage(BasePage):
         self._diag_thread_done = True
 
     def _publish_diag_result(self, text: str) -> None:
+        if self._cleanup_in_progress:
+            return
         self._diag_result = text
 
     def _update_diag(self, text: str):
@@ -549,159 +358,63 @@ class TelegramProxyPage(BasePage):
             sb.setValue(sb.maximum())
 
     def _diag_finished(self):
-        plan = TelegramProxyPageActionsController.build_diagnostics_finish_plan()
-        self._btn_run_diag.setEnabled(plan.button_enabled)
-        self._btn_run_diag.setText(plan.button_text)
+        finish_diagnostics(btn_run_diag=self._btn_run_diag)
 
     def _refresh_pivot_texts(self) -> None:
-        try:
-            self._pivot.setItemText("settings", "Настройки")
-            self._pivot.setItemText("logs", "Логи")
-            self._pivot.setItemText("diag", "Диагностика")
-        except Exception:
-            pass
+        refresh_pivot_texts(self._pivot)
 
     def _refresh_status_texts(self) -> None:
         mgr = _get_proxy_manager()
-        running = bool(mgr.is_running)
-        plan = TelegramProxyRuntimeController.build_status_plan(
-            running=running,
+        refresh_status_texts(
+            manager=mgr,
+            status_label=getattr(self, "_status_label", None),
+            btn_toggle=getattr(self, "_btn_toggle", None),
             restarting=bool(getattr(self, "_restarting", False)),
             starting=bool(getattr(self, "_starting", False)),
-            host=mgr.host,
-            port=mgr.port,
         )
 
-        if getattr(self, "_status_label", None) is not None:
-            self._status_label.setText(plan.status_text)
-
-        if getattr(self, "_btn_toggle", None) is not None:
-            self._btn_toggle.setText(plan.toggle_text)
-
     def _apply_ui_texts(self) -> None:
-        try:
-            self._refresh_pivot_texts()
-            self._refresh_status_texts()
-
-            if getattr(self, "_setup_section_label", None) is not None:
-                self._setup_section_label.setText("Быстрая настройка Telegram")
-            title_label = getattr(getattr(self, "_settings_card", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText("Настройки")
-            title_label = getattr(getattr(self, "_upstream_card", None), "titleLabel", None)
-            if title_label is not None:
-                title_label.setText("Внешний прокси (upstream)")
-            if getattr(self, "_manual_section_label", None) is not None:
-                self._manual_section_label.setText("Ручная настройка")
-
-            if getattr(self, "_setup_desc_label", None) is not None:
-                self._setup_desc_label.setText(
-                    "Нажмите кнопку ниже - Telegram автоматически добавит прокси. "
-                    "Настройка требуется один раз.\nЕсли Telegram не открывается попробуйте скопировать ссылку и отправить в любой чат Telegram или кому-то в ЛС — после чего нажмите на отправленную ссылку и подтвердите добавление прокси в Telegram клиент.\nРекомендуем полностью ПЕРЕЗАПУСТИТЬ клиент для более корректного работа прокси после включения Zapret 2 GUI!"
-                )
-            if getattr(self, "_host_label", None) is not None:
-                self._host_label.setText("Адрес:")
-            if getattr(self, "_port_label", None) is not None:
-                self._port_label.setText("Порт:")
-            if getattr(self, "_upstream_desc_label", None) is not None:
-                self._upstream_desc_label.setText(
-                    "SOCKS5 прокси-сервер для DC заблокированных вашим провайдером.\n"
-                    "Используется как резервный канал когда WSS relay и прямое подключение не работают."
-                )
-            if getattr(self, "_upstream_host_label", None) is not None:
-                self._upstream_host_label.setText("Хост:")
-            if getattr(self, "_upstream_port_label", None) is not None:
-                self._upstream_port_label.setText("Порт:")
-            if getattr(self, "_upstream_user_label", None) is not None:
-                self._upstream_user_label.setText("Логин:")
-            if getattr(self, "_upstream_pass_label", None) is not None:
-                self._upstream_pass_label.setText("Пароль:")
-            if getattr(self, "_mtproxy_desc_label", None) is not None:
-                self._mtproxy_desc_label.setText("MTProxy настраивается в Telegram напрямую. Нажмите для добавления.")
-            if getattr(self, "_instr1_label", None) is not None:
-                self._instr1_label.setText("Если автоматическая настройка не сработала:")
-            if getattr(self, "_instr2_label", None) is not None:
-                self._instr2_label.setText("  Telegram -> Настройки -> Продвинутые -> Тип соединения -> Прокси")
-            if getattr(self, "_diag_desc_label", None) is not None:
-                self._diag_desc_label.setText(
-                    "Проверка соединений к Telegram DC, WSS relay эндпоинтов (kws1-kws5), "
-                    "SOCKS5 прокси и определение типа блокировки."
-                )
-
-            if getattr(self, "_setup_open_btn", None) is not None:
-                self._setup_open_btn.setText("Открыть")
-                self._setup_open_btn.setToolTip(
-                    "Открыть ссылку для автоматической настройки прокси внутри Telegram."
-                )
-            if getattr(self, "_setup_copy_btn", None) is not None:
-                self._setup_copy_btn.setText("Копировать")
-                self._setup_copy_btn.setToolTip(
-                    "Сохранить ссылку в буфер обмена, если Telegram не открылся автоматически."
-                )
-            if getattr(self, "_mtproxy_action_btn", None) is not None:
-                self._mtproxy_action_btn.setText("Открыть")
-                self._mtproxy_action_btn.setToolTip(
-                    "MTProxy настраивается в Telegram напрямую. Нажмите для добавления."
-                )
-            if getattr(self, "_btn_copy_logs", None) is not None:
-                self._btn_copy_logs.setText("Копировать все")
-            if getattr(self, "_btn_open_log_file", None) is not None:
-                self._btn_open_log_file.setText("Открыть файл лога")
-            if getattr(self, "_btn_clear_logs", None) is not None:
-                self._btn_clear_logs.setText("Очистить")
-            if getattr(self, "_btn_copy_diag", None) is not None:
-                self._btn_copy_diag.setText("Копировать результат")
-            if getattr(self, "_btn_run_diag", None) is not None and self._btn_run_diag.isEnabled():
-                self._btn_run_diag.setText("Запустить диагностику")
-
-            if getattr(self, "_host_edit", None) is not None:
-                self._host_edit.setPlaceholderText("127.0.0.1")
-            if getattr(self, "_upstream_host_edit", None) is not None:
-                self._upstream_host_edit.setPlaceholderText("192.168.1.100 или proxy.example.com")
-            if getattr(self, "_upstream_user_edit", None) is not None:
-                self._upstream_user_edit.setPlaceholderText("username")
-            if getattr(self, "_upstream_pass_edit", None) is not None:
-                self._upstream_pass_edit.setPlaceholderText("password")
-            if getattr(self, "_log_edit", None) is not None:
-                self._log_edit.setPlaceholderText("Лог подключений появится здесь...")
-            if getattr(self, "_diag_edit", None) is not None:
-                self._diag_edit.setPlaceholderText("Нажмите 'Запустить диагностику'...")
-
-            if getattr(self, "_autostart_toggle", None) is not None:
-                self._autostart_toggle.set_texts(
-                    "Автозапуск прокси",
-                    "Запускать прокси автоматически при старте программы",
-                )
-            if getattr(self, "_auto_deeplink_toggle", None) is not None:
-                self._auto_deeplink_toggle.set_texts(
-                    "Авто-настройка Telegram",
-                    "При первом запуске прокси автоматически открыть ссылку настройки в Telegram",
-                )
-            if getattr(self, "_upstream_toggle", None) is not None:
-                self._upstream_toggle.set_texts(
-                    "Использовать внешний прокси",
-                    "Маршрутизировать заблокированные DC через внешний SOCKS5 прокси",
-                )
-            if getattr(self, "_upstream_preset_row", None) is not None:
-                self._upstream_preset_row.set_texts(
-                    "Сервер",
-                    "Выберите сервер из списка или переключитесь на ручной ввод",
-                )
-            if getattr(self, "_upstream_catalog_hint", None) is not None:
-                self._upstream_catalog_hint.setText(
-                    "В этой сборке список предустановленных прокси не загружен. "
-                    "Доступен только ручной ввод."
-                )
-            if getattr(self, "_upstream_mode_toggle", None) is not None:
-                self._upstream_mode_toggle.set_texts(
-                    "Весь трафик через прокси",
-                    "Если выключено — только заблокированные DC. Если включено — весь трафик Telegram.",
-                )
-
-            if getattr(self, "_manual_host_port_label", None) is not None:
-                self._update_manual_instructions()
-        except Exception:
-            pass
+        apply_ui_texts(
+            refresh_pivot_texts_callback=self._refresh_pivot_texts,
+            refresh_status_texts_callback=self._refresh_status_texts,
+            setup_section_label=getattr(self, "_setup_section_label", None),
+            settings_card=getattr(self, "_settings_card", None),
+            upstream_card=getattr(self, "_upstream_card", None),
+            manual_section_label=getattr(self, "_manual_section_label", None),
+            setup_desc_label=getattr(self, "_setup_desc_label", None),
+            host_label=getattr(self, "_host_label", None),
+            port_label=getattr(self, "_port_label", None),
+            upstream_desc_label=getattr(self, "_upstream_desc_label", None),
+            upstream_host_label=getattr(self, "_upstream_host_label", None),
+            upstream_port_label=getattr(self, "_upstream_port_label", None),
+            upstream_user_label=getattr(self, "_upstream_user_label", None),
+            upstream_pass_label=getattr(self, "_upstream_pass_label", None),
+            mtproxy_desc_label=getattr(self, "_mtproxy_desc_label", None),
+            instr1_label=getattr(self, "_instr1_label", None),
+            instr2_label=getattr(self, "_instr2_label", None),
+            diag_desc_label=getattr(self, "_diag_desc_label", None),
+            setup_open_btn=getattr(self, "_setup_open_btn", None),
+            setup_copy_btn=getattr(self, "_setup_copy_btn", None),
+            mtproxy_action_btn=getattr(self, "_mtproxy_action_btn", None),
+            btn_copy_logs=getattr(self, "_btn_copy_logs", None),
+            btn_open_log_file=getattr(self, "_btn_open_log_file", None),
+            btn_clear_logs=getattr(self, "_btn_clear_logs", None),
+            btn_copy_diag=getattr(self, "_btn_copy_diag", None),
+            btn_run_diag=getattr(self, "_btn_run_diag", None),
+            host_edit=getattr(self, "_host_edit", None),
+            upstream_host_edit=getattr(self, "_upstream_host_edit", None),
+            upstream_user_edit=getattr(self, "_upstream_user_edit", None),
+            upstream_pass_edit=getattr(self, "_upstream_pass_edit", None),
+            log_edit=getattr(self, "_log_edit", None),
+            diag_edit=getattr(self, "_diag_edit", None),
+            autostart_toggle=getattr(self, "_autostart_toggle", None),
+            auto_deeplink_toggle=getattr(self, "_auto_deeplink_toggle", None),
+            upstream_toggle=getattr(self, "_upstream_toggle", None),
+            upstream_preset_row=getattr(self, "_upstream_preset_row", None),
+            upstream_catalog_hint=getattr(self, "_upstream_catalog_hint", None),
+            upstream_mode_toggle=getattr(self, "_upstream_mode_toggle", None),
+            update_manual_instructions_callback=self._update_manual_instructions,
+        )
 
     def set_ui_language(self, language: str) -> None:
         super().set_ui_language(language)
@@ -727,48 +440,25 @@ class TelegramProxyPage(BasePage):
                 pass
 
     def _refresh_upstream_preset_combo(self, *, select_index: int | None = None) -> int:
-        combo = self._upstream_preset_row.combo
-        combo.blockSignals(True)
-        combo.clear()
-        for label, preset in self._upstream_catalog.items():
-            combo.addItem(label, userData=preset)
-
-        if not self._upstream_catalog.choices:
-            target_index = -1
-        elif select_index is None:
-            target_index = combo.currentIndex()
-            if target_index < 0:
-                target_index = 0
-            target_index = min(target_index, len(self._upstream_catalog.choices) - 1)
-        else:
-            target_index = min(max(select_index, 0), len(self._upstream_catalog.choices) - 1)
-
-        combo.setCurrentIndex(target_index)
-        combo.blockSignals(False)
-
-        if target_index >= 0:
-            self._apply_upstream_preset_ui(target_index)
+        target_index, self._current_mtproxy_link = refresh_upstream_preset_combo(
+            upstream_preset_row=self._upstream_preset_row,
+            upstream_catalog=self._upstream_catalog,
+            apply_upstream_preset_ui_callback=self._apply_upstream_preset_ui,
+            select_index=select_index,
+        )
         return target_index
 
     def _apply_upstream_preset_ui(self, index: int) -> None:
-        upstream_enabled = self._upstream_toggle.toggle.isChecked()
-        preset = self._upstream_catalog.preset_at(index)
-        has_bundled_presets = self._upstream_catalog.has_bundled_presets()
-        is_manual = bool(preset is not None and self._upstream_catalog.is_manual(index))
-        is_mtproxy = bool(preset is not None and self._upstream_catalog.is_mtproxy(index))
-
-        self._upstream_preset_row.setVisible(upstream_enabled and has_bundled_presets)
-        self._upstream_catalog_hint.setVisible(upstream_enabled and not has_bundled_presets)
-        self._upstream_manual_widget.setVisible(upstream_enabled and is_manual)
-        self._mtproxy_action_widget.setVisible(upstream_enabled and is_mtproxy)
-        self._upstream_mode_toggle.setVisible(upstream_enabled)
-        self._upstream_mode_toggle.setEnabled(upstream_enabled)
-        self._upstream_mode_toggle.toggle.setEnabled(upstream_enabled)
-
-        if preset is not None and is_mtproxy:
-            self._current_mtproxy_link = self._upstream_catalog.mtproxy_link(index)
-        else:
-            self._current_mtproxy_link = ""
+        self._current_mtproxy_link = apply_upstream_preset_ui(
+            upstream_toggle=self._upstream_toggle,
+            upstream_catalog=self._upstream_catalog,
+            upstream_preset_row=self._upstream_preset_row,
+            upstream_catalog_hint=self._upstream_catalog_hint,
+            upstream_manual_widget=self._upstream_manual_widget,
+            mtproxy_action_widget=self._mtproxy_action_widget,
+            upstream_mode_toggle=self._upstream_mode_toggle,
+            index=index,
+        )
 
     def _connect_signals(self):
         mgr = _get_proxy_manager()
@@ -794,35 +484,20 @@ class TelegramProxyPage(BasePage):
         self._on_status_changed(mgr.is_running)
 
     def _load_settings(self):
-        state = TelegramProxySettingsController.load_state(self._upstream_catalog)
-
-        self._port_spin.blockSignals(True)
-        self._port_spin.setValue(state.port)
-        self._port_spin.blockSignals(False)
-
-        self._host_edit.setText(state.host)
-
-        self._autostart_toggle.toggle.blockSignals(True)
-        self._autostart_toggle.toggle.setChecked(state.autostart_enabled)
-        self._autostart_toggle.toggle.blockSignals(False)
-        self._update_manual_instructions()
-
-        self._upstream_toggle.toggle.blockSignals(True)
-        self._upstream_toggle.toggle.setChecked(state.upstream_enabled)
-        self._upstream_toggle.toggle.blockSignals(False)
-
-        self._upstream_host_edit.setText(state.upstream_host)
-        self._upstream_port_spin.blockSignals(True)
-        self._upstream_port_spin.setValue(state.upstream_port)
-        self._upstream_port_spin.blockSignals(False)
-        self._upstream_user_edit.setText(state.upstream_user)
-        self._upstream_pass_edit.setText(state.upstream_password)
-
-        self._refresh_upstream_preset_combo(select_index=state.upstream_preset_index)
-
-        self._upstream_mode_toggle.toggle.blockSignals(True)
-        self._upstream_mode_toggle.toggle.setChecked(state.upstream_mode == "always")
-        self._upstream_mode_toggle.toggle.blockSignals(False)
+        load_settings_into_ui(
+            upstream_catalog=self._upstream_catalog,
+            port_spin=self._port_spin,
+            host_edit=self._host_edit,
+            autostart_toggle=self._autostart_toggle,
+            update_manual_instructions=self._update_manual_instructions,
+            upstream_toggle=self._upstream_toggle,
+            upstream_host_edit=self._upstream_host_edit,
+            upstream_port_spin=self._upstream_port_spin,
+            upstream_user_edit=self._upstream_user_edit,
+            upstream_pass_edit=self._upstream_pass_edit,
+            refresh_upstream_preset_combo_callback=self._refresh_upstream_preset_combo,
+            upstream_mode_toggle=self._upstream_mode_toggle,
+        )
 
     def _auto_start_check(self):
         """Auto-start proxy if autostart is enabled."""
@@ -902,279 +577,142 @@ class TelegramProxyPage(BasePage):
 
     def _on_toggle_proxy(self):
         mgr = _get_proxy_manager()
-        plan = TelegramProxyRuntimeController.build_toggle_action_plan(
-            running=bool(mgr.is_running),
+        handle_toggle_proxy(
+            manager=mgr,
             restarting=bool(getattr(self, "_restarting", False)),
             starting=bool(getattr(self, "_starting", False)),
+            set_restarting=lambda value: setattr(self, "_restarting", value),
+            stop_proxy=self._stop_proxy,
+            start_proxy=self._start_proxy,
         )
-        if plan.action == "cancel_restart":
-            self._restarting = False
-            mgr.status_changed.emit(False)
-            if plan.persist_enabled is not None:
-                TelegramProxySettingsController.set_proxy_enabled(plan.persist_enabled)
-            return
-        if plan.action == "ignore":
-            return
-        if plan.action == "stop":
-            self._stop_proxy()
-        else:
-            self._start_proxy()
 
     def _restart_if_running(self):
-        """Restart proxy if running, so new upstream config takes effect.
-
-        Non-blocking: Qt cleanup runs on GUI thread first, then the blocking
-        ProxyController.stop() runs in a background thread. When done,
-        _start_proxy is invoked back on the GUI thread via QueuedConnection.
-        """
         mgr = _get_proxy_manager()
-        plan = TelegramProxyRuntimeController.build_restart_plan(
-            running=bool(mgr.is_running),
+        restart_proxy_if_running(
+            page=self,
+            manager=mgr,
             restarting=bool(getattr(self, "_restarting", False)),
+            set_restarting=lambda value: setattr(self, "_restarting", value),
+            status_label=self._status_label,
         )
-        if not plan.should_restart:
-            return
-        self._restarting = True
-        self._status_label.setText(plan.status_text)
-
-        # Qt operations on GUI thread BEFORE going to background (Qt-safe)
-        mgr._stop_stats_polling()
-
-        def _bg_stop():
-            # Pure-Python blocking stop — no Qt objects touched, safe in any thread
-            mgr._stop_controller_only()
-            from PyQt6.QtCore import QMetaObject, Qt as QtNS
-            QMetaObject.invokeMethod(
-                self, "_finish_restart",
-                QtNS.ConnectionType.QueuedConnection,
-            )
-        threading.Thread(target=_bg_stop, daemon=True).start()
 
     @pyqtSlot()
     def _finish_restart(self):
-        """Called on GUI thread after background stop completes.
-        Checks cancel flag and starts proxy only if restart wasn't cancelled."""
+        if self._cleanup_in_progress:
+            return
         if not self._restarting:
-            # User clicked Stop during restart — don't re-start
             return
         self._restarting = False
         self._start_proxy()
 
     def _schedule_upstream_restart(self):
         """Debounced proxy restart for SpinBox valueChanged signals."""
-        if not hasattr(self, '_upstream_restart_timer'):
-            self._upstream_restart_timer = QTimer(self)
-            self._upstream_restart_timer.setSingleShot(True)
-            self._upstream_restart_timer.timeout.connect(self._restart_if_running)
-        self._upstream_restart_timer.start(800)
+        self._upstream_restart_timer = schedule_upstream_restart(
+            page=self,
+            timer=self._upstream_restart_timer,
+            restart_callback=self._restart_if_running,
+            delay_ms=800,
+        )
 
     @pyqtSlot()
     def _start_proxy(self):
         mgr = _get_proxy_manager()
-        port = self._port_spin.value()
-        host = self._host_edit.text().strip() or "127.0.0.1"
-        upstream_config = TelegramProxySettingsController.build_upstream_config()
-        plan = TelegramProxyRuntimeController.build_start_plan(
+        start_proxy_runtime(
+            page=self,
+            manager=mgr,
             starting=bool(getattr(self, "_starting", False)),
             running=bool(mgr.is_running),
-            host=host,
-            port=port,
-            upstream_config=upstream_config,
+            host=self._host_edit.text().strip() or "127.0.0.1",
+            port=self._port_spin.value(),
+            set_starting=lambda value: setattr(self, "_starting", value),
+            btn_toggle=self._btn_toggle,
+            status_label=self._status_label,
+            append_log_line=self._append_log_line,
         )
-        if not plan.should_start:
-            return
-
-        self._starting = True
-        self._btn_toggle.setEnabled(plan.toggle_enabled)
-        self._status_label.setText(plan.status_text)
-        if plan.upstream_log_line:
-            self._append_log_line(plan.upstream_log_line)
-
-        def _bg_start():
-            ok = mgr.start_proxy(port=port, mode="socks5", host=host,
-                                  upstream_config=upstream_config)
-            self._start_result = ok
-            from PyQt6.QtCore import QMetaObject, Qt as QtNS
-            QMetaObject.invokeMethod(
-                self, "_finish_start",
-                QtNS.ConnectionType.QueuedConnection,
-            )
-        threading.Thread(target=_bg_start, daemon=True).start()
 
     @pyqtSlot()
     def _finish_start(self):
-        """Called on GUI thread after background start completes."""
-        self._starting = False
-        ok = getattr(self, '_start_result', False)
-        plan = TelegramProxyRuntimeController.build_finish_start_plan(ok)
-        self._btn_toggle.setEnabled(plan.toggle_enabled)
-        if plan.persist_enabled is not None:
-            TelegramProxySettingsController.set_proxy_enabled(plan.persist_enabled)
-        if plan.should_check_relay:
-            self._check_relay_after_start()
-        elif plan.fallback_to_stopped_status:
-            self._on_status_changed(False)
+        if self._cleanup_in_progress:
+            return
+        finish_proxy_start(
+            start_ok=getattr(self, "_start_result", False),
+            set_starting=lambda value: setattr(self, "_starting", value),
+            btn_toggle=self._btn_toggle,
+            check_relay_after_start=self._check_relay_after_start,
+            on_status_changed=self._on_status_changed,
+        )
 
     def _check_relay_after_start(self):
-        """Check relay reachability after proxy starts. Runs check in background.
-
-        Logic:
-        1. TLS check (port 443) — if OK → update status "Relay OK"
-        2. If TLS fails → check TCP port 80 (HTTP) to distinguish:
-           - Port 80 works + TLS fails = something breaks TLS (likely zapret desync)
-           - Port 80 also fails = ISP blocks the IP entirely
-        3. Update status label + show InfoBar warning if needed
-        Uses generation counter to discard stale results after stop/restart.
-        """
-        # Invalidate any previous relay check
         mgr = _get_proxy_manager()
-        start_plan = TelegramProxyRuntimeController.build_relay_start_plan(
+        start_relay_check(
+            page=self,
+            manager=mgr,
             current_generation=getattr(self, "_relay_check_gen", 0),
-            host=mgr.host,
-            port=mgr.port,
+            set_generation=lambda value: setattr(self, "_relay_check_gen", value),
+            status_label=self._status_label,
+            set_relay_diag=lambda value: setattr(self, "_relay_diag", value),
+            get_zapret_running=lambda: (
+                bool(getattr(getattr(getattr(self.window(), "app", None), "dpi_runtime", None), "is_any_running", lambda silent=True: False)(silent=True))
+            ),
+            log_warning=lambda text: log(text, "WARNING"),
         )
-        self._relay_check_gen = start_plan.generation
-        gen = start_plan.generation
-
-        # Show "checking..." in status
-        if mgr.is_running:
-            self._status_label.setText(start_plan.status_text)
-
-        def _do_check():
-            import time
-            # Wait for proxy to warm up and WSS pool to fill
-            time.sleep(2)
-
-            # Check if this generation is still current
-            if getattr(self, '_relay_check_gen', 0) != gen:
-                return  # Stale — proxy was stopped/restarted
-
-            try:
-                from telegram_proxy.wss_proxy import check_relay_reachable
-
-                # Retry up to 3 times — DPI is intermittent and can reset
-                # individual TLS connections randomly
-                best_result = None
-                for attempt in range(3):
-                    if getattr(self, '_relay_check_gen', 0) != gen:
-                        return  # Stale
-                    result = check_relay_reachable(timeout=5.0)
-                    if result["reachable"]:
-                        best_result = result
-                        break
-                    if attempt < 2:
-                        time.sleep(2)
-
-                # Final generation check before writing results
-                if getattr(self, '_relay_check_gen', 0) != gen:
-                    return  # Stale
-
-                if best_result and best_result["reachable"]:
-                    self._relay_diag = {"status": "ok", "ms": best_result["ms"]}
-                else:
-                    # All attempts failed — check port 80 to determine cause
-                    http_ok = TelegramProxyRuntimeController.check_relay_http()
-
-                    # Determine if zapret is running
-                    zapret_running = False
-                    try:
-                        app = self.window()
-                        if hasattr(app, 'app') and hasattr(app.app, 'dpi_runtime'):
-                            zapret_running = app.app.dpi_runtime.is_any_running(silent=True)
-                    except Exception:
-                        pass
-
-                    self._relay_diag = {
-                        "status": "fail",
-                        "http_ok": http_ok,
-                        "zapret_running": zapret_running,
-                    }
-
-                # Check generation before GUI callback
-                if getattr(self, '_relay_check_gen', 0) != gen:
-                    return  # Stale
-
-                from PyQt6.QtCore import QMetaObject, Qt as QtNS
-                QMetaObject.invokeMethod(
-                    self, "_apply_relay_result",
-                    QtNS.ConnectionType.QueuedConnection,
-                )
-            except Exception as e:
-                log(f"Relay check error: {e}", "WARNING")
-        threading.Thread(target=_do_check, daemon=True).start()
 
     @pyqtSlot()
     def _apply_relay_result(self):
-        """Update status label and show warning based on relay check. GUI thread only."""
-        diag = getattr(self, "_relay_diag", {})
-        mgr = _get_proxy_manager()
-
-        if not mgr.is_running:
+        if self._cleanup_in_progress:
             return
-
-        plan = TelegramProxyRuntimeController.build_relay_result_plan(
-            host=mgr.host,
-            port=mgr.port,
-            status=diag.get("status", "fail"),
-            ms=diag.get("ms", 0),
-            http_ok=bool(diag.get("http_ok", False)),
-            zapret_running=bool(diag.get("zapret_running", False)),
+        mgr = _get_proxy_manager()
+        apply_relay_result(
+            manager=mgr,
+            diag=getattr(self, "_relay_diag", {}),
+            status_label=self._status_label,
+            info_bar_cls=InfoBar,
+            info_bar_position=InfoBarPosition,
+            parent=self,
         )
-        self._status_label.setText(plan.status_text)
-        if plan.show_warning and InfoBar is not None:
-            InfoBar.warning(
-                plan.warning_title, plan.warning_content,
-                duration=-1,
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
 
     def _stop_proxy(self):
         mgr = _get_proxy_manager()
-        mgr.stop_proxy()
-        TelegramProxySettingsController.set_proxy_enabled(False)
+        stop_proxy_runtime(manager=mgr)
 
     def _on_status_changed(self, running: bool):
         mgr = _get_proxy_manager()
-        plan = TelegramProxyRuntimeController.build_status_plan(
+        apply_status_changed(
+            manager=mgr,
             running=bool(running),
             restarting=bool(getattr(self, "_restarting", False)),
             starting=bool(getattr(self, "_starting", False)),
-            host=mgr.host,
-            port=mgr.port,
+            status_dot=self._status_dot,
+            stats_label=self._stats_label,
+            status_label=self._status_label,
+            btn_toggle=self._btn_toggle,
+            port_spin=self._port_spin,
+            host_edit=self._host_edit,
+            relay_check_gen=getattr(self, "_relay_check_gen", 0),
+            set_speed_state=lambda prev_sent, prev_recv, up, down: (
+                setattr(self, "_prev_bytes_sent", prev_sent),
+                setattr(self, "_prev_bytes_received", prev_recv),
+                setattr(self, "_speed_hist_up", up),
+                setattr(self, "_speed_hist_down", down),
+            ),
+            set_generation=lambda value: setattr(self, "_relay_check_gen", value),
         )
-        self._status_dot.set_active(plan.dot_active)
-        if plan.reset_speed_state:
-            self._prev_bytes_sent = 0
-            self._prev_bytes_received = 0
-            self._speed_hist_up = ()
-            self._speed_hist_down = ()
-        if plan.clear_stats:
-            self._stats_label.setText("")
-        if plan.invalidate_relay_check:
-            self._relay_check_gen = getattr(self, '_relay_check_gen', 0) + 1
-
-        self._status_label.setText(plan.status_text)
-        self._btn_toggle.setText(plan.toggle_text)
-        self._port_spin.setEnabled(plan.port_spin_enabled)
-        self._host_edit.setEnabled(plan.host_edit_enabled)
 
     def _on_stats_updated(self, stats):
-        if stats is None:
-            return
-        plan = TelegramProxyRuntimeController.build_stats_plan(
+        apply_stats_updated(
             stats=stats,
             prev_sent=getattr(self, '_prev_bytes_sent', 0),
             prev_recv=getattr(self, '_prev_bytes_received', 0),
             speed_hist_up=tuple(getattr(self, '_speed_hist_up', ()) or ()),
             speed_hist_down=tuple(getattr(self, '_speed_hist_down', ()) or ()),
-            interval=2.0,
+            stats_label=self._stats_label,
+            set_speed_state=lambda prev_sent, prev_recv, up, down: (
+                setattr(self, "_prev_bytes_sent", prev_sent),
+                setattr(self, "_prev_bytes_received", prev_recv),
+                setattr(self, "_speed_hist_up", up),
+                setattr(self, "_speed_hist_down", down),
+            ),
         )
-        self._prev_bytes_sent = plan.next_prev_sent
-        self._prev_bytes_received = plan.next_prev_recv
-        self._speed_hist_up = plan.next_speed_hist_up
-        self._speed_hist_down = plan.next_speed_hist_down
-        self._stats_label.setText(plan.stats_text)
 
     def _on_autostart_changed(self, checked: bool):
         TelegramProxySettingsController.set_autostart(checked)
@@ -1195,83 +733,66 @@ class TelegramProxyPage(BasePage):
     # -- Upstream proxy handlers --
 
     def _on_upstream_changed(self, checked: bool):
-        TelegramProxySettingsController.set_upstream_enabled(checked)
-        self._apply_upstream_preset_ui(self._upstream_preset_row.combo.currentIndex())
-        self._restart_if_running()
+        handle_upstream_toggle(
+            checked=checked,
+            set_upstream_enabled=TelegramProxySettingsController.set_upstream_enabled,
+            apply_upstream_preset_ui=self._apply_upstream_preset_ui,
+            current_index=self._upstream_preset_row.combo.currentIndex(),
+            restart_if_running=self._restart_if_running,
+        )
 
     def _on_upstream_preset_changed(self, index: int):
         """Handle upstream server selection."""
-        preset = self._upstream_catalog.preset_at(index)
-        if preset is None:
-            return
-
-        self._apply_upstream_preset_ui(index)
-
-        is_manual = self._upstream_catalog.is_manual(index)
-        is_mtproxy = self._upstream_catalog.is_mtproxy(index)
-
-        if is_manual:
-            self._upstream_host_edit.clear()
-            self._upstream_port_spin.blockSignals(True)
-            self._upstream_port_spin.setValue(1080)
-            self._upstream_port_spin.blockSignals(False)
-            self._upstream_user_edit.clear()
-            self._upstream_pass_edit.clear()
-            TelegramProxySettingsController.set_upstream_fields("", 1080, "", "")
-            self._restart_if_running()
-        elif is_mtproxy:
-            self._current_mtproxy_link = preset.get("link", "")
-        else:
-            self._upstream_host_edit.setText(preset.get("host", ""))
-            self._upstream_port_spin.blockSignals(True)
-            self._upstream_port_spin.setValue(preset.get("port", 1080))
-            self._upstream_port_spin.blockSignals(False)
-            self._upstream_user_edit.setText(preset.get("username", ""))
-            self._upstream_pass_edit.setText(preset.get("password", ""))
-            TelegramProxySettingsController.set_upstream_fields(
-                preset.get("host", ""), preset.get("port", 0),
-                preset.get("username", ""), preset.get("password", ""),
-            )
-            self._restart_if_running()
+        self._current_mtproxy_link = handle_upstream_preset_changed(
+            index=index,
+            upstream_catalog=self._upstream_catalog,
+            apply_upstream_preset_ui=self._apply_upstream_preset_ui,
+            upstream_host_edit=self._upstream_host_edit,
+            upstream_port_spin=self._upstream_port_spin,
+            upstream_user_edit=self._upstream_user_edit,
+            upstream_pass_edit=self._upstream_pass_edit,
+            set_upstream_fields=TelegramProxySettingsController.set_upstream_fields,
+            restart_if_running=self._restart_if_running,
+        )
 
     def _on_upstream_host_changed(self):
-        TelegramProxySettingsController.set_upstream_fields(
-            self._upstream_host_edit.text().strip(),
-            self._upstream_port_spin.value(),
-            self._upstream_user_edit.text().strip(),
-            self._upstream_pass_edit.text(),
+        save_upstream_fields(
+            host=self._upstream_host_edit.text(),
+            port=self._upstream_port_spin.value(),
+            user=self._upstream_user_edit.text(),
+            password=self._upstream_pass_edit.text(),
         )
         self._restart_if_running()
 
     def _on_upstream_port_changed(self, port: int):
-        TelegramProxySettingsController.set_upstream_fields(
-            self._upstream_host_edit.text().strip(),
-            port,
-            self._upstream_user_edit.text().strip(),
-            self._upstream_pass_edit.text(),
+        save_upstream_fields(
+            host=self._upstream_host_edit.text(),
+            port=port,
+            user=self._upstream_user_edit.text(),
+            password=self._upstream_pass_edit.text(),
         )
         self._schedule_upstream_restart()
 
     def _on_upstream_user_changed(self):
-        TelegramProxySettingsController.set_upstream_fields(
-            self._upstream_host_edit.text().strip(),
-            self._upstream_port_spin.value(),
-            self._upstream_user_edit.text().strip(),
-            self._upstream_pass_edit.text(),
+        save_upstream_fields(
+            host=self._upstream_host_edit.text(),
+            port=self._upstream_port_spin.value(),
+            user=self._upstream_user_edit.text(),
+            password=self._upstream_pass_edit.text(),
         )
         self._restart_if_running()
 
     def _on_upstream_pass_changed(self):
-        TelegramProxySettingsController.set_upstream_fields(
-            self._upstream_host_edit.text().strip(),
-            self._upstream_port_spin.value(),
-            self._upstream_user_edit.text().strip(),
-            self._upstream_pass_edit.text(),
+        save_upstream_fields(
+            host=self._upstream_host_edit.text(),
+            port=self._upstream_port_spin.value(),
+            user=self._upstream_user_edit.text(),
+            password=self._upstream_pass_edit.text(),
         )
         self._restart_if_running()
 
     def _on_upstream_mode_changed(self, checked: bool):
-        TelegramProxySettingsController.set_upstream_mode(checked)
+        save_upstream_mode(checked=checked)
         self._restart_if_running()
 
     def _on_open_mtproxy(self):
@@ -1350,7 +871,17 @@ class TelegramProxyPage(BasePage):
 
     def cleanup(self):
         """Called on app exit."""
+        self._cleanup_in_progress = True
+        self._relay_check_gen = getattr(self, '_relay_check_gen', 0) + 1
         if self._log_timer is not None:
             self._log_timer.stop()
+        if self._diag_poll_timer is not None:
+            self._diag_poll_timer.stop()
+            self._diag_poll_timer.deleteLater()
+            self._diag_poll_timer = None
+        if self._upstream_restart_timer is not None:
+            self._upstream_restart_timer.stop()
+            self._upstream_restart_timer.deleteLater()
+            self._upstream_restart_timer = None
         mgr = _get_proxy_manager()
         mgr.cleanup()

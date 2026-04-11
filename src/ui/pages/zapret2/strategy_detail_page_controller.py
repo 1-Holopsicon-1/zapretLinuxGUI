@@ -480,9 +480,9 @@ class StrategyDetailPageController:
         updated = facade.rename_by_file_name(old_file_name, new_name)
         switched_file_name = updated.file_name if facade.is_selected_file_name(updated.file_name) else None
         if switched_file_name:
-            from core.presets.direct_runtime_events import notify_direct_preset_switched
+            from core.presets.direct_runtime_events import notify_direct_preset_identity_changed
 
-            notify_direct_preset_switched("direct_zapret2", updated.file_name)
+            notify_direct_preset_identity_changed("direct_zapret2", updated.file_name)
 
         return StrategyDetailPresetActionResult(
             ok=True,

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import time
 from dataclasses import dataclass
 from typing import Protocol
@@ -109,6 +107,7 @@ class UpdatePageController:
         self.version_worker = None
         self._update_thread = None
         self._update_worker = None
+        self._cleanup_in_progress = False
 
         self._found_state = UpdateFoundState()
         self._check_state = UpdateCheckState()
@@ -243,6 +242,8 @@ class UpdatePageController:
         )
 
     def apply_idle_view_state(self, *, view_action: str, elapsed_seconds: float) -> None:
+        if self._cleanup_in_progress:
+            return
         if not self._can_present_idle_view_state():
             return
 
@@ -258,6 +259,8 @@ class UpdatePageController:
             self._view.show_auto_enabled_hint()
 
     def present_startup_update(self, version: str, release_notes: str, *, install_after_show: bool = True) -> bool:
+        if self._cleanup_in_progress:
+            return False
         action = self._resolve_startup_present_action(
             version=version,
             release_notes=release_notes,
@@ -271,6 +274,7 @@ class UpdatePageController:
         return True
 
     def start_checks(self, telegram_only: bool = False, skip_server_rate_limit: bool = False) -> None:
+        self._cleanup_in_progress = False
         if self._check_state.is_active:
             return
         if not self._can_start_new_check():
@@ -316,6 +320,7 @@ class UpdatePageController:
         self.start_checks(telegram_only=False, skip_server_rate_limit=True)
 
     def install_update(self) -> None:
+        self._cleanup_in_progress = False
         if not self._can_start_install():
             if self._download_state.is_installing:
                 log("Загрузка уже выполняется, повторный запуск проигнорирован", "🔄 UPDATE")
@@ -368,6 +373,7 @@ class UpdatePageController:
         log(f"Автопроверка при запуске: {'включена' if enabled else 'отключена'}", "🔄 UPDATE")
 
     def cleanup(self) -> None:
+        self._cleanup_in_progress = True
         self._teardown_server_worker()
         self._teardown_version_worker()
         self._teardown_update_runtime(wait_for_finish=True)
@@ -526,11 +532,20 @@ class UpdatePageController:
         worker.progress.connect(lambda message: log(f"{message}", "🔁 UPDATE"))
 
     def _handle_update_thread_finished(self) -> None:
+        if self._cleanup_in_progress:
+            return
         self._teardown_update_runtime()
 
     def _teardown_server_worker(self) -> None:
         worker = self.server_worker
         try:
+            if worker is not None:
+                stop = getattr(worker, "stop", None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except Exception as e:
+                        log(f"Ошибка остановки server_worker: {e}", "DEBUG")
             if worker is not None and worker.isRunning():
                 log("Останавливаем server_worker...", "DEBUG")
                 worker.quit()
@@ -546,6 +561,13 @@ class UpdatePageController:
     def _teardown_version_worker(self) -> None:
         worker = self.version_worker
         try:
+            if worker is not None:
+                stop = getattr(worker, "stop", None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except Exception as e:
+                        log(f"Ошибка остановки version_worker: {e}", "DEBUG")
             if worker is not None and worker.isRunning():
                 log("Останавливаем version_worker...", "DEBUG")
                 worker.quit()
@@ -560,7 +582,15 @@ class UpdatePageController:
 
     def _teardown_update_runtime(self, *, wait_for_finish: bool = False) -> None:
         thread = self._update_thread
+        worker = self._update_worker
         try:
+            if worker is not None:
+                stop = getattr(worker, "stop", None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except Exception as e:
+                        log(f"Ошибка остановки update_worker: {e}", "DEBUG")
             if wait_for_finish and thread is not None and thread.isRunning():
                 log("Останавливаем update_thread...", "DEBUG")
                 thread.quit()
@@ -574,9 +604,12 @@ class UpdatePageController:
             self._update_thread = None
             self._update_worker = None
             self._reset_download_state()
-            self._view.set_update_check_enabled(True)
+            if not self._cleanup_in_progress:
+                self._view.set_update_check_enabled(True)
 
     def _offer_current_update(self) -> None:
+        if self._cleanup_in_progress:
+            return
         if not self._found_state.is_available or not self._found_state.version:
             return
         self._view.show_update_offer(
@@ -585,24 +618,36 @@ class UpdatePageController:
         )
 
     def _present_found_update_source(self, server_name: str) -> None:
+        if self._cleanup_in_progress:
+            return
         self._view.show_found_update_source(self._found_state.version, server_name)
 
     def _present_deferred_update(self, version: str) -> None:
+        if self._cleanup_in_progress:
+            return
         self._view.show_update_deferred(version)
 
     def _finish_checking_workflow(self) -> None:
+        if self._cleanup_in_progress:
+            return
         self._reset_check_state(keep_cached_data=True)
         self._check_state.has_cached_data = True
         self._view.finish_checking(self._found_state.is_available, self._found_state.version)
 
     def _on_server_checked(self, server_name: str, status: dict) -> None:
+        if self._cleanup_in_progress:
+            return
         self._view.upsert_server_status(server_name, status)
         self._maybe_offer_update_from_server(server_name, status)
 
     def _on_servers_complete(self) -> None:
+        if self._cleanup_in_progress:
+            return
         self._start_version_check_workflow()
 
     def _on_version_found(self, channel: str, version_info: dict) -> None:
+        if self._cleanup_in_progress:
+            return
         target_channel = "test" if self._is_test_update_channel() else "stable"
         if channel not in {"stable", "test"} or channel != target_channel or version_info.get("error"):
             return
@@ -620,16 +665,22 @@ class UpdatePageController:
             pass
 
     def _on_versions_complete(self) -> None:
+        if self._cleanup_in_progress:
+            return
         self._finish_checking_workflow()
 
         if self._found_state.is_available and self._can_accept_startup_present():
             self._offer_current_update()
 
     def _on_download_failed(self, error: str) -> None:
+        if self._cleanup_in_progress:
+            return
         _ = error
         self._present_download_failure_ui()
 
     def _present_download_failure_ui(self) -> None:
+        if self._cleanup_in_progress:
+            return
         self._view.show_update_status_card()
         self._view.show_update_download_error()
 
@@ -681,6 +732,8 @@ class UpdatePageController:
             return None, ""
 
     def _restart_dpi_after_update(self) -> None:
+        if self._cleanup_in_progress:
+            return
         try:
             win = self._view.window()
             if hasattr(win, "dpi_controller") and win.dpi_controller:

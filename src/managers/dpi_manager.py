@@ -55,9 +55,9 @@ class DPIManager(QObject):
         method = str(launch_method or "").strip().lower()
         try:
             if method in {"direct_zapret1", "direct_zapret2"}:
-                from core.services import get_direct_flow_coordinator
+                from app_context import require_app_context
 
-                snapshot = get_direct_flow_coordinator().get_startup_snapshot(method)
+                snapshot = require_app_context().direct_flow_coordinator.get_startup_snapshot(method)
                 return str(snapshot.display_name or "").strip() or "Пресет"
 
             if method == "orchestra":

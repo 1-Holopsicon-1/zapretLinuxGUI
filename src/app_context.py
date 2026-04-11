@@ -2,21 +2,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
-from config import get_zapret_userdata_dir
-from core.direct_flow import DirectFlowCoordinator
-from core.paths import AppPaths
-from core.presets.repository import PresetRepository
-from core.presets.selection_service import PresetSelectionService
-from core.runtime.direct_ui_snapshot_service import DirectUiSnapshotService
-from core.runtime.orchestra_whitelist_runtime_service import OrchestraWhitelistRuntimeService
-from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
-from core.runtime.program_settings_runtime_service import ProgramSettingsRuntimeService
-from core.runtime.user_presets_runtime_service import UserPresetsRuntimeService
-from managers.app_runtime_state import AppRuntimeState
-from managers.dpi_runtime_service import DpiRuntimeService
-from ui.main_window_state import AppUiState, MainWindowStateStore
+if TYPE_CHECKING:
+    from core.direct_flow import DirectFlowCoordinator
+    from core.paths import AppPaths
+    from core.presets.repository import PresetRepository
+    from core.presets.runtime_store import DirectRuntimePresetStore
+    from core.presets.selection_service import PresetSelectionService
+    from core.runtime.direct_ui_snapshot_service import DirectUiSnapshotService
+    from core.runtime.orchestra_whitelist_runtime_service import OrchestraWhitelistRuntimeService
+    from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
+    from core.runtime.program_settings_runtime_service import ProgramSettingsRuntimeService
+    from core.runtime.user_presets_runtime_service import UserPresetsRuntimeService
+    from managers.app_runtime_state import AppRuntimeState
+    from managers.dpi_runtime_service import DpiRuntimeService
+    from strategy_menu.marks_store import DirectZapret2FavoritesStore, DirectZapret2MarksStore
+    from ui.main_window_state import AppUiState, MainWindowStateStore
+
+
+_APP_CONTEXT: "AppContext | None" = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +33,10 @@ class AppContext:
     direct_flow_coordinator: DirectFlowCoordinator
     preset_selection_service: PresetSelectionService
     preset_repository: PresetRepository
+    preset_store: DirectRuntimePresetStore
+    preset_store_v1: DirectRuntimePresetStore
+    strategy_marks_store: DirectZapret2MarksStore
+    strategy_favorites_store: DirectZapret2FavoritesStore
     direct_ui_snapshot_service: DirectUiSnapshotService
     orchestra_whitelist_runtime_service: OrchestraWhitelistRuntimeService
     program_settings_runtime_service: ProgramSettingsRuntimeService
@@ -36,11 +45,31 @@ class AppContext:
 
 
 def build_app_context(*, initial_ui_state: AppUiState | None = None) -> AppContext:
+    from config import get_zapret_userdata_dir
+    from core.direct_flow import DirectFlowCoordinator
+    from core.paths import AppPaths
+    from core.presets.repository import PresetRepository
+    from core.presets.runtime_store import DirectRuntimePresetStore
+    from core.presets.selection_service import PresetSelectionService
+    from core.runtime.direct_ui_snapshot_service import DirectUiSnapshotService
+    from core.runtime.orchestra_whitelist_runtime_service import OrchestraWhitelistRuntimeService
+    from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
+    from core.runtime.program_settings_runtime_service import ProgramSettingsRuntimeService
+    from core.runtime.user_presets_runtime_service import UserPresetsRuntimeService
+    from managers.app_runtime_state import AppRuntimeState
+    from managers.dpi_runtime_service import DpiRuntimeService
+    from strategy_menu.marks_store import DirectZapret2FavoritesStore, DirectZapret2MarksStore
+    from ui.main_window_state import AppUiState, MainWindowStateStore
+
     root = Path(get_zapret_userdata_dir()).resolve()
     app_paths = AppPaths(user_root=root, local_root=root)
     ui_state_store = MainWindowStateStore(initial_ui_state or AppUiState())
     preset_repository = PresetRepository(app_paths)
     preset_selection_service = PresetSelectionService(app_paths, preset_repository)
+    preset_store = DirectRuntimePresetStore("winws2")
+    preset_store_v1 = DirectRuntimePresetStore("winws1")
+    strategy_marks_store = DirectZapret2MarksStore.default()
+    strategy_favorites_store = DirectZapret2FavoritesStore.default()
     app_runtime_state = AppRuntimeState(ui_state_store)
     dpi_runtime_service = DpiRuntimeService(ui_state_store)
     direct_flow_coordinator = DirectFlowCoordinator()
@@ -56,9 +85,29 @@ def build_app_context(*, initial_ui_state: AppUiState | None = None) -> AppConte
         direct_flow_coordinator=direct_flow_coordinator,
         preset_selection_service=preset_selection_service,
         preset_repository=preset_repository,
+        preset_store=preset_store,
+        preset_store_v1=preset_store_v1,
+        strategy_marks_store=strategy_marks_store,
+        strategy_favorites_store=strategy_favorites_store,
         direct_ui_snapshot_service=direct_ui_snapshot_service,
         orchestra_whitelist_runtime_service=orchestra_whitelist_runtime_service,
         program_settings_runtime_service=program_settings_runtime_service,
         user_presets_runtime_service_factory=lambda scope_key: UserPresetsRuntimeService(scope_key=scope_key),
         preset_runtime_coordinator_factory=lambda *args, **kwargs: PresetRuntimeCoordinator(*args, **kwargs),
     )
+
+
+def install_app_context(app_context: AppContext | None) -> None:
+    global _APP_CONTEXT
+    _APP_CONTEXT = app_context
+
+
+def get_installed_app_context() -> AppContext | None:
+    return _APP_CONTEXT
+
+
+def require_app_context() -> AppContext:
+    context = _APP_CONTEXT
+    if context is None:
+        raise RuntimeError("AppContext is not installed")
+    return context

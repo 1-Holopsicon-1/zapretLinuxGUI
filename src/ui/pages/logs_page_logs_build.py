@@ -10,6 +10,7 @@ class LogsTabWidgets:
     controls_card: object
     log_combo: object
     refresh_btn: object
+    info_label: object
     controls_actions_title: object
     controls_actions_bar: object
     copy_btn: object
@@ -240,6 +241,7 @@ def build_logs_tab_ui(
         controls_card=controls_card,
         log_combo=log_combo,
         refresh_btn=refresh_btn,
+        info_label=info_label,
         controls_actions_title=controls_actions_title,
         controls_actions_bar=controls_actions_bar,
         copy_btn=copy_btn,

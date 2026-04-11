@@ -26,13 +26,11 @@ from .restart_flow import (
 )
 from .lifecycle_feedback import (
     cleanup_threads as cleanup_threads_impl,
-    on_dpi_process_confirmed,
     on_dpi_start_finished as on_dpi_start_finished_impl,
     on_dpi_stop_finished as on_dpi_stop_finished_impl,
     on_stop_and_exit_finished as on_stop_and_exit_finished_impl,
     show_launch_error_top,
     show_launch_warning_top,
-    verify_dpi_process_running,
 )
 from .thread_runtime import start_worker_thread
 from .workers import (
@@ -65,6 +63,7 @@ class DPIController:
         # Generation token for async start verification.
         # Prevents stale QTimer checks from previous start attempts.
         self._dpi_start_verify_generation = 0
+        self._dpi_start_verify_retry = 0
 
     def _runtime_service(self):
         return getattr(self.app, "dpi_runtime_service", None)
@@ -429,12 +428,6 @@ class DPIController:
     
     def _on_dpi_start_finished(self, success, error_message):
         on_dpi_start_finished_impl(self, success, error_message)
-
-    def _verify_dpi_process_running(self, verify_gen=None):
-        verify_dpi_process_running(self, verify_gen)
-
-    def _on_dpi_process_confirmed(self, running: bool, verify_gen=None):
-        on_dpi_process_confirmed(self, running, verify_gen)
 
     def _on_dpi_stop_finished(self, success, error_message):
         on_dpi_stop_finished_impl(self, success, error_message)

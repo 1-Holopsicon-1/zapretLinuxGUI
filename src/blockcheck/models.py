@@ -102,3 +102,4 @@ class BlockcheckReport:
     dns_integrity: list[DNSIntegrityResult] = field(default_factory=list)
     summary: dict[str, Any] = field(default_factory=dict)
     elapsed_seconds: float = 0.0
+    cancelled: bool = False

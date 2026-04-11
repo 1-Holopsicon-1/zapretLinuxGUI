@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QIcon, QFont, QColor, QPainter, QPixmap, QTransform
 import qtawesome as qta
 
+from ui.theme import get_cached_qta_pixmap, get_themed_qta_icon
 from ui.theme_refresh import ThemeRefreshController
 
 try:
@@ -457,7 +458,9 @@ class SemanticNotice(QWidget):
             border = "rgba(255, 152, 0, 0.30)"
 
         try:
-            self._icon_label.setPixmap(qta.icon("fa5s.exclamation-triangle", color=icon_color).pixmap(14, 14))
+            self._icon_label.setPixmap(
+                get_cached_qta_pixmap("fa5s.exclamation-triangle", color=icon_color, size=14)
+            )
         except Exception:
             pass
 
@@ -605,7 +608,7 @@ class ActionButton(PushButton if HAS_FLUENT else QPushButton):
                 _color = "#cccccc" if _idt() else "#555555"
                 if _color == self._last_icon_color:
                     return
-                self.setIcon(qta.icon(self._icon_name, color=_color))
+                self.setIcon(get_themed_qta_icon(self._icon_name, color=_color))
                 self._last_icon_color = _color
             except Exception:
                 pass
@@ -686,7 +689,7 @@ class RefreshButton(ActionButton):
 
             # Рисуем вращение внутри фиксированного холста одного размера,
             # чтобы иконка не "плавала" по вертикали из-за меняющегося bbox.
-            source = qta.icon(self._icon_name, color=color).pixmap(icon_w, icon_h)
+            source = get_cached_qta_pixmap(self._icon_name, color=color, size=max(icon_w, icon_h))
             rotated = source.transformed(QTransform().rotate(angle), Qt.TransformationMode.SmoothTransformation)
 
             canvas = QPixmap(icon_w, icon_h)
@@ -732,7 +735,7 @@ class PrimaryActionButton(PrimaryPushButton if HAS_FLUENT else QPushButton):
             self.setIconSize(QSize(16, 16))
             try:
                 import qtawesome as qta
-                self.setIcon(qta.icon(icon_name, color="#ffffff"))
+                self.setIcon(get_themed_qta_icon(icon_name, color="#ffffff"))
             except Exception:
                 pass
 
@@ -756,7 +759,7 @@ class SettingsRow(FluentSettingCard if HAS_FLUENT else QWidget):
         if HAS_FLUENT:
             try:
                 import qtawesome as qta
-                icon = qta.icon(icon_name, color=themeColor().name())
+                icon = get_themed_qta_icon(icon_name, color=themeColor().name())
             except Exception:
                 icon = QIcon()
             super().__init__(icon, title, description or None, parent)
@@ -818,7 +821,7 @@ class SettingsRow(FluentSettingCard if HAS_FLUENT else QWidget):
         try:
             import qtawesome as qta
             color = themeColor().name() if HAS_FLUENT else "#5fcffe"
-            self._icon_label.setPixmap(qta.icon(self._icon_name, color=color).pixmap(20, 20))
+            self._icon_label.setPixmap(get_cached_qta_pixmap(self._icon_name, color=color, size=20))
         except Exception:
             pass
 

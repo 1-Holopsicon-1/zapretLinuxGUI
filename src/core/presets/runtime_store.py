@@ -1,51 +1,20 @@
 from __future__ import annotations
 
-import sys
 from typing import Dict, Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from app_context import require_app_context
+
 from .models import PresetManifest
 
 
-def _get_installed_app_context():
-    try:
-        core_services = sys.modules.get("core.services")
-        if core_services is None:
-            import core.services as core_services
-
-        getter = getattr(core_services, "get_installed_app_context", None)
-        if callable(getter):
-            return getter()
-    except Exception:
-        pass
-    return None
-
-
 def _get_preset_repository():
-    app_context = _get_installed_app_context()
-    repository = getattr(app_context, "preset_repository", None)
-    if repository is not None:
-        return repository
-
-    core_services = sys.modules.get("core.services")
-    if core_services is None:
-        import core.services as core_services
-
-    return core_services.get_preset_repository()
+    return require_app_context().preset_repository
 
 
 def _get_selection_service():
-    app_context = _get_installed_app_context()
-    service = getattr(app_context, "preset_selection_service", None)
-    if service is not None:
-        return service
-
-    core_services = sys.modules.get("core.services")
-    if core_services is None:
-        import core.services as core_services
-
-    return core_services.get_selection_service()
+    return require_app_context().preset_selection_service
 
 
 class DirectRuntimePresetStore(QObject):
@@ -57,6 +26,7 @@ class DirectRuntimePresetStore(QObject):
 
     presets_changed = pyqtSignal()
     preset_switched = pyqtSignal(str)
+    preset_identity_changed = pyqtSignal(str)
     preset_updated = pyqtSignal(str)
 
     def __init__(self, engine: str, parent: Optional[QObject] = None):
@@ -96,6 +66,10 @@ class DirectRuntimePresetStore(QObject):
     def notify_preset_switched(self, file_name: str) -> None:
         self._selected_source_file_name = str(file_name or "").strip() or None
         self.preset_switched.emit(self._selected_source_file_name or "")
+
+    def notify_preset_identity_changed(self, file_name: str) -> None:
+        self._selected_source_file_name = str(file_name or "").strip() or None
+        self.preset_identity_changed.emit(self._selected_source_file_name or "")
 
     def _ensure_loaded(self) -> None:
         if not self._loaded:

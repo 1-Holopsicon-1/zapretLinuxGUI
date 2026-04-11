@@ -14,11 +14,40 @@ class SubscriptionManager:
         self.app = app_instance
         self.donate_checker = None
         self._last_is_premium: Optional[bool] = None
+        self._subscription_thread: Optional[QThread] = None
+        self._subscription_worker: Optional[QObject] = None
         self._refresh_thread: Optional[QThread] = None
         self._refresh_worker: Optional[QObject] = None
+        self._cleanup_in_progress = False
+
+    @staticmethod
+    def _shutdown_thread(thread: Optional[QThread], *, wait_timeout_ms: int = 2000) -> Optional[QThread]:
+        if thread is None:
+            return None
+        try:
+            if thread.isRunning():
+                thread.quit()
+                if not thread.wait(wait_timeout_ms):
+                    log("⚠ Поток подписки не завершился, принудительно завершаем", "WARNING")
+                    thread.terminate()
+                    thread.wait(500)
+        except RuntimeError:
+            return None
+        except Exception as e:
+            log(f"Ошибка остановки потока подписки: {e}", "DEBUG")
+        return None
         
     def initialize_async(self):
         """Асинхронная инициализация и проверка подписки"""
+        self._cleanup_in_progress = False
+        if self._subscription_thread is not None:
+            try:
+                if self._subscription_thread.isRunning():
+                    log("Инициализация подписки уже выполняется, повторный запуск пропущен", "DEBUG")
+                    return
+            except RuntimeError:
+                self._subscription_thread = None
+                self._subscription_worker = None
         
         class SubscriptionInitWorker(QObject):
             finished = pyqtSignal(object, object, bool)  # donate_checker, activation_info, success
@@ -51,9 +80,13 @@ class SubscriptionManager:
         # Показываем что идет загрузка
         self.app.set_status("Инициализация подписок...")
         
-        self._subscription_thread = QThread()
+        self._subscription_thread = QThread(self.app)
         self._subscription_worker = SubscriptionInitWorker()
         self._subscription_worker.moveToThread(self._subscription_thread)
+
+        def _cleanup_subscription_objects():
+            self._subscription_worker = None
+            self._subscription_thread = None
         
         self._subscription_thread.started.connect(self._subscription_worker.run)
         self._subscription_worker.progress.connect(self.app.set_status)
@@ -61,6 +94,7 @@ class SubscriptionManager:
         self._subscription_worker.finished.connect(self._subscription_thread.quit)
         self._subscription_worker.finished.connect(self._subscription_worker.deleteLater)
         self._subscription_thread.finished.connect(self._subscription_thread.deleteLater)
+        self._subscription_thread.finished.connect(_cleanup_subscription_objects)
         
         self._subscription_thread.start()
 
@@ -77,6 +111,8 @@ class SubscriptionManager:
         }
 
     def _apply_subscription_info_to_ui(self, sub_info: Dict[str, Any], *, status_message: Optional[str] = None):
+        if self._cleanup_in_progress:
+            return
         is_premium = bool(sub_info.get('is_premium'))
         days_remaining = sub_info.get('days_remaining')
         store = getattr(self.app, 'ui_state_store', None)
@@ -93,16 +129,14 @@ class SubscriptionManager:
             )
             log(f"Обновлены карточки подписки: premium={is_premium}", "DEBUG")
 
-        if hasattr(self.app, 'theme_manager') and hasattr(self.app, 'ui_manager'):
-            available_themes = self.app.theme_manager.get_available_themes()
-            self.app.ui_manager.update_theme_gallery(available_themes)
-
         self._last_is_premium = is_premium
         if status_message:
             self.app.set_status(status_message)
 
     def _on_subscription_ready(self, donate_checker, activation_info, success):
         """✅ ОБНОВЛЕННЫЙ обработчик готовности подписки"""
+        if self._cleanup_in_progress:
+            return
         if not success or not donate_checker:
             log("DonateChecker не инициализирован", "⚠ WARNING")
             # ✅ ИСПОЛЬЗУЕМ UI MANAGER
@@ -161,20 +195,12 @@ class SubscriptionManager:
 
     def handle_subscription_status_change(self, was_premium, is_premium):
         """Обрабатывает изменение статуса подписки"""
+        if self._cleanup_in_progress:
+            return
         log(f"Статус подписки изменился: {was_premium} -> {is_premium}", "INFO")
-        
-        # ✅ ИСПОЛЬЗУЕМ UI MANAGER для обновления галереи тем
-        if hasattr(self.app, 'theme_manager') and hasattr(self.app, 'ui_manager'):
-            available_themes = self.app.theme_manager.get_available_themes()
-            
-            # Обновляем галерею тем через UI Manager
-            self.app.ui_manager.update_theme_gallery(available_themes)
         
         # Показываем уведомления
         self._show_subscription_notifications(was_premium, is_premium)
-        
-        # Обновляем UI элементы
-        self._update_subscription_ui_elements()
 
     def _show_subscription_notifications(self, was_premium, is_premium):
         """Показывает уведомления об изменении статуса подписки"""
@@ -226,15 +252,14 @@ class SubscriptionManager:
                     )
                 )
 
-    def _update_subscription_ui_elements(self):
-        pass
-
     def update_subscription_ui(self):
         """✅ ОБНОВЛЕННЫЙ метод обновления UI после проверки подписки"""
         return self.update_subscription_ui_with_data(None)
 
     def update_subscription_ui_with_data(self, sub_info: Optional[Dict[str, Any]] = None):
         """Обновляет UI подписки без блокирующих сетевых вызовов в UI-потоке."""
+        if self._cleanup_in_progress:
+            return
         try:
             # Проверяем наличие theme_manager
             if not hasattr(self.app, 'theme_manager'):
@@ -276,12 +301,9 @@ class SubscriptionManager:
             log(f"Traceback: {traceback.format_exc()}", "DEBUG")
             self.app.set_status("Ошибка проверки подписки")
     
-    def check_and_update_subscription(self, silent=False):
-        """Back-compat обертка: запуск асинхронной проверки подписки."""
-        return self.check_and_update_subscription_async(silent=silent)
-
     def check_and_update_subscription_async(self, silent: bool = False):
         """Асинхронно проверяет подписку без блокировки UI."""
+        self._cleanup_in_progress = False
         try:
             if not self.donate_checker:
                 log_level = "DEBUG" if silent else "⚠ WARNING"
@@ -316,13 +338,15 @@ class SubscriptionManager:
                     except Exception as e:
                         self.finished.emit(None, False, str(e))
 
-            self._refresh_thread = QThread()
+            self._refresh_thread = QThread(self.app)
             self._refresh_worker = SubscriptionRefreshWorker(self.donate_checker)
             self._refresh_worker.moveToThread(self._refresh_thread)
 
             self._refresh_thread.started.connect(self._refresh_worker.run)
 
             def _on_refresh_finished(activation_info, success, error_msg):
+                if self._cleanup_in_progress:
+                    return
                 if not success:
                     log(f"Ошибка проверки подписки: {error_msg}", "❌ ERROR")
                     if not silent:
@@ -356,3 +380,11 @@ class SubscriptionManager:
             if not silent:
                 self.app.set_status(f"Ошибка проверки подписки: {e}")
             return False
+
+    def cleanup(self) -> None:
+        """Останавливает фоновые потоки менеджера подписки при закрытии приложения."""
+        self._cleanup_in_progress = True
+        self._refresh_thread = self._shutdown_thread(self._refresh_thread)
+        self._refresh_worker = None
+        self._subscription_thread = self._shutdown_thread(self._subscription_thread)
+        self._subscription_worker = None

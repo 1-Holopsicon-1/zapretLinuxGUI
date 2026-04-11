@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import sys
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
+from app_context import require_app_context
 from log import log
 
 
@@ -227,7 +227,7 @@ class _DirectUserPresetsStorageApiImpl:
         self._controller = controller
 
     def get_preset_store(self):
-        return self._controller.get_preset_store()
+        return self._controller.require_app_context().preset_store
 
     def get_hierarchy_store(self):
         return self._controller.get_hierarchy_store()
@@ -277,54 +277,14 @@ class DirectUserPresetsPageController:
     def build_page_api(self) -> DirectUserPresetsPageApiBundle:
         return self._page_api
 
-    def _get_installed_app_context(self):
-        try:
-            core_services = sys.modules.get("core.services")
-            if core_services is None:
-                import core.services as core_services
-
-            getter = getattr(core_services, "get_installed_app_context", None)
-            if callable(getter):
-                return getter()
-        except Exception:
-            pass
-        return None
-
     def _get_direct_flow_coordinator(self):
-        app_context = self._get_installed_app_context()
-        coordinator = getattr(app_context, "direct_flow_coordinator", None)
-        if coordinator is not None:
-            return coordinator
-
-        core_services = sys.modules.get("core.services")
-        if core_services is None:
-            import core.services as core_services
-
-        return core_services.get_direct_flow_coordinator()
+        return require_app_context().direct_flow_coordinator
 
     def _get_selection_service(self):
-        app_context = self._get_installed_app_context()
-        service = getattr(app_context, "preset_selection_service", None)
-        if service is not None:
-            return service
-
-        core_services = sys.modules.get("core.services")
-        if core_services is None:
-            import core.services as core_services
-
-        return core_services.get_selection_service()
+        return require_app_context().preset_selection_service
 
     def _get_app_paths(self):
-        app_context = self._get_installed_app_context()
-        app_paths = getattr(app_context, "app_paths", None)
-        if app_paths is not None:
-            return app_paths
-
-        core_services = sys.modules.get("core.services")
-        if core_services is None:
-            import core.services as core_services
-
-        return core_services.get_app_paths()
+        return require_app_context().app_paths
 
     def _get_direct_facade(self):
         from core.presets.direct_facade import DirectPresetFacade
@@ -332,7 +292,7 @@ class DirectUserPresetsPageController:
         return DirectPresetFacade.from_launch_method(self._config.launch_method)
 
     def get_preset_store(self):
-        return self._config.get_preset_store()
+        return self._config.require_app_context().preset_store
 
     def create_preset(self, *, name: str, from_current: bool) -> UserPresetActionResult:
         facade = self._get_direct_facade()
@@ -352,9 +312,9 @@ class DirectUserPresetsPageController:
         updated = facade.rename_by_file_name(current_name, new_name)
         switched_file_name = updated.file_name if facade.is_selected_file_name(updated.file_name) else None
         if switched_file_name:
-            from core.presets.direct_runtime_events import notify_direct_preset_switched
+            from core.presets.direct_runtime_events import notify_direct_preset_identity_changed
 
-            notify_direct_preset_switched(self._config.launch_method, switched_file_name)
+            notify_direct_preset_identity_changed(self._config.launch_method, switched_file_name)
 
         return UserPresetActionResult(
             ok=True,
@@ -402,9 +362,9 @@ class DirectUserPresetsPageController:
         success_count, total, failed = facade.reset_all_to_templates()
         selected_file_name = facade.get_selected_file_name()
         if selected_file_name:
-            from core.presets.direct_runtime_events import notify_direct_preset_switched
+            from core.presets.direct_runtime_events import notify_direct_preset_saved
 
-            notify_direct_preset_switched(self._config.launch_method, selected_file_name)
+            notify_direct_preset_saved(self._config.launch_method, selected_file_name)
 
         failed_count = len(failed or [])
         if failed_count:
@@ -450,11 +410,9 @@ class DirectUserPresetsPageController:
     def reset_preset_to_template(self, *, file_name: str, display_name: str) -> UserPresetActionResult:
         facade = self._get_direct_facade()
         facade.reset_to_template_by_file_name(file_name)
-        from core.presets.direct_runtime_events import notify_direct_preset_saved, notify_direct_preset_switched
+        from core.presets.direct_runtime_events import notify_direct_preset_saved
 
         notify_direct_preset_saved(self._config.launch_method, file_name)
-        if facade.is_selected_file_name(file_name):
-            notify_direct_preset_switched(self._config.launch_method, file_name)
 
         return UserPresetActionResult(
             ok=True,
@@ -522,9 +480,9 @@ class DirectUserPresetsPageController:
         facade.restore_deleted()
         selected_file_name = facade.get_selected_file_name()
         if selected_file_name:
-            from core.presets.direct_runtime_events import notify_direct_preset_switched
+            from core.presets.direct_runtime_events import notify_direct_preset_identity_changed
 
-            notify_direct_preset_switched(self._config.launch_method, selected_file_name)
+            notify_direct_preset_identity_changed(self._config.launch_method, selected_file_name)
 
         return UserPresetActionResult(
             ok=True,
@@ -628,14 +586,14 @@ class DirectUserPresetsPageController:
 
     def get_active_preset_name_light(self) -> str:
         try:
-            preset = self._get_direct_flow_coordinator().get_selected_source_manifest(self._config.launch_method)
+            preset = self._require_app_context().direct_flow_coordinator.get_selected_source_manifest(self._config.launch_method)
             return str(preset.name if preset is not None else "").strip()
         except Exception:
             return ""
 
     def get_selected_source_preset_file_name_light(self) -> str:
         try:
-            return str(self._get_selection_service().get_selected_file_name(self._config.selection_key) or "").strip()
+            return str(self._require_app_context().preset_selection_service.get_selected_file_name(self._config.selection_key) or "").strip()
         except Exception:
             return ""
 

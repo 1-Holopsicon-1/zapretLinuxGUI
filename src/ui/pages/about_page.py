@@ -3,36 +3,31 @@
 
 from __future__ import annotations
 
-import qtawesome as qta
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QStackedWidget,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QSizePolicy, QLayout,
 )
 
 from .base_page import BasePage
 from ui.about_page_controller import AboutPageController
-from ui.compat_widgets import SettingsCard
+from ui.pages.about_page_about_build import build_about_page_about_content
+from ui.pages.about_page_help_build import build_about_page_help_content
+from ui.pages.about_page_kvn_build import build_about_page_kvn_content
+from ui.pages.about_page_support_build import build_about_page_support_content
+from ui.pages.about_page_tabs_build import build_about_page_tabs
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from log import log
 
 from qfluentwidgets import (
-    SubtitleLabel,
-    BodyLabel,
     StrongBodyLabel,
-    CaptionLabel,
-    SegmentedWidget,
     InfoBar,
     HyperlinkCard,
     PushSettingCard,
-    PrimaryPushSettingCard,
-    SettingCard,
     SettingCardGroup,
     FluentIcon,
-    PushButton,
-    PrimaryPushButton,
 )
 
 def _make_section_label(text: str, parent: QWidget | None = None) -> QLabel:
@@ -104,52 +99,22 @@ class AboutPage(BasePage):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # ── Pivot (tabs) ──────────────────────────────────────────────────
-        self.tabs_pivot = SegmentedWidget()
-        self.tabs_pivot.addItem(routeKey="about", text=" " + tr_catalog("page.about.tab.about", default="О ПРОГРАММЕ"),
-                                onClick=lambda: self._switch_tab(0))
-        self.tabs_pivot.addItem(routeKey="support", text=" " + tr_catalog("page.about.tab.support", default="ПОДДЕРЖКА"),
-                                onClick=lambda: self._switch_tab(1))
-        self.tabs_pivot.addItem(routeKey="help", text=" " + tr_catalog("page.about.tab.help", default="СПРАВКА"),
-                                onClick=lambda: self._switch_tab(2))
-        self.tabs_pivot.addItem(routeKey="kvn", text=" ZAPRET KVN",
-                                onClick=lambda: self._switch_tab(3))
-        self.tabs_pivot.setCurrentItem("about")
-        self.tabs_pivot.setItemFontSize(13)
+        tabs_widgets = build_about_page_tabs(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            on_switch_tab=self._switch_tab,
+        )
+        self.tabs_pivot = tabs_widgets.tabs_pivot
         self.add_widget(self.tabs_pivot)
 
-        # ── QStackedWidget ────────────────────────────────────────────────
-        self.stacked_widget = QStackedWidget()
-
-        # Tab 0: О программе
-        self._about_tab = QWidget()
-        about_layout = QVBoxLayout(self._about_tab)
-        about_layout.setContentsMargins(0, 0, 0, 0)
-        about_layout.setSpacing(16)
-        self._build_about_content(about_layout)
-
-        # Tab 1: Поддержка (lazy)
-        self._support_tab = QWidget()
-        self._support_layout = QVBoxLayout(self._support_tab)
-        self._support_layout.setContentsMargins(0, 0, 0, 0)
-        self._support_layout.setSpacing(16)
-
-        # Tab 2: Справка (lazy)
-        self._help_tab = QWidget()
-        self._help_layout = QVBoxLayout(self._help_tab)
-        self._help_layout.setContentsMargins(0, 0, 0, 0)
-        self._help_layout.setSpacing(16)
-
-        # Tab 3: Zapret KVN (lazy)
-        self._kvn_tab = QWidget()
-        self._kvn_layout = QVBoxLayout(self._kvn_tab)
-        self._kvn_layout.setContentsMargins(0, 0, 0, 0)
-        self._kvn_layout.setSpacing(16)
-
-        self.stacked_widget.addWidget(self._about_tab)
-        self.stacked_widget.addWidget(self._support_tab)
-        self.stacked_widget.addWidget(self._help_tab)
-        self.stacked_widget.addWidget(self._kvn_tab)
+        self.stacked_widget = tabs_widgets.stacked_widget
+        self._about_tab = tabs_widgets.about_tab
+        self._support_tab = tabs_widgets.support_tab
+        self._help_tab = tabs_widgets.help_tab
+        self._kvn_tab = tabs_widgets.kvn_tab
+        self._support_layout = tabs_widgets.support_layout
+        self._help_layout = tabs_widgets.help_layout
+        self._kvn_layout = tabs_widgets.kvn_layout
+        self._build_about_content(tabs_widgets.about_layout)
 
         self.add_widget(self.stacked_widget)
 
@@ -317,146 +282,30 @@ class AboutPage(BasePage):
     def _build_about_content(self, layout: QVBoxLayout):
         from config import APP_VERSION
         tokens = get_theme_tokens()
-
-        # ── Версия ────────────────────────────────────────────────────────
-        self.about_section_version_label = _make_section_label(
-            tr_catalog("page.about.section.version", language=self._ui_language, default="Версия")
+        widgets = build_about_page_about_content(
+            layout,
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            tokens=tokens,
+            app_version=APP_VERSION,
+            client_id=AboutPageController.get_client_id(),
+            make_section_label=lambda text: _make_section_label(text),
+            on_open_updates=self.open_updates_requested.emit,
+            on_copy_client_id=self._copy_client_id,
+            on_open_premium=self.open_premium_requested.emit,
         )
-        layout.addWidget(self.about_section_version_label)
-
-        version_card = SettingsCard()
-        version_layout = QHBoxLayout()
-        version_layout.setSpacing(16)
-
-        icon_label = QLabel()
-        icon_label.setPixmap(qta.icon('fa5s.shield-alt', color=tokens.accent_hex).pixmap(40, 40))
-        icon_label.setFixedSize(48, 48)
-        version_layout.addWidget(icon_label)
-
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
-        name_label = SubtitleLabel(
-            tr_catalog("page.about.app_name", language=self._ui_language, default="Zapret 2 GUI")
-        )
-        version_label = CaptionLabel(
-            tr_catalog(
-                "page.about.version.value_template",
-                language=self._ui_language,
-                default="Версия {version}",
-            ).format(version=APP_VERSION)
-        )
-        self.about_app_name_label = name_label
-        text_layout.addWidget(name_label)
-        self.about_version_value_label = version_label
-        text_layout.addWidget(self.about_version_value_label)
-        version_layout.addLayout(text_layout, 1)
-
-        self.update_btn = PushButton()
-        self.update_btn.setText(
-            tr_catalog("page.about.button.update_settings", language=self._ui_language, default="Настройка обновлений")
-        )
-        self.update_btn.setIcon(qta.icon("fa5s.sync-alt", color=tokens.accent_hex))
-        self.update_btn.setFixedHeight(36)
-        self.update_btn.clicked.connect(self.open_updates_requested.emit)
-        version_layout.addWidget(self.update_btn)
-
-        version_card.add_layout(version_layout)
-        layout.addWidget(version_card)
-
-        layout.addSpacing(16)
-
-        # ── Устройство ────────────────────────────────────────────────────
-        self.about_section_device_label = _make_section_label(
-            tr_catalog("page.about.section.device", language=self._ui_language, default="Устройство")
-        )
-        layout.addWidget(self.about_section_device_label)
-
-        device_card = SettingsCard()
-        device_layout = QHBoxLayout()
-        device_layout.setSpacing(16)
-
-        device_icon = QLabel()
-        device_icon.setPixmap(qta.icon('fa5s.key', color=tokens.accent_hex).pixmap(20, 20))
-        device_icon.setFixedSize(24, 24)
-        device_layout.addWidget(device_icon)
-
-        client_id = AboutPageController.get_client_id()
-
-        device_text_layout = QVBoxLayout()
-        device_text_layout.setSpacing(2)
-        device_title = BodyLabel(tr_catalog("page.about.device.id", language=self._ui_language, default="ID устройства"))
-        self.client_id_label = CaptionLabel(client_id or "—")
-        self.device_title_label = device_title
-        self.client_id_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        device_text_layout.addWidget(self.device_title_label)
-        device_text_layout.addWidget(self.client_id_label)
-        device_layout.addLayout(device_text_layout, 1)
-
-        self.copy_btn = PushButton()
-        self.copy_btn.setText(
-            tr_catalog("page.about.button.copy_id", language=self._ui_language, default="Копировать ID")
-        )
-        self.copy_btn.setIcon(qta.icon("fa5s.copy", color=tokens.accent_hex))
-        self.copy_btn.setFixedHeight(36)
-        self.copy_btn.clicked.connect(self._copy_client_id)
-        device_layout.addWidget(self.copy_btn)
-
-        device_card.add_layout(device_layout)
-        layout.addWidget(device_card)
-
-        layout.addSpacing(16)
-
-        # ── Подписка ──────────────────────────────────────────────────────
-        self.about_section_subscription_label = _make_section_label(
-            tr_catalog("page.about.section.subscription", language=self._ui_language, default="Подписка")
-        )
-        layout.addWidget(self.about_section_subscription_label)
-
-        sub_card = SettingsCard()
-        sub_layout = QVBoxLayout()
-        sub_layout.setSpacing(12)
-
-        sub_status_layout = QHBoxLayout()
-        sub_status_layout.setSpacing(8)
-
-        self.sub_status_icon = QLabel()
-        self.sub_status_icon.setPixmap(qta.icon('fa5s.user', color=tokens.fg_faint).pixmap(18, 18))
-        self.sub_status_icon.setFixedSize(22, 22)
-        sub_status_layout.addWidget(self.sub_status_icon)
-
-        self.sub_status_label = StrongBodyLabel(
-            tr_catalog("page.about.subscription.free", language=self._ui_language, default="Free версия")
-        )
-        sub_status_layout.addWidget(self.sub_status_label, 1)
-        sub_layout.addLayout(sub_status_layout)
-
-        self.sub_desc_label = CaptionLabel(
-            tr_catalog(
-                "page.about.subscription.desc",
-                language=self._ui_language,
-                default="Подписка Zapret Premium открывает доступ к дополнительным темам, приоритетной поддержке и VPN-сервису.",
-            )
-        )
-        self.sub_desc_label.setWordWrap(True)
-        sub_layout.addWidget(self.sub_desc_label)
-
-        sub_btns = QHBoxLayout()
-        sub_btns.setSpacing(8)
-        self.premium_btn = PrimaryPushButton()
-        self.premium_btn.setText(
-            tr_catalog("page.about.button.premium_vpn", language=self._ui_language, default="Premium и VPN")
-        )
-        self.premium_btn.setIcon(qta.icon("fa5s.star", color="#ffc107"))
-        self.premium_btn.setFixedHeight(36)
-        self.premium_btn.clicked.connect(self.open_premium_requested.emit)
-        sub_btns.addWidget(self.premium_btn)
-        sub_btns.addStretch()
-        sub_layout.addLayout(sub_btns)
-
-        sub_card.add_layout(sub_layout)
-        layout.addWidget(sub_card)
-
-        layout.addStretch()
+        self.about_section_version_label = widgets.about_section_version_label
+        self.about_app_name_label = widgets.about_app_name_label
+        self.about_version_value_label = widgets.about_version_value_label
+        self.update_btn = widgets.update_btn
+        self.about_section_device_label = widgets.about_section_device_label
+        self.device_title_label = widgets.device_title_label
+        self.client_id_label = widgets.client_id_label
+        self.copy_btn = widgets.copy_btn
+        self.about_section_subscription_label = widgets.about_section_subscription_label
+        self.sub_status_icon = widgets.sub_status_icon
+        self.sub_status_label = widgets.sub_status_label
+        self.sub_desc_label = widgets.sub_desc_label
+        self.premium_btn = widgets.premium_btn
 
     def _copy_client_id(self) -> None:
         cid = self.client_id_label.text().strip() if hasattr(self, "client_id_label") else ""
@@ -482,7 +331,7 @@ class AboutPage(BasePage):
             free_icon_color=tokens.fg_faint,
             premium_icon_color="#ffc107",
         )
-        self.sub_status_icon.setPixmap(qta.icon(plan.icon_name, color=plan.icon_color).pixmap(18, 18))
+        self.sub_status_icon.setPixmap(get_cached_qta_pixmap(plan.icon_name, color=plan.icon_color, size=18))
         self.sub_status_label.setText(plan.label_text)
 
     def _current_subscription_state(self) -> tuple[bool, int | None]:
@@ -505,74 +354,18 @@ class AboutPage(BasePage):
         self._support_telegram_card = None
         self._support_discord_card = None
         tokens = get_theme_tokens()
-
-        discussions_group = SettingCardGroup(
-            tr_catalog(
-                "page.about.support.section.discussions",
-                language=self._ui_language,
-                default="GitHub Discussions",
-            ),
-            self.content,
+        widgets = build_about_page_support_content(
+            layout,
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            content_parent=self.content,
+            tokens=tokens,
+            on_open_discussions=self._open_support_discussions,
+            on_open_telegram=self._open_telegram_support,
+            on_open_discord=self._open_discord,
         )
-        self._support_discussions_card = PrimaryPushSettingCard(
-            tr_catalog("page.about.support.discussions.button", language=self._ui_language, default="Открыть"),
-            qta.icon("fa5b.github", color=tokens.accent_hex),
-            tr_catalog(
-                "page.about.support.discussions.title",
-                language=self._ui_language,
-                default="GitHub Discussions",
-            ),
-            tr_catalog(
-                "page.about.support.discussions.desc",
-                language=self._ui_language,
-                default="Основной канал поддержки. Здесь можно задать вопрос, описать проблему и приложить материалы вручную.",
-            ),
-        )
-        self._support_discussions_card.clicked.connect(self._open_support_discussions)
-        discussions_group.addSettingCard(self._support_discussions_card)
-        layout.addWidget(discussions_group)
-
-        layout.addSpacing(16)
-
-        community_group = SettingCardGroup(
-            tr_catalog(
-                "page.about.support.section.community",
-                language=self._ui_language,
-                default="Каналы сообщества",
-            ),
-            self.content,
-        )
-        self._support_telegram_card = PushSettingCard(
-            tr_catalog("page.about.support.button.open", language=self._ui_language, default="Открыть"),
-            qta.icon("fa5b.telegram", color="#229ED9"),
-            tr_catalog("page.about.support.telegram.title", language=self._ui_language, default="Telegram"),
-            tr_catalog(
-                "page.about.support.telegram.desc",
-                language=self._ui_language,
-                default="Быстрые вопросы и общение с сообществом",
-            ),
-        )
-        self._support_telegram_card.clicked.connect(self._open_telegram_support)
-
-        self._support_discord_card = PushSettingCard(
-            tr_catalog("page.about.support.button.open", language=self._ui_language, default="Открыть"),
-            qta.icon("fa5b.discord", color="#5865F2"),
-            tr_catalog("page.about.support.discord.title", language=self._ui_language, default="Discord"),
-            tr_catalog(
-                "page.about.support.discord.desc",
-                language=self._ui_language,
-                default="Обсуждение и живое общение",
-            ),
-        )
-        self._support_discord_card.clicked.connect(self._open_discord)
-
-        community_group.addSettingCards([
-            self._support_telegram_card,
-            self._support_discord_card,
-        ])
-        layout.addWidget(community_group)
-
-        layout.addStretch()
+        self._support_discussions_card = widgets.discussions_card
+        self._support_telegram_card = widgets.telegram_card
+        self._support_discord_card = widgets.discord_card
 
     def _open_support_discussions(self) -> None:
         result = AboutPageController.open_support_discussions()
@@ -597,108 +390,20 @@ class AboutPage(BasePage):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _build_help_content(self, layout: QVBoxLayout):
-        self._add_motto_block(layout)
-        layout.addSpacing(6)
-        layout.addWidget(_make_section_label(tr_catalog("page.about.help.section.links", language=self._ui_language, default="Ссылки")))
-
-        try:
-            from config.urls import INFO_URL, ANDROID_URL
-        except Exception:
-            INFO_URL = ""
-            ANDROID_URL = ""
-
-        # ── Документация ──────────────────────────────────────────────────
-        docs_group = SettingCardGroup(
-            tr_catalog("page.about.help.group.docs", language=self._ui_language, default="Документация"),
-            self.content,
+        build_about_page_help_content(
+            layout,
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            tokens=get_theme_tokens(),
+            content_parent=self.content,
+            make_section_label=lambda text: _make_section_label(text),
+            hyperlink_card_cls=HyperlinkCard,
+            push_setting_card_cls=PushSettingCard,
+            setting_card_group_cls=SettingCardGroup,
+            fluent_icon=FluentIcon,
+            on_open_forum=self._open_forum_for_beginners,
+            on_open_help_folder=self._open_help_folder,
+            on_open_telegram_news=self._open_telegram_news,
         )
-
-        forum_card = PushSettingCard(
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.SEND,
-            tr_catalog("page.about.help.docs.forum.title", language=self._ui_language, default="Сайт-форум для новичков"),
-            tr_catalog("page.about.help.docs.forum.desc", language=self._ui_language, default="Авторизация через Telegram-бота"),
-        )
-        forum_card.clicked.connect(self._open_forum_for_beginners)
-
-        info_card = HyperlinkCard(
-            INFO_URL,
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.INFO,
-            tr_catalog("page.about.help.docs.info.title", language=self._ui_language, default="Что это такое?"),
-            tr_catalog("page.about.help.docs.info.desc", language=self._ui_language, default="Руководство и ответы на вопросы"),
-        )
-
-        folder_card = PushSettingCard(
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.FOLDER,
-            tr_catalog("page.about.help.docs.folder.title", language=self._ui_language, default="Папка с инструкциями"),
-            tr_catalog("page.about.help.docs.folder.desc", language=self._ui_language, default="Открыть локальную папку help"),
-        )
-        folder_card.clicked.connect(self._open_help_folder)
-
-        android_card = HyperlinkCard(
-            ANDROID_URL,
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.PHONE,
-            tr_catalog("page.about.help.docs.android.title", language=self._ui_language, default="На Android (Magisk Zapret, ByeByeDPI и др.)"),
-            tr_catalog("page.about.help.docs.android.desc", language=self._ui_language, default="Открыть инструкцию на сайте"),
-        )
-
-        github_card = HyperlinkCard(
-            "https://github.com/youtubediscord/zapret",
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.GITHUB,
-            "GitHub",
-            tr_catalog("page.about.help.docs.github.desc", language=self._ui_language, default="Исходный код и документация"),
-        )
-
-        docs_group.addSettingCards([forum_card, info_card, folder_card, android_card, github_card])
-        layout.addWidget(docs_group)
-        layout.addSpacing(8)
-
-        # ── Новости ───────────────────────────────────────────────────────
-        news_group = SettingCardGroup(
-            tr_catalog("page.about.help.group.news", language=self._ui_language, default="Новости"),
-            self.content,
-        )
-
-        telegram_card = PushSettingCard(
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.MEGAPHONE,
-            tr_catalog("page.about.help.news.telegram.title", language=self._ui_language, default="Telegram канал"),
-            tr_catalog("page.about.help.news.telegram.desc", language=self._ui_language, default="Новости и обновления"),
-        )
-        telegram_card.clicked.connect(self._open_telegram_news)
-
-        youtube_card = HyperlinkCard(
-            "https://www.youtube.com/@приватность",
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.PLAY,
-            tr_catalog("page.about.help.news.youtube.title", language=self._ui_language, default="YouTube канал"),
-            tr_catalog("page.about.help.news.youtube.desc", language=self._ui_language, default="Видео и обновления"),
-        )
-
-        mastodon_card = HyperlinkCard(
-            "https://mastodon.social/@zapret",
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.GLOBE,
-            tr_catalog("page.about.help.news.mastodon.title", language=self._ui_language, default="Mastodon профиль"),
-            tr_catalog("page.about.help.news.mastodon.desc", language=self._ui_language, default="Новости в Fediverse"),
-        )
-
-        bastyon_card = HyperlinkCard(
-            "https://bastyon.com/zapretgui",
-            tr_catalog("page.about.help.button.open", language=self._ui_language, default="Открыть"),
-            FluentIcon.GLOBE,
-            tr_catalog("page.about.help.news.bastyon.title", language=self._ui_language, default="Bastyon профиль"),
-            tr_catalog("page.about.help.news.bastyon.desc", language=self._ui_language, default="Новости в Bastyon"),
-        )
-
-        news_group.addSettingCards([telegram_card, youtube_card, mastodon_card, bastyon_card])
-        layout.addWidget(news_group)
-
-        layout.addStretch()
 
     def _add_motto_block(self, layout: QVBoxLayout):
         tokens = get_theme_tokens()
@@ -799,103 +504,15 @@ class AboutPage(BasePage):
         self._build_kvn_content(self._kvn_layout)
 
     def _build_kvn_content(self, layout: QVBoxLayout):
-        tokens = get_theme_tokens()
-
-        # ── Hero-баннер ────────────────────────────────────────────────────
-        hero_wrap = QFrame()
-        hero_wrap.setStyleSheet("QFrame { background: transparent; border: none; }")
-
-        hero_layout = QVBoxLayout(hero_wrap)
-        hero_layout.setContentsMargins(0, 8, 0, 0)
-        hero_layout.setSpacing(4)
-
-        hero_icon = QLabel()
-        hero_icon.setPixmap(qta.icon("fa5s.globe-americas", color=tokens.accent_hex).pixmap(48, 48))
-        hero_icon.setFixedSize(56, 56)
-        hero_layout.addWidget(hero_icon)
-
-        hero_title = SubtitleLabel("Zapret KVN")
-        hero_title.setProperty("tone", "primary")
-        hero_layout.addWidget(hero_title)
-
-        subtitle = QLabel("Уникальный туннель до любой страны мира")
-        subtitle.setWordWrap(True)
-        subtitle.setStyleSheet(
-            f"QLabel {{ color: {tokens.fg}; font-size: 15px; font-weight: 600; "
-            f"font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif; }}"
+        build_about_page_kvn_content(
+            layout,
+            tokens=get_theme_tokens(),
+            content_parent=self.content,
+            on_open_kvn_channel=self._open_kvn_channel,
+            on_open_kvn_bot=self._open_kvn_bot,
+            on_open_kvn_bypass=self._open_kvn_bypass,
+            on_open_kvn_github=self._open_kvn_github,
         )
-        hero_layout.addWidget(subtitle)
-
-        desc = QLabel("Создан передовыми мировыми инженерами (не является тем чем вы думаете)")
-        desc.setWordWrap(True)
-        desc.setStyleSheet(
-            f"QLabel {{ color: {tokens.fg_muted}; font-size: 12px; font-style: italic; "
-            f"font-family: 'Palatino Linotype', 'Book Antiqua', 'Georgia', serif; "
-            f"padding-top: 2px; }}"
-        )
-        hero_layout.addWidget(desc)
-
-        layout.addWidget(hero_wrap)
-        layout.addSpacing(8)
-
-        # ── Возможности ────────────────────────────────────────────────────
-        features_group = SettingCardGroup("Возможности", self.content)
-
-        yt_card = SettingCard(
-            qta.icon("fa5s.rocket", color=tokens.accent_hex),
-            "Ускорение YouTube и Discord",
-            "Позволяет ускорить замедленные сервера в случае если те перестали работать и начали деградировать",
-            self.content,
-        )
-        game_card = SettingCard(
-            qta.icon("fa5s.gamepad", color="#4CAF50"),
-            "Игровые серверы",
-            "Также подходит для ускорения игровых серверов",
-            self.content,
-        )
-        features_group.addSettingCards([yt_card, game_card])
-        layout.addWidget(features_group)
-        layout.addSpacing(16)
-
-        # ── Ссылки ─────────────────────────────────────────────────────────
-        links_group = SettingCardGroup("Ссылки", self.content)
-
-        tg_card = PushSettingCard(
-            "Открыть",
-            qta.icon("fa5b.telegram", color="#229ED9"),
-            "Канал Zapret KVN",
-            "Новости и обновления",
-        )
-        tg_card.clicked.connect(self._open_kvn_channel)
-
-        bot_card = PrimaryPushSettingCard(
-            "Купить",
-            qta.icon("fa5s.shopping-cart", color="#f59e0b"),
-            "Купить подписку",
-            "Оформление через Telegram-бота @zapretvpns_bot",
-        )
-        bot_card.clicked.connect(self._open_kvn_bot)
-
-        bypass_card = PushSettingCard(
-            "Открыть",
-            qta.icon("fa5b.telegram", color="#229ED9"),
-            "Канал BypassBlock",
-            "Второй канал с новостями",
-        )
-        bypass_card.clicked.connect(self._open_kvn_bypass)
-
-        gh_card = PushSettingCard(
-            "Открыть",
-            qta.icon("fa5b.github", color=tokens.accent_hex),
-            "Исходный код",
-            "GitHub репозиторий Zapret KVN",
-        )
-        gh_card.clicked.connect(self._open_kvn_github)
-
-        links_group.addSettingCards([tg_card, bot_card, bypass_card, gh_card])
-        layout.addWidget(links_group)
-
-        layout.addStretch()
 
     def _open_kvn_channel(self):
         result = AboutPageController.open_telegram("vpndiscordyooutube")
@@ -931,28 +548,28 @@ class AboutPage(BasePage):
         if self._support_discussions_card is not None:
             try:
                 self._support_discussions_card.iconLabel.setIcon(
-                    qta.icon("fa5b.github", color=tokens.accent_hex)
+                    get_themed_qta_icon("fa5b.github", color=tokens.accent_hex)
                 )
             except Exception:
                 pass
         if self._support_telegram_card is not None:
             try:
                 self._support_telegram_card.iconLabel.setIcon(
-                    qta.icon("fa5b.telegram", color="#229ED9")
+                    get_themed_qta_icon("fa5b.telegram", color="#229ED9")
                 )
             except Exception:
                 pass
         if self._support_discord_card is not None:
             try:
                 self._support_discord_card.iconLabel.setIcon(
-                    qta.icon("fa5b.discord", color="#5865F2")
+                    get_themed_qta_icon("fa5b.discord", color="#5865F2")
                 )
             except Exception:
                 pass
         if self._support_icon_label is not None:
             try:
                 self._support_icon_label.setPixmap(
-                    qta.icon("fa5b.github", color=tokens.accent_hex).pixmap(36, 36)
+                    get_cached_qta_pixmap("fa5b.github", color=tokens.accent_hex, size=36)
                 )
             except Exception:
                 pass

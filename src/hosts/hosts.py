@@ -7,9 +7,7 @@ from .proxy_domains import (
     get_all_services,
     get_dns_profiles,
     get_service_domain_ip_rows,
-    get_service_domain_ip_map,
     get_service_domain_names,
-    get_service_domains,
 )
 from .adobe_domains import ADOBE_DOMAINS
 from log import log
@@ -48,6 +46,95 @@ def _extract_tracker_from_bootstrap_signature(signature: str | None) -> tuple[st
     if not domain or not ip:
         return None, None
     return domain, ip
+
+
+def _parse_hosts_mapping_line(line: str) -> tuple[str, list[str], str] | None:
+    mapping_part, sep, comment_part = str(line or "").partition("#")
+    mapping_stripped = mapping_part.strip()
+    if not mapping_stripped:
+        return None
+
+    parts = mapping_stripped.split()
+    if len(parts) < 2:
+        return None
+
+    ip = parts[0]
+    domains = parts[1:]
+    comment = comment_part.strip() if sep else ""
+    return ip, domains, comment
+
+
+def _rewrite_hosts_bootstrap_line(
+    *,
+    line: str,
+    remove_github: bool,
+    previous_tracker_domain: str | None,
+) -> tuple[str | None, bool, bool, bool, bool]:
+    parsed = _parse_hosts_mapping_line(line)
+    if parsed is None:
+        return line, False, False, False, False
+
+    ip, domains, comment = parsed
+    domains_lower = [domain.lower() for domain in domains]
+    updated_domains = domains
+    removed_github = False
+    tracker_has_correct_ip = False
+    tracker_ip_corrected = False
+    previous_tracker_removed = False
+    line_changed = False
+
+    if remove_github and _GITHUB_API_DOMAIN in domains_lower:
+        removed_github = True
+        updated_domains = [domain for domain in updated_domains if domain.lower() != _GITHUB_API_DOMAIN]
+        line_changed = True
+
+    if previous_tracker_domain and previous_tracker_domain in domains_lower:
+        updated_domains = [domain for domain in updated_domains if domain.lower() != previous_tracker_domain]
+        previous_tracker_removed = True
+        line_changed = True
+        log(f"Удаляем устаревший трекер-домен: {ip} {' '.join(domains)}")
+
+    if _ZAPRET_TRACKER_DOMAIN in domains_lower:
+        if ip == _ZAPRET_TRACKER_IP:
+            tracker_has_correct_ip = True
+        else:
+            tracker_ip_corrected = True
+            updated_domains = [domain for domain in updated_domains if domain.lower() != _ZAPRET_TRACKER_DOMAIN]
+            line_changed = True
+            log(f"Удаляем запись {_ZAPRET_TRACKER_DOMAIN} с некорректным IP: {ip} {' '.join(domains)}")
+
+    if not line_changed:
+        return line, removed_github, tracker_has_correct_ip, tracker_ip_corrected, previous_tracker_removed
+
+    if not updated_domains:
+        log(f"Удаляем из hosts: {ip} {' '.join(domains)}")
+        return None, removed_github, tracker_has_correct_ip, tracker_ip_corrected, previous_tracker_removed
+
+    rebuilt_line = f"{ip} {' '.join(updated_domains)}"
+    if comment:
+        rebuilt_line += f" # {comment}"
+
+    if remove_github and removed_github:
+        log(f"Обновляем строку hosts без api.github.com: {ip} {' '.join(domains)}")
+
+    return rebuilt_line + "\n", removed_github, tracker_has_correct_ip, tracker_ip_corrected, previous_tracker_removed
+
+
+def _append_tracker_row_if_needed(new_lines: list[str], *, tracker_has_correct_ip: bool) -> bool:
+    if tracker_has_correct_ip:
+        return False
+
+    while new_lines and new_lines[-1].strip() == "":
+        new_lines.pop()
+
+    if new_lines and not new_lines[-1].endswith("\n"):
+        new_lines[-1] += "\n"
+    if new_lines:
+        new_lines.append("\n")
+
+    new_lines.append(f"{_ZAPRET_TRACKER_IP} {_ZAPRET_TRACKER_DOMAIN}\n")
+    log(f"Добавляем в hosts: {_ZAPRET_TRACKER_IP} {_ZAPRET_TRACKER_DOMAIN}")
+    return True
 
 
 # ───────────────────────── hosts file read cache ─────────────────────────
@@ -363,7 +450,7 @@ class HostsManager:
         self.status_callback = status_callback
         self._last_status: str | None = None
         # При инициализации выполняем единоразовый bootstrap hosts.
-        self.check_and_remove_github_api()
+        self.apply_hosts_bootstrap_if_needed()
 
     def restore_permissions(self):
         """Восстанавливает права доступа к файлу hosts"""
@@ -371,103 +458,13 @@ class HostsManager:
         self.set_status(message)
         return success
 
-    # 🆕 НОВЫЕ МЕТОДЫ ДЛЯ РАБОТЫ С api.github.com
-    def check_github_api_in_hosts(self):
-        """Проверяет, есть ли запись api.github.com в hosts файле"""
-        try:
-            content = safe_read_hosts_file()
-            if content is None:
-                return False
-                
-            lines = content.splitlines()
-            
-            for line in lines:
-                line = line.strip()
-                # Пропускаем пустые строки и комментарии
-                if not line or line.startswith('#'):
-                    continue
-                    
-                # Разбиваем строку на части (IP домен)
-                parts = line.split()
-                if len(parts) >= 2:
-                    domain = parts[1]  # Второй элемент - это домен
-                    if domain.lower() == "api.github.com":
-                        return True
-                        
-            return False
-        except Exception as e:
-            log(f"Ошибка при проверке api.github.com в hosts: {e}")
-            return False
-
-    def remove_github_api_from_hosts(self):
-        """Принудительно удаляет запись api.github.com из hosts файла"""
-        try:
-            content = safe_read_hosts_file()
-            if content is None:
-                log("Не удалось прочитать файл hosts для удаления api.github.com")
-                return False
-                
-            lines = content.splitlines(keepends=True)
-            new_lines = []
-            removed_lines = []
-            
-            for line in lines:
-                line_stripped = line.strip()
-                # Пропускаем пустые строки и комментарии
-                if not line_stripped or line_stripped.startswith('#'):
-                    new_lines.append(line)
-                    continue
-                    
-                # Разбиваем строку на части (IP домен)
-                parts = line_stripped.split()
-                if len(parts) >= 2:
-                    domain = parts[1]  # Второй элемент - это домен
-                    if domain.lower() == "api.github.com":
-                        # Нашли запись api.github.com - не добавляем её в новый файл
-                        removed_lines.append(line_stripped)
-                        log(f"Удаляем из hosts: {line_stripped}")
-                        continue
-                
-                # Добавляем все остальные строки
-                new_lines.append(line)
-            
-            if removed_lines:
-                # Убираем лишние пустые строки в конце файла
-                while new_lines and new_lines[-1].strip() == "":
-                    new_lines.pop()
-                
-                # Оставляем одну пустую строку в конце, если файл не пустой
-                if new_lines and not new_lines[-1].endswith('\n'):
-                    new_lines[-1] += '\n'
-                elif new_lines:
-                    new_lines.append('\n')
-
-                if not safe_write_hosts_file("".join(new_lines)):
-                    log("Не удалось записать файл hosts после удаления api.github.com")
-                    return False
-                
-                log(f"✅ Удалена запись api.github.com из hosts файла: {removed_lines}")
-                self.set_status("Запись api.github.com удалена из hosts файла")
-                return True
-            else:
-                log("Запись api.github.com не найдена в hosts файле")
-                return True  # Не ошибка, просто нет записи
-                
-        except PermissionError:
-            log("Нет прав для удаления api.github.com из hosts файла")
-            return False
-        except Exception as e:
-            log(f"Ошибка при удалении api.github.com из hosts: {e}")
-            return False
-
-    def check_and_remove_github_api(self):
+    def apply_hosts_bootstrap_if_needed(self):
         """Единоразово применяет bootstrap hosts для текущей сигнатуры."""
         try:
             from config import get_remove_github_api
             from config.reg import (
                 get_hosts_bootstrap_signature,
                 set_hosts_bootstrap_signature,
-                set_hosts_bootstrap_v1_done,
             )
 
             expected_signature = _get_hosts_bootstrap_signature()
@@ -509,73 +506,30 @@ class HostsManager:
                 if not line_stripped:
                     new_lines.append(line)
                     continue
+                (
+                    rewritten_line,
+                    line_removed_github,
+                    line_tracker_has_correct_ip,
+                    line_tracker_ip_corrected,
+                    line_previous_tracker_removed,
+                ) = _rewrite_hosts_bootstrap_line(
+                    line=line,
+                    remove_github=remove_github,
+                    previous_tracker_domain=previous_tracker_domain,
+                )
 
-                mapping_part, sep, comment_part = line.partition('#')
-                mapping_stripped = mapping_part.strip()
-                if not mapping_stripped:
-                    new_lines.append(line)
-                    continue
+                removed_github = removed_github or line_removed_github
+                tracker_has_correct_ip = tracker_has_correct_ip or line_tracker_has_correct_ip
+                tracker_ip_corrected = tracker_ip_corrected or line_tracker_ip_corrected
+                previous_tracker_removed = previous_tracker_removed or line_previous_tracker_removed
 
-                parts = mapping_stripped.split()
-                if len(parts) < 2:
-                    new_lines.append(line)
-                    continue
+                if rewritten_line is not None:
+                    new_lines.append(rewritten_line)
 
-                ip = parts[0]
-                domains = parts[1:]
-                domains_lower = [domain.lower() for domain in domains]
-                updated_domains = domains
-                line_changed = False
-
-                if remove_github and _GITHUB_API_DOMAIN in domains_lower:
-                    removed_github = True
-                    updated_domains = [domain for domain in updated_domains if domain.lower() != _GITHUB_API_DOMAIN]
-                    line_changed = True
-
-                if previous_tracker_domain and previous_tracker_domain in domains_lower:
-                    updated_domains = [domain for domain in updated_domains if domain.lower() != previous_tracker_domain]
-                    previous_tracker_removed = True
-                    line_changed = True
-                    log(f"Удаляем устаревший трекер-домен: {mapping_stripped}")
-
-                if _ZAPRET_TRACKER_DOMAIN in domains_lower:
-                    if ip == _ZAPRET_TRACKER_IP:
-                        tracker_has_correct_ip = True
-                    else:
-                        tracker_ip_corrected = True
-                        updated_domains = [domain for domain in updated_domains if domain.lower() != _ZAPRET_TRACKER_DOMAIN]
-                        line_changed = True
-                        log(f"Удаляем запись {_ZAPRET_TRACKER_DOMAIN} с некорректным IP: {mapping_stripped}")
-
-                if line_changed:
-                    if not updated_domains:
-                        log(f"Удаляем из hosts: {mapping_stripped}")
-                        continue
-
-                    rebuilt_line = f"{ip} {' '.join(updated_domains)}"
-                    comment = comment_part.strip() if sep else ""
-                    if comment:
-                        rebuilt_line += f" # {comment}"
-                    new_lines.append(rebuilt_line + "\n")
-                    if remove_github and _GITHUB_API_DOMAIN in domains_lower:
-                        log(f"Обновляем строку hosts без api.github.com: {mapping_stripped}")
-                    continue
-
-                new_lines.append(line)
-
-            tracker_added = False
-            if not tracker_has_correct_ip:
-                while new_lines and new_lines[-1].strip() == "":
-                    new_lines.pop()
-
-                if new_lines and not new_lines[-1].endswith('\n'):
-                    new_lines[-1] += '\n'
-                if new_lines:
-                    new_lines.append('\n')
-
-                new_lines.append(f"{_ZAPRET_TRACKER_IP} {_ZAPRET_TRACKER_DOMAIN}\n")
-                tracker_added = True
-                log(f"Добавляем в hosts: {_ZAPRET_TRACKER_IP} {_ZAPRET_TRACKER_DOMAIN}")
+            tracker_added = _append_tracker_row_if_needed(
+                new_lines,
+                tracker_has_correct_ip=tracker_has_correct_ip,
+            )
 
             changed = removed_github or tracker_ip_corrected or previous_tracker_removed or tracker_added
             if changed and not safe_write_hosts_file("".join(new_lines)):
@@ -585,9 +539,6 @@ class HostsManager:
             if not set_hosts_bootstrap_signature(expected_signature):
                 log("Не удалось сохранить сигнатуру bootstrap hosts", "⚠ WARNING")
                 return
-
-            if not set_hosts_bootstrap_v1_done(True):
-                log("Не удалось сохранить legacy-флаг bootstrap hosts", "DEBUG")
 
             if remove_github:
                 if removed_github:
@@ -640,10 +591,6 @@ class HostsManager:
             log(f"Ошибка при чтении hosts: {e}", "ERROR")
         return current_active
 
-    def get_active_domains(self) -> set:
-        """Back-compat: возвращает множество активных доменов (без проверки IP)."""
-        return set(self.get_active_domains_map().keys())
-
     def set_status(self, message: str):
         self._last_status = message
         if self.status_callback:
@@ -658,30 +605,9 @@ class HostsManager:
     # ------------------------- проверки -------------------------
 
     def is_proxy_domains_active(self) -> bool:
-        """Проверяет, есть ли активные (НЕ закомментированные) записи управляемых доменов в hosts"""
+        """Проверяет, есть ли активные управляемые записи в hosts."""
         try:
-            content = safe_read_hosts_file()
-            if content is None:
-                return False
-                
-            lines = content.splitlines()
-            domains = _get_all_managed_domains()
-            
-            for line in lines:
-                line = line.strip()
-                # Пропускаем пустые строки и комментарии
-                if not line or line.startswith('#'):
-                    continue
-                    
-                # Разбиваем строку на части (IP домен)
-                parts = line.split()
-                if len(parts) >= 2:
-                    domain = parts[1]  # Второй элемент - это домен
-                    if domain in domains:
-                        # Найден активный (не закомментированный) домен
-                        return True
-                        
-            return False
+            return bool(self.get_active_domains_map())
         except Exception as e:
             log(f"Ошибка при проверке hosts: {e}")
             return False

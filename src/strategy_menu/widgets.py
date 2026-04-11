@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QVBoxLayout, QLabel,
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor, QBrush
 
+from core.services import get_strategy_marks_store
 from launcher_common.constants import LABEL_TEXTS, LABEL_COLORS
 from ui.theme import get_theme_tokens
 from ui.theme_refresh import ThemeRefreshController
@@ -101,6 +102,7 @@ class CompactStrategyItem(QFrame):
         self.strategy_data = strategy_data
         self.is_selected = False
         self._current_style = None  # Кэш текущего стиля
+        self._marks_store = get_strategy_marks_store()
 
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
@@ -113,9 +115,8 @@ class CompactStrategyItem(QFrame):
 
     def _get_rating_style(self):
         """Возвращает стиль на основе рейтинга стратегии"""
-        from .marks_store_bridge import get_strategy_rating
         # У компактного элемента нет target_key, поэтому ищем оценку по strategy_id во всех категориях.
-        rating = get_strategy_rating(self.strategy_id, target_key=None)
+        rating = self._marks_store.get_rating(self.strategy_id, target_key=None)
         if rating == 'working':
             return _STYLE_RATING_WORKING
         elif rating == 'broken':

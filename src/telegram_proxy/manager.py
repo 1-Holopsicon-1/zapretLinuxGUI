@@ -118,11 +118,17 @@ class TelegramProxyManager(QThread):
         except Exception:
             pass
         try:
+            if self._stats_timer is not None:
+                self._stats_timer.deleteLater()
+        except Exception:
+            pass
+        try:
             if self._controller:
                 self._controller.stop()
         except Exception:
             pass
         self._controller = None
+        self._stats_timer = None
 
     def _on_log(self, msg: str) -> None:
         # Write to file logger + ring buffer (thread-safe)

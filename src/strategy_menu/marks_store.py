@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Iterable, Optional, Set, Tuple
 
 from config import get_zapret_userdata_dir
-from log import log
 
 
 MarkKey = Tuple[str, str]  # (target_key, strategy_id)
@@ -27,8 +26,8 @@ def _get_marks_dir() -> Path:
     if not base:
         raise RuntimeError("APPDATA is required for strategy marks storage")
 
-    # Keep the existing direct_zapret2 marks location so current file-based data
-    # continues to work after the strategy_menu split.
+    # Сохраняем существующее расположение direct_zapret2, чтобы пользовательские
+    # файлы оценок и избранного продолжали читаться из прежнего места.
     return Path(base) / "direct_zapret2"
 
 
@@ -89,6 +88,23 @@ class DirectZapret2MarksStore:
             return False
         return None
 
+    def get_rating(self, strategy_id: str, target_key: str | None = None) -> str | None:
+        sid = str(strategy_id or "").strip()
+        if not sid:
+            return None
+        if target_key:
+            mark = self.get_mark(str(target_key).strip(), sid)
+            if mark is True:
+                return "working"
+            if mark is False:
+                return "broken"
+            return None
+
+        for _category, ratings in self.export_ratings().items():
+            if sid in ratings:
+                return ratings[sid]
+        return None
+
     def set_mark(self, target_key: str, strategy_id: str, is_working: Optional[bool]) -> None:
         self._ensure_loaded()
         key = (target_key, strategy_id)
@@ -99,6 +115,34 @@ class DirectZapret2MarksStore:
         elif is_working is False:
             self._notwork.add(key)
         self._save()
+
+    def set_rating(self, strategy_id: str, rating: str | None, target_key: str | None = None) -> bool:
+        normalized_target = str(target_key or "").strip()
+        if not normalized_target:
+            return False
+
+        normalized = str(rating or "").strip().lower()
+        mark: Optional[bool]
+        if not normalized:
+            mark = None
+        elif normalized == "working":
+            mark = True
+        elif normalized == "broken":
+            mark = False
+        else:
+            return False
+
+        self.set_mark(normalized_target, str(strategy_id or "").strip(), mark)
+        return True
+
+    def toggle_rating(self, strategy_id: str, rating: str, target_key: str | None = None) -> str | None:
+        current = self.get_rating(strategy_id, target_key)
+        if current == rating:
+            self.set_rating(strategy_id, None, target_key)
+            return None
+        if self.set_rating(strategy_id, rating, target_key):
+            return str(rating or "").strip().lower() or None
+        return current
 
     def export_ratings(self) -> dict[str, dict[str, str]]:
         self._ensure_loaded()
@@ -169,6 +213,13 @@ class DirectZapret2FavoritesStore:
         self._ensure_loaded()
         return (target_key, strategy_id) in (self._favorites or set())
 
+    def is_favorite_any(self, strategy_id: str) -> bool:
+        sid = str(strategy_id or "").strip()
+        if not sid:
+            return False
+        self._ensure_loaded()
+        return any(stored_sid == sid for _cat, stored_sid in (self._favorites or set()))
+
     def set_favorite(self, target_key: str, strategy_id: str, favorite: bool) -> None:
         self._ensure_loaded()
         key = ((target_key or "").strip(), (strategy_id or "").strip())
@@ -179,6 +230,11 @@ class DirectZapret2FavoritesStore:
         else:
             self._favorites.discard(key)
         self._save()
+
+    def toggle_favorite(self, target_key: str, strategy_id: str) -> bool:
+        favorite = not self.is_favorite(target_key, strategy_id)
+        self.set_favorite(target_key, strategy_id, favorite)
+        return favorite
 
     def export_favorites(self) -> dict[str, list[str]]:
         self._ensure_loaded()
@@ -197,7 +253,7 @@ class DirectZapret2FavoritesStore:
                     self._favorites.add((cat, sid.strip()))
         self._save()
 
-    def clear_category(self, target_key: str) -> None:
+    def clear_target(self, target_key: str) -> None:
         self._ensure_loaded()
         cat = str(target_key or "").strip()
         if not cat:
@@ -217,168 +273,3 @@ class DirectZapret2FavoritesStore:
         base = self.favorites_path.parent
         base.mkdir(parents=True, exist_ok=True)
         self.favorites_path.write_text(_format_marks_lines(self._favorites or set()), encoding="utf-8")
-
-
-_MARKS_STORE: Optional[DirectZapret2MarksStore] = None
-_FAVORITES_STORE: Optional[DirectZapret2FavoritesStore] = None
-
-
-def _marks_store() -> DirectZapret2MarksStore:
-    global _MARKS_STORE
-    if _MARKS_STORE is None:
-        _MARKS_STORE = DirectZapret2MarksStore.default()
-    return _MARKS_STORE
-
-
-def _favorites_store() -> DirectZapret2FavoritesStore:
-    global _FAVORITES_STORE
-    if _FAVORITES_STORE is None:
-        _FAVORITES_STORE = DirectZapret2FavoritesStore.default()
-    return _FAVORITES_STORE
-
-
-def get_favorites_for_target(target_key):
-    """Получает избранные стратегии для target."""
-    return _favorites_store().get_favorites(target_key)
-
-
-def invalidate_favorites_cache():
-    global _FAVORITES_STORE
-    _FAVORITES_STORE = None
-
-
-def get_favorite_strategies(target=None):
-    """Получает избранные стратегии."""
-    favorites = _favorites_store().export_favorites()
-    if target:
-        return favorites.get(target, [])
-    return favorites
-
-
-def add_favorite_strategy(strategy_id, target):
-    try:
-        before = _favorites_store().is_favorite(target, strategy_id)
-        _favorites_store().set_favorite(target, strategy_id, True)
-        if not before:
-            log(f"Стратегия {strategy_id} добавлена в избранные ({target})", "DEBUG")
-        return not before
-    except Exception as e:
-        log(f"Ошибка добавления в избранные: {e}", "ERROR")
-        return False
-
-
-def remove_favorite_strategy(strategy_id, target):
-    try:
-        before = _favorites_store().is_favorite(target, strategy_id)
-        _favorites_store().set_favorite(target, strategy_id, False)
-        if before:
-            log(f"Стратегия {strategy_id} удалена из избранных ({target})", "DEBUG")
-        return before
-    except Exception as e:
-        log(f"Ошибка удаления из избранных: {e}", "ERROR")
-        return False
-
-
-def is_favorite_strategy(strategy_id, target=None):
-    sid = str(strategy_id or "").strip()
-    if not sid:
-        return False
-    if target:
-        return _favorites_store().is_favorite(target, sid)
-    return sid in _favorites_store().all_strategy_ids()
-
-
-def toggle_favorite_strategy(strategy_id, target):
-    if is_favorite_strategy(strategy_id, target):
-        remove_favorite_strategy(strategy_id, target)
-        return False
-    add_favorite_strategy(strategy_id, target)
-    return True
-
-
-def clear_favorite_strategies(target=None):
-    try:
-        if target:
-            _favorites_store().clear_target(target)
-        else:
-            _favorites_store().clear_all()
-        return True
-    except Exception as e:
-        log(f"Ошибка очистки избранных: {e}", "ERROR")
-        return False
-
-
-def get_all_favorite_strategies_flat():
-    return _favorites_store().all_strategy_ids()
-
-
-def invalidate_ratings_cache():
-    global _MARKS_STORE
-    _MARKS_STORE = None
-
-
-def get_all_strategy_ratings() -> dict:
-    return _marks_store().export_ratings()
-
-
-def get_strategy_rating(strategy_id: str, target_key: str = None) -> str:
-    sid = str(strategy_id or "").strip()
-    if not sid:
-        return None
-    store = _marks_store()
-    if target_key:
-        mark = store.get_mark(target_key, sid)
-        if mark is True:
-            return "working"
-        if mark is False:
-            return "broken"
-        return None
-
-    for category, ratings in store.export_ratings().items():
-        if sid in ratings:
-            return ratings[sid]
-    return None
-
-
-def set_strategy_rating(strategy_id: str, rating: str, target_key: str = None) -> bool:
-    if not target_key:
-        log("⚠️ set_strategy_rating вызван без target_key", "WARNING")
-        return False
-    try:
-        normalized = str(rating or "").strip().lower()
-        mark: Optional[bool]
-        if not normalized:
-            mark = None
-        elif normalized == "working":
-            mark = True
-        elif normalized == "broken":
-            mark = False
-        else:
-            log(f"⚠️ set_strategy_rating получил неизвестную оценку: {rating}", "WARNING")
-            return False
-        _marks_store().set_mark(target_key, strategy_id, mark)
-        return True
-    except Exception as e:
-        log(f"Ошибка сохранения оценок стратегий: {e}", "❌ ERROR")
-        return False
-
-
-def toggle_strategy_rating(strategy_id: str, rating: str, target_key: str = None) -> str:
-    if not target_key:
-        log("⚠️ toggle_strategy_rating вызван без target_key", "WARNING")
-        return None
-    current = get_strategy_rating(strategy_id, target_key)
-    if current == rating:
-        set_strategy_rating(strategy_id, None, target_key)
-        return None
-    set_strategy_rating(strategy_id, rating, target_key)
-    return rating
-
-
-def clear_all_strategy_ratings() -> bool:
-    try:
-        _marks_store().clear_all()
-        return True
-    except Exception as e:
-        log(f"Ошибка очистки оценок стратегий: {e}", "❌ ERROR")
-        return False

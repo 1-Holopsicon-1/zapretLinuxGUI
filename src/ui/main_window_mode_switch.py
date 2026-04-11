@@ -66,9 +66,9 @@ def complete_main_window_method_switch(window, method: str) -> None:
     if method == "direct_zapret2":
         try:
             if direct_flow_coordinator is None:
-                from core.services import get_direct_flow_coordinator
+                from app_context import require_app_context
 
-                direct_flow_coordinator = get_direct_flow_coordinator()
+                direct_flow_coordinator = require_app_context().direct_flow_coordinator
             direct_flow_coordinator.get_startup_snapshot("direct_zapret2")
         except Exception:
             log("direct_zapret2: выбранный source-пресет не подготовлен", "ERROR")
@@ -81,9 +81,9 @@ def complete_main_window_method_switch(window, method: str) -> None:
     elif method == "direct_zapret1":
         try:
             if direct_flow_coordinator is None:
-                from core.services import get_direct_flow_coordinator
+                from app_context import require_app_context
 
-                direct_flow_coordinator = get_direct_flow_coordinator()
+                direct_flow_coordinator = require_app_context().direct_flow_coordinator
             direct_flow_coordinator.get_startup_snapshot("direct_zapret1")
         except Exception as e:
             log(f"direct_zapret1: ошибка инициализации пресета: {e}", "WARNING")

@@ -1,8 +1,5 @@
 """DNS integrity check — compare UDP DNS vs DoH to detect faking/stubs."""
 
-from __future__ import annotations
-
-import asyncio
 import logging
 import socket
 from collections import Counter
@@ -10,13 +7,12 @@ from typing import TYPE_CHECKING
 
 from blockcheck.config import (
     DNS_CHECK_DOMAINS,
-    DNS_RETRIES,
     DNS_TIMEOUT,
     DNS_UDP_SERVERS,
     DOH_SERVERS,
     DOH_TIMEOUT,
 )
-from blockcheck.models import DNSIntegrityResult, SingleTestResult, TestStatus, TestType
+from blockcheck.models import DNSIntegrityResult
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -146,6 +142,7 @@ def _resolve_doh(domain: str, doh_url: str, timeout: float = DOH_TIMEOUT) -> lis
 def check_dns_integrity(
     domains: list[str] | None = None,
     callback: Callable[[str], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
 ) -> list[DNSIntegrityResult]:
     """Compare UDP DNS vs DoH results to detect DNS faking/stubs.
 
@@ -158,18 +155,33 @@ def check_dns_integrity(
     if domains is None:
         domains = DNS_CHECK_DOMAINS
 
-    if callback:
+    def _is_cancelled() -> bool:
+        if not callable(cancelled):
+            return False
+        try:
+            return bool(cancelled())
+        except Exception:
+            return False
+
+    if callback and not _is_cancelled():
         callback("DNS integrity: resolving via UDP...")
 
     # Phase 1: UDP DNS
     udp_results: dict[str, list[str]] = {}
     for domain in domains:
+        if _is_cancelled():
+            break
         ips = []
         for server in DNS_UDP_SERVERS[:2]:  # Use first 2 servers
+            if _is_cancelled():
+                break
             ips = _resolve_udp(domain, server)
             if ips:
                 break
         udp_results[domain] = ips
+
+    if _is_cancelled():
+        return []
 
     if callback:
         callback("DNS integrity: resolving via DoH...")
@@ -177,12 +189,19 @@ def check_dns_integrity(
     # Phase 2: DoH
     doh_results: dict[str, list[str]] = {}
     for domain in domains:
+        if _is_cancelled():
+            break
         ips = []
         for server in DOH_SERVERS[:2]:
+            if _is_cancelled():
+                break
             ips = _resolve_doh(domain, server["url"])
             if ips:
                 break
         doh_results[domain] = ips
+
+    if _is_cancelled():
+        return []
 
     if callback:
         callback("DNS integrity: analyzing results...")
@@ -228,6 +247,8 @@ def check_dns_integrity(
     # Phase 4: Build results
     results = []
     for domain in domains:
+        if _is_cancelled():
+            break
         udp_ips = udp_results.get(domain, [])
         doh_ips = doh_results.get(domain, [])
 

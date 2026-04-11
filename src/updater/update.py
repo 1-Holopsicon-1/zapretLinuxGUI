@@ -3,17 +3,12 @@ updater/update.py
 ────────────────────────────────────────────────────────────────
 ОПТИМИЗИРОВАННАЯ ВЕРСИЯ ДЛЯ БЫСТРОГО СКАЧИВАНИЯ
 """
-from __future__ import annotations
-
 import os, sys, tempfile, subprocess, shutil, time, requests
-import threading
-import ctypes
-from typing import Callable, Optional
+from typing import Callable
 from time import sleep
 
-from PyQt6.QtCore    import QObject, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore    import QObject, pyqtSignal, QTimer
 from packaging import version
-from utils import run_hidden, get_system_exe
 
 from .release_manager import get_latest_release
 from .github_release import normalize_version
@@ -323,7 +318,6 @@ class UpdateWorker(QObject):
     progress_value = pyqtSignal(int)
     progress_bytes = pyqtSignal(int, int, int)
     finished = pyqtSignal(bool)
-    ask_user = pyqtSignal(str, str, bool)
     show_no_updates = pyqtSignal(str)
     download_complete = pyqtSignal()
     download_failed = pyqtSignal(str)
@@ -334,39 +328,19 @@ class UpdateWorker(QObject):
         self._parent = parent
         self._silent = silent
         self._skip_rate_limit = skip_rate_limit
-        self._should_continue = True
-        self._user_response = None
-        self._response_event = threading.Event()
+        self._stop_requested = False
 
-    def set_user_response(self, response: bool):
-        log(f"UpdateWorker: получен ответ: {response}", "🔁 UPDATE")
-        self._user_response = response
-        self._response_event.set()
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def is_stop_requested(self) -> bool:
+        return self._stop_requested
 
     def _emit(self, msg: str):
         self.progress.emit(msg)
 
     def _emit_progress(self, percent: int):
         self.progress_value.emit(percent)
-    
-    def _ask_user_dialog(self, new_ver: str, notes: str, is_pre: bool):
-        if self._silent:
-            log("UpdateWorker: тихий режим - автоустановка", "🔁 UPDATE")
-            self._user_response = True
-            return True
-        
-        self._user_response = None
-        self._response_event.clear()
-        
-        log(f"UpdateWorker: запрос разрешения для v{new_ver}", "🔁 UPDATE")
-        self.ask_user.emit(new_ver, notes, is_pre)
-        
-        if self._response_event.wait(timeout=60):
-            log(f"UpdateWorker: ответ получен: {self._user_response}", "🔁 UPDATE")
-            return self._user_response
-        else:
-            log("UpdateWorker: таймаут ожидания ответа", "🔁 UPDATE")
-            return False
     
     def _get_download_urls(self, release_info: dict) -> list:
         """Формирует список URL: GitHub CDN первый, VPS как fallback"""
@@ -507,6 +481,9 @@ class UpdateWorker(QObject):
             return False
     
     def _download_update(self, release_info: dict, is_retry: bool = False) -> bool:
+        if self.is_stop_requested():
+            self._emit("Обновление остановлено")
+            return False
         new_ver = release_info["version"]
         log(f"UpdateWorker: загрузка v{new_ver} (retry={is_retry})", "🔁 UPDATE")
 
@@ -528,6 +505,10 @@ class UpdateWorker(QObject):
 
         download_error = None
         for idx, (url, verify_ssl) in enumerate(download_urls):
+            if self.is_stop_requested():
+                shutil.rmtree(tmp_dir, True)
+                self._emit("Обновление остановлено")
+                return False
             if url.startswith("telegram://"):
                 continue
 
@@ -594,6 +575,9 @@ class UpdateWorker(QObject):
 
     def run(self):
         try:
+            if self.is_stop_requested():
+                self.finished.emit(False)
+                return
             ok = self._check_and_run_update()
             self.finished.emit(ok)
         except Exception as e:
@@ -602,6 +586,9 @@ class UpdateWorker(QObject):
             self.finished.emit(False)
 
     def _check_and_run_update(self) -> bool:
+        if self.is_stop_requested():
+            self._emit("Обновление остановлено")
+            return False
         self._emit("Проверка обновлений…")
         
         # ═══════════════════════════════════════════════════════════════
@@ -659,10 +646,8 @@ class UpdateWorker(QObject):
                 self.show_no_updates.emit(app_ver_norm)
             return False
 
-        user_confirmed = self._ask_user_dialog(new_ver, notes, is_pre)
-        
-        if not user_confirmed:
-            self._emit("Обновление отменено")
+        if self.is_stop_requested():
+            self._emit("Обновление остановлено")
             return False
 
         return self._download_update(release_info)

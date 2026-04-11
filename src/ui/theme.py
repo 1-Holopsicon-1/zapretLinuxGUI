@@ -5,7 +5,7 @@ import sys
 from collections import OrderedDict
 from dataclasses import dataclass
 from PyQt6.QtCore import QThread, QObject, pyqtSignal
-from PyQt6.QtGui import QPixmap, QColor
+from PyQt6.QtGui import QPixmap, QColor, QIcon
 from config import reg, THEME_FOLDER
 from log import log
 from typing import Optional, Tuple
@@ -1228,6 +1228,66 @@ def get_cached_qta_pixmap(
     return pixmap
 
 
+def get_themed_qta_icon(
+    icon_name: str,
+    *,
+    color=None,
+    theme_name: str | None = None,
+    muted_fallback: bool = False,
+    **kwargs,
+) -> QIcon:
+    """Returns qtawesome icon with explicit local color normalization.
+
+    This helper lets use-sites avoid relying on the global qta.icon monkey-patch.
+    """
+    try:
+        import qtawesome as qta
+    except Exception:
+        return QIcon()
+
+    local_kwargs = dict(kwargs)
+    local_kwargs["color"] = resolve_icon_color(
+        local_kwargs.get("color", color),
+        theme_name=theme_name,
+        muted_fallback=muted_fallback,
+    )
+    if "color_disabled" in local_kwargs:
+        local_kwargs["color_disabled"] = resolve_icon_color(
+            local_kwargs.get("color_disabled"),
+            theme_name=theme_name,
+            muted_fallback=True,
+        )
+    if "color_active" in local_kwargs:
+        local_kwargs["color_active"] = resolve_icon_color(
+            local_kwargs.get("color_active"),
+            theme_name=theme_name,
+            muted_fallback=False,
+        )
+    if "color_selected" in local_kwargs:
+        local_kwargs["color_selected"] = resolve_icon_color(
+            local_kwargs.get("color_selected"),
+            theme_name=theme_name,
+            muted_fallback=False,
+        )
+    if "color_on" in local_kwargs:
+        local_kwargs["color_on"] = resolve_icon_color(
+            local_kwargs.get("color_on"),
+            theme_name=theme_name,
+            muted_fallback=False,
+        )
+    if "color_off" in local_kwargs:
+        local_kwargs["color_off"] = resolve_icon_color(
+            local_kwargs.get("color_off"),
+            theme_name=theme_name,
+            muted_fallback=True,
+        )
+
+    try:
+        return qta.icon(icon_name, **local_kwargs)
+    except Exception:
+        return QIcon()
+
+
 def install_qtawesome_icon_theme_patch() -> None:
     """Installs global qtawesome icon color defaults and rgba() normalization."""
     global _QTA_ICON_PATCHED
@@ -1348,6 +1408,8 @@ class ThemeManager:
         self._premium_cache: Optional[Tuple[bool, str, Optional[int]]] = None
         self._cache_time: Optional[float] = None
         self._cache_duration = 60  # 60 секунд кеша
+        self._cleanup_in_progress = False
+        self._check_in_progress = False
         
         # Потоки для асинхронных проверок
         self._check_thread: Optional[QThread] = None
@@ -1356,7 +1418,6 @@ class ThemeManager:
         # Потоки для асинхронной генерации CSS темы
         self._theme_build_thread: Optional[QThread] = None
         self._theme_build_worker: Optional[ThemeBuildWorker] = None
-        self._pending_theme_data: Optional[dict] = None  # legacy поле (не используется для новых запросов)
         self._theme_request_seq = 0
         self._latest_theme_request_id = 0
         self._latest_requested_theme: str | None = None
@@ -1393,6 +1454,8 @@ class ThemeManager:
     def cleanup(self):
         """Безопасная очистка всех ресурсов"""
         try:
+            self._cleanup_in_progress = True
+            self._check_in_progress = False
             # Очищаем кеш
             self._premium_cache = None
             self._cache_time = None
@@ -1419,7 +1482,10 @@ class ThemeManager:
                 try:
                     if thread.isRunning():
                         thread.quit()
-                        thread.wait(100)
+                        if not thread.wait(1000):
+                            log("Принудительное завершение потока сборки темы", "WARNING")
+                            thread.terminate()
+                            thread.wait(500)
                 except RuntimeError:
                     pass
             self._cleanup_theme_build_thread()
@@ -1452,11 +1518,12 @@ class ThemeManager:
 
     def _start_async_premium_check(self):
         """Запускает асинхронную проверку премиум статуса"""
+        if self._cleanup_in_progress:
+            return
         if not self.donate_checker:
             return
         
-        # ✅ ДОБАВИТЬ ЗАЩИТУ
-        if hasattr(self, '_check_in_progress') and self._check_in_progress:
+        if self._check_in_progress:
             log("Проверка премиума уже выполняется, пропускаем", "DEBUG")
             return
         
@@ -1466,6 +1533,7 @@ class ThemeManager:
         checker_type = self.donate_checker.__class__.__name__
         if checker_type == 'DummyChecker':
             log("DummyChecker обнаружен, пропускаем асинхронную проверку", "DEBUG")
+            self._check_in_progress = False
             return
         
         # Проверяем существование потока перед проверкой isRunning
@@ -1526,11 +1594,14 @@ class ThemeManager:
             self._check_thread.start()
         except RuntimeError as e:
             log(f"Ошибка запуска потока проверки премиума: {e}", "❌ ERROR")
+            self._check_in_progress = False
             self._check_thread = None
             self._check_worker = None
 
     def _on_premium_check_finished(self, is_premium: bool, message: str, days: Optional[int]):
         """Обработчик завершения асинхронной проверки"""
+        if self._cleanup_in_progress:
+            return
         log(f"Асинхронная проверка завершена: premium={is_premium}, msg='{message}', days={days}", "DEBUG")
         
         # Обновляем кеш
@@ -1551,15 +1622,10 @@ class ThemeManager:
             self._fallback_due_to_premium = None
             self.apply_theme_async(theme_to_restore, persist=True)
         
-        # Обновляем список доступных тем в UI
-        if hasattr(self.widget, 'theme_handler'):
-            try:
-                self.widget.theme_handler.update_available_themes()
-            except Exception as e:
-                log(f"Ошибка обновления списка тем: {e}", "DEBUG")
-
     def _on_premium_check_error(self, error: str):
         """Обработчик ошибки асинхронной проверки"""
+        if self._cleanup_in_progress:
+            return
         log(f"Ошибка асинхронной проверки премиума: {error}", "❌ ERROR")
         
         # Устанавливаем кеш с негативным результатом
@@ -1571,10 +1637,6 @@ class ThemeManager:
         log(f"🔄 reapply_saved_theme_if_premium: fallback={self._fallback_due_to_premium}", "DEBUG")
         # Запускаем асинхронную проверку
         self._start_async_premium_check()
-
-    def get_available_themes(self):
-        """Returns empty list (theme selection removed)."""
-        return []
 
     def get_clean_theme_name(self, display_name):
         """Извлекает чистое имя темы из отображаемого названия"""
@@ -1596,6 +1658,8 @@ class ThemeManager:
             progress_callback: Функция для обновления прогресса (str)
             done_callback: Функция вызываемая после завершения (bool success, str message)
         """
+        if self._cleanup_in_progress:
+            return
         if theme_name is None:
             theme_name = self.current_theme
 
@@ -1644,7 +1708,7 @@ class ThemeManager:
                 "DEBUG",
             )
 
-            thread = QThread()
+            thread = QThread(self.widget)
             worker = ThemeBuildWorker(theme_name=clean)
             worker.moveToThread(thread)
 
@@ -1689,6 +1753,8 @@ class ThemeManager:
 
         Применяет CSS только для актуального (последнего) запроса.
         """
+        if self._cleanup_in_progress:
+            return
         done_callback = None
         try:
             data = request_data or {}
@@ -1739,6 +1805,8 @@ class ThemeManager:
         request_data: Optional[dict] = None,
     ):
         """Обработчик ошибки генерации CSS"""
+        if self._cleanup_in_progress:
+            return
         log(f"❌ Ошибка генерации CSS темы: {error}", "ERROR")
 
         if request_id is not None and request_id != self._latest_theme_request_id:
@@ -1830,31 +1898,3 @@ class ThemeManager:
         """Устанавливает текст статуса (через главное окно)"""
         if hasattr(self.widget, 'set_status'):
             self.widget.set_status(text)
-
-
-class ThemeHandler:
-    """Legacy stub — theme styling handled natively by qfluentwidgets.
-
-    All methods are no-ops. Theme switching is done via ThemeManager.apply_theme_async()
-    which calls _apply_css_only() → _sync_theme_mode_to_qfluent() / setTheme(DARK/LIGHT).
-    The old CSS-overlay approach (setStyleSheet on FluentWindow) has been removed because
-    it caused white-text-on-white-background when Windows uses dark taskbar + light windows.
-    """
-
-    def __init__(self, app_instance, target_widget=None):
-        self.app = app_instance
-        self.app_window = app_instance
-        self.theme_manager = None
-
-    def set_theme_manager(self, theme_manager):
-        self.theme_manager = theme_manager
-
-    def change_theme(self, theme_name):
-        """No-op stub. Theme changes go through ThemeManager.apply_theme_async()."""
-        pass
-
-    def update_subscription_status_in_title(self):
-        pass
-
-    def update_available_themes(self):
-        pass

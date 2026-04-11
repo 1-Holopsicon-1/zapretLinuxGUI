@@ -124,6 +124,7 @@ def start_winws_output_worker(
     create_worker_fn,
     on_new_output,
     on_process_ended,
+    on_thread_finished,
     log_fn,
 ):
     stop_worker_fn()
@@ -148,6 +149,9 @@ def start_winws_output_worker(
         worker.new_output.connect(on_new_output)
         worker.process_ended.connect(on_process_ended)
         worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(on_thread_finished)
+        thread.finished.connect(thread.deleteLater)
         thread.start()
         return thread, worker
     except Exception as e:

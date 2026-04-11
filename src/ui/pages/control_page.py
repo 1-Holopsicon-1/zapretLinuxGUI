@@ -1,7 +1,7 @@
 # ui/pages/control_page.py
 """Страница управления - запуск/остановка DPI"""
 
-from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy
+from PyQt6.QtWidgets import QHBoxLayout, QLabel
 import qtawesome as qta
 
 try:
@@ -20,6 +20,22 @@ except ImportError:
     _HAS_FLUENT_LABELS = False
 
 from .base_page import BasePage
+from ui.pages.control_page_program_settings_build import (
+    build_control_program_settings_section,
+)
+from ui.pages.control_page_runtime_helpers import (
+    apply_program_settings_snapshot,
+    apply_status_plan,
+    apply_strategy_display,
+    set_toggle_checked,
+    show_action_result_plan,
+)
+from ui.pages.control_page_sections_build import (
+    build_control_extra_actions_section,
+    build_control_management_section,
+    build_control_status_section,
+    build_control_strategy_section,
+)
 from ui.compat_widgets import (
     SettingsCard,
     ActionButton,
@@ -27,9 +43,7 @@ from ui.compat_widgets import (
     QuickActionsBar,
     ResetActionButton,
     enable_setting_card_group_auto_height,
-    set_tooltip,
 )
-from ui.compat_widgets import PulsingDot
 from ui.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 from ui.window_action_controller import (
@@ -114,172 +128,61 @@ class ControlPage(BasePage):
         # Статус работы
         self.add_section_title(text_key="page.control.section.status")
         
-        status_card = SettingsCard()
-        
-        status_layout = QHBoxLayout()
-        status_layout.setSpacing(16)
-        
-        # Пульсирующая точка статуса
-        self.status_dot = PulsingDot()
-        status_layout.addWidget(self.status_dot)
-        
-        # Текст статуса
-        status_text_layout = QVBoxLayout()
-        status_text_layout.setSpacing(2)
-        
-        if _HAS_FLUENT_LABELS:
-            self.status_title = SubtitleLabel(
-                tr_catalog("page.control.status.checking", language=self._ui_language, default="Проверка...")
-            )
-        else:
-            self.status_title = QLabel(
-                tr_catalog("page.control.status.checking", language=self._ui_language, default="Проверка...")
-            )
-            self.status_title.setStyleSheet("font-size: 15px; font-weight: 600;")
-        status_text_layout.addWidget(self.status_title)
-        
-        if _HAS_FLUENT_LABELS:
-            self.status_desc = CaptionLabel(
-                tr_catalog("page.control.status.detecting", language=self._ui_language, default="Определение состояния процесса")
-            )
-        else:
-            self.status_desc = QLabel(
-                tr_catalog("page.control.status.detecting", language=self._ui_language, default="Определение состояния процесса")
-            )
-            self.status_desc.setStyleSheet("font-size: 12px;")
-        status_text_layout.addWidget(self.status_desc)
-        
-        status_layout.addLayout(status_text_layout, 1)
-        status_card.add_layout(status_layout)
-        self.add_widget(status_card)
+        status_widgets = build_control_status_section(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            has_fluent_labels=_HAS_FLUENT_LABELS,
+            subtitle_label_cls=SubtitleLabel,
+            caption_label_cls=CaptionLabel,
+        )
+        self.status_dot = status_widgets.status_dot
+        self.status_title = status_widgets.status_title
+        self.status_desc = status_widgets.status_desc
+        self.add_widget(status_widgets.card)
         
         self.add_spacing(16)
         
         # Управление
         self.add_section_title(text_key="page.control.section.management")
         
-        control_card = SettingsCard()
-
-        # Кнопки управления
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(12)
-        
-        self.start_btn = BigActionButton(
-            tr_catalog("page.control.button.start", language=self._ui_language, default="Запустить Zapret"),
-            "fa5s.play",
-            accent=True,
+        management_widgets = build_control_management_section(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            has_fluent_labels=_HAS_FLUENT_LABELS,
+            caption_label_cls=CaptionLabel,
+            indeterminate_progress_bar_cls=IndeterminateProgressBar,
+            big_action_button_cls=BigActionButton,
+            stop_button_cls=StopButton,
+            on_start=self._start_dpi,
+            on_stop_winws=self._stop_dpi,
+            on_stop_and_exit=self._stop_and_exit,
+            parent=self,
         )
-        self.start_btn.clicked.connect(self._start_dpi)
-        buttons_layout.addWidget(self.start_btn)
-        
-        # Кнопка остановки только winws.exe / winws2.exe (в зависимости от режима)
-        self.stop_winws_btn = StopButton(
-            tr_catalog("page.control.button.stop_only_winws", language=self._ui_language, default="Остановить только winws.exe"),
-            "fa5s.stop",
-        )
-        self.stop_winws_btn.clicked.connect(self._stop_dpi)
-        self.stop_winws_btn.setVisible(False)
-        buttons_layout.addWidget(self.stop_winws_btn)
-        
-        # Кнопка полного выхода (остановка + закрытие программы)
-        self.stop_and_exit_btn = StopButton(
-            tr_catalog("page.control.button.stop_and_exit", language=self._ui_language, default="Остановить и закрыть программу"),
-            "fa5s.power-off",
-        )
-        self.stop_and_exit_btn.clicked.connect(self._stop_and_exit)
-        self.stop_and_exit_btn.setVisible(False)
-        buttons_layout.addWidget(self.stop_and_exit_btn)
-        
-        buttons_layout.addStretch()
-        control_card.add_layout(buttons_layout)
-
-        # Индикатор загрузки держим под кнопками, чтобы при показе
-        # ряд действий не прыгал вниз.
-        self.progress_bar = IndeterminateProgressBar(self)
-        self.progress_bar.setVisible(False)
-        control_card.add_widget(self.progress_bar)
-
-        # Метка статуса загрузки
-        if _HAS_FLUENT_LABELS:
-            self.loading_label = CaptionLabel("")
-        else:
-            self.loading_label = QLabel("")
-            self.loading_label.setStyleSheet("font-size: 12px;")
-        self.loading_label.setVisible(False)
-        control_card.add_widget(self.loading_label)
-        
-        self.add_widget(control_card)
+        self.start_btn = management_widgets.start_btn
+        self.stop_winws_btn = management_widgets.stop_winws_btn
+        self.stop_and_exit_btn = management_widgets.stop_and_exit_btn
+        self.progress_bar = management_widgets.progress_bar
+        self.loading_label = management_widgets.loading_label
+        self.add_widget(management_widgets.card)
         
         self.add_spacing(16)
 
         # Текущая стратегия
         self.add_section_title(text_key="page.control.section.current_strategy")
 
-        strategy_card = SettingsCard()
-
-        strategy_layout = QHBoxLayout()
-        strategy_layout.setSpacing(12)
-
-        self.strategy_icon = QLabel()
-        try:
-            from ui.fluent_icons import fluent_pixmap
-            self.strategy_icon.setPixmap(fluent_pixmap('fa5s.cog', 20))
-        except Exception:
-            accent = themeColor().name() if HAS_FLUENT else "#60cdff"
-            self.strategy_icon.setPixmap(qta.icon('fa5s.cog', color=accent).pixmap(20, 20))
-        self.strategy_icon.setFixedSize(24, 24)
-        strategy_layout.addWidget(self.strategy_icon)
-
-        strategy_text_layout = QVBoxLayout()
-        strategy_text_layout.setSpacing(2)
-
-        if _HAS_FLUENT_LABELS:
-            self.strategy_label = StrongBodyLabel(
-                tr_catalog("page.control.strategy.not_selected", language=self._ui_language, default="Не выбрана")
-            )
-        else:
-            self.strategy_label = QLabel(
-                tr_catalog("page.control.strategy.not_selected", language=self._ui_language, default="Не выбрана")
-            )
-            self.strategy_label.setStyleSheet("font-size: 14px; font-weight: 500;")
-        self.strategy_label.setWordWrap(True)
-        self.strategy_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        strategy_text_layout.addWidget(self.strategy_label)
-
-        if _HAS_FLUENT_LABELS:
-            self.strategy_desc = CaptionLabel(
-                tr_catalog("page.control.strategy.select_hint", language=self._ui_language, default="Выберите стратегию в разделе «Стратегии»")
-            )
-        else:
-            self.strategy_desc = QLabel(
-                tr_catalog("page.control.strategy.select_hint", language=self._ui_language, default="Выберите стратегию в разделе «Стратегии»")
-            )
-            self.strategy_desc.setStyleSheet("font-size: 11px;")
-        strategy_text_layout.addWidget(self.strategy_desc)
-
-        strategy_layout.addLayout(strategy_text_layout, 1)
-        strategy_card.add_layout(strategy_layout)
-
-        self.add_widget(strategy_card)
+        strategy_widgets = build_control_strategy_section(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            has_fluent_labels=_HAS_FLUENT_LABELS,
+            strong_body_label_cls=StrongBodyLabel,
+            caption_label_cls=CaptionLabel,
+            accent_hex=themeColor().name() if HAS_FLUENT else "#60cdff",
+        )
+        self.strategy_icon = strategy_widgets.strategy_icon
+        self.strategy_label = strategy_widgets.strategy_label
+        self.strategy_desc = strategy_widgets.strategy_desc
+        self.add_widget(strategy_widgets.card)
 
         self.add_spacing(16)
 
         # Настройки программы (бывшие пункты Alt-меню "Настройки")
-        program_settings_title = tr_catalog(
-            "page.control.section.program_settings",
-            language=self._ui_language,
-            default="Настройки программы",
-        )
-        if SettingCardGroup is not None and PushSettingCard is not None and _HAS_FLUENT_LABELS:
-            self.program_settings_section_label = None
-            program_settings_card = SettingCardGroup(program_settings_title, self.content)
-        else:
-            self.program_settings_section_label = self.add_section_title(
-                text_key="page.control.section.program_settings"
-            )
-            program_settings_card = SettingsCard()
-        self.program_settings_card = program_settings_card
-
         try:
             from ui.widgets.win11_controls import Win11ToggleRow
         except Exception:
@@ -288,152 +191,71 @@ class ControlPage(BasePage):
         if Win11ToggleRow is None:
             raise RuntimeError("Win11ToggleRow недоступен для страницы управления")
 
-        self.auto_dpi_toggle = Win11ToggleRow(
-            "fa5s.bolt",
-            tr_catalog("page.control.setting.autostart.title", language=self._ui_language, default="Автозапуск DPI после старта программы"),
-            tr_catalog("page.control.setting.autostart.desc", language=self._ui_language, default="После запуска ZapretGUI автоматически запускать текущий DPI-режим"),
+        use_fluent_program_settings_group = (
+            SettingCardGroup is not None
+            and PushSettingCard is not None
+            and _HAS_FLUENT_LABELS
         )
-        self.auto_dpi_toggle.toggled.connect(self._on_auto_dpi_toggled)
+        self.program_settings_section_label = None
+        if not use_fluent_program_settings_group:
+            self.program_settings_section_label = self.add_section_title(
+                text_key="page.control.section.program_settings"
+            )
 
-        self.defender_toggle = Win11ToggleRow(
-            "fa5s.shield-alt",
-            tr_catalog("page.control.setting.defender.title", language=self._ui_language, default="Отключить Windows Defender"),
-            tr_catalog("page.control.setting.defender.desc", language=self._ui_language, default="Требуются права администратора"),
+        program_settings_widgets = build_control_program_settings_section(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            content_parent=self.content,
+            has_fluent_labels=_HAS_FLUENT_LABELS,
+            setting_card_group_cls=SettingCardGroup,
+            push_setting_card_cls=PushSettingCard,
+            settings_card_cls=SettingsCard,
+            reset_action_button_cls=ResetActionButton,
+            win11_toggle_row_cls=Win11ToggleRow,
+            caption_label_cls=CaptionLabel,
+            fallback_label_cls=QLabel,
+            qhbox_layout_cls=QHBoxLayout,
+            qta_module=qta,
+            on_auto_dpi_toggled=self._on_auto_dpi_toggled,
+            on_defender_toggled=self._on_defender_toggled,
+            on_max_blocker_toggled=self._on_max_blocker_toggled,
+            on_confirm_reset_program_clicked=self._confirm_reset_program_clicked,
+            on_reset_program_clicked=self._on_reset_program_clicked,
         )
-        self.defender_toggle.toggled.connect(self._on_defender_toggled)
+        self.program_settings_card = program_settings_widgets.program_settings_card
+        self.auto_dpi_toggle = program_settings_widgets.auto_dpi_toggle
+        self.defender_toggle = program_settings_widgets.defender_toggle
+        self.max_block_toggle = program_settings_widgets.max_block_toggle
+        self.reset_program_card = program_settings_widgets.reset_program_card
+        self.reset_program_btn = program_settings_widgets.reset_program_btn
+        self._reset_program_desc_label = program_settings_widgets.reset_program_desc_label
 
-        self.max_block_toggle = Win11ToggleRow(
-            "fa5s.ban",
-            tr_catalog("page.control.setting.max_block.title", language=self._ui_language, default="Блокировать установку MAX"),
-            tr_catalog("page.control.setting.max_block.desc", language=self._ui_language, default="Блокирует запуск/установку MAX и домены в hosts"),
-        )
-        self.max_block_toggle.toggled.connect(self._on_max_blocker_toggled)
-
-        add_setting_card = getattr(program_settings_card, "addSettingCard", None)
-        if callable(add_setting_card):
-            add_setting_card(self.auto_dpi_toggle)
-            add_setting_card(self.defender_toggle)
-            add_setting_card(self.max_block_toggle)
-        else:
-            program_settings_card.add_widget(self.auto_dpi_toggle)
-            program_settings_card.add_widget(self.defender_toggle)
-            program_settings_card.add_widget(self.max_block_toggle)
-
-        self.reset_program_card = None
-        self.reset_program_btn = None
-        self._reset_program_desc_label = None
-        if callable(add_setting_card) and PushSettingCard is not None:
-            self.reset_program_card = PushSettingCard(
-                tr_catalog("page.control.button.reset", language=self._ui_language, default="Сбросить"),
-                qta.icon("fa5s.undo", color="#ff9800"),
-                tr_catalog("page.control.setting.reset.title", language=self._ui_language, default="Сбросить программу"),
-                tr_catalog("page.control.setting.reset.desc", language=self._ui_language, default="Очистить кэш проверок запуска (без удаления пресетов/настроек)"),
-            )
-            self.reset_program_card.clicked.connect(self._confirm_reset_program_clicked)
-            add_setting_card(self.reset_program_card)
-        else:
-            self.reset_program_btn = ResetActionButton(
-                tr_catalog("page.control.button.reset", language=self._ui_language, default="Сбросить"),
-                confirm_text=tr_catalog("page.control.button.reset_confirm", language=self._ui_language, default="Сбросить?"),
-            )
-            self.reset_program_btn.setProperty("noDrag", True)
-            self.reset_program_btn.reset_confirmed.connect(self._on_reset_program_clicked)
-            reset_card = SettingsCard(
-                tr_catalog("page.control.setting.reset.title", language=self._ui_language, default="Сбросить программу")
-            )
-            reset_desc_label = CaptionLabel(
-                tr_catalog("page.control.setting.reset.desc", language=self._ui_language, default="Очистить кэш проверок запуска (без удаления пресетов/настроек)")
-            ) if _HAS_FLUENT_LABELS else QLabel(
-                tr_catalog("page.control.setting.reset.desc", language=self._ui_language, default="Очистить кэш проверок запуска (без удаления пресетов/настроек)")
-            )
-            reset_desc_label.setWordWrap(True)
-            self._reset_program_desc_label = reset_desc_label
-            reset_card.add_widget(reset_desc_label)
-            reset_layout = QHBoxLayout()
-            reset_layout.setSpacing(8)
-            reset_layout.addWidget(self.reset_program_btn)
-            reset_layout.addStretch()
-            reset_card.add_layout(reset_layout)
-            self.reset_program_card = reset_card
-            self.add_widget(program_settings_card)
-            self.add_widget(reset_card)
-            program_settings_card = None
-
-        if program_settings_card is not None:
-            self.add_widget(program_settings_card)
+        self.add_widget(self.program_settings_card)
+        if program_settings_widgets.extra_reset_card is not None:
+            self.add_widget(program_settings_widgets.extra_reset_card)
         enable_setting_card_group_auto_height(self.program_settings_card)
 
         self.add_spacing(16)
         
         # Дополнительные действия
-        self.test_btn = ActionButton(
-            tr_catalog("page.control.button.connection_test", language=self._ui_language, default="Тест соединения"),
-            "fa5s.wifi",
+        extra_widgets = build_control_extra_actions_section(
+            tr_fn=lambda key, default: tr_catalog(key, language=self._ui_language, default=default),
+            strong_body_label_cls=StrongBodyLabel,
+            action_button_cls=ActionButton,
+            quick_actions_bar_cls=QuickActionsBar,
+            parent=self.content,
+            on_test=self._open_connection_test,
+            on_open_folder=self._open_folder,
         )
-        self.test_btn.clicked.connect(self._open_connection_test)
-        self.folder_btn = ActionButton(
-            tr_catalog("page.control.button.open_folder", language=self._ui_language, default="Открыть папку"),
-            "fa5s.folder-open",
-        )
-        self.folder_btn.clicked.connect(self._open_folder)
-
-        self.additional_section_label = None
-        self.additional_section_label = StrongBodyLabel(
-            tr_catalog("page.control.section.additional", language=self._ui_language, default="Дополнительные действия")
-        )
+        self.test_btn = extra_widgets.test_btn
+        self.folder_btn = extra_widgets.folder_btn
+        self.additional_section_label = extra_widgets.section_label
+        self.extra_actions_group = extra_widgets.actions_group
         self.add_widget(self.additional_section_label)
-
-        self.extra_actions_group = QuickActionsBar(self.content)
-        self.test_btn.setToolTip(
-            tr_catalog(
-                "page.control.section.additional.test_desc",
-                language=self._ui_language,
-                default="Проверить сетевое подключение и доступность маршрута",
-            )
-        )
-        self.folder_btn.setToolTip(
-            tr_catalog(
-                "page.control.section.additional.folder_desc",
-                language=self._ui_language,
-                default="Быстро перейти к рабочей папке программы",
-            )
-        )
-        self.extra_actions_group.add_buttons([self.test_btn, self.folder_btn])
         self.add_widget(self.extra_actions_group)
 
     def _set_toggle_checked(self, toggle, checked: bool) -> None:
         """Устанавливает состояние toggle-карточки или переключателя без лишних сигналов."""
-        try:
-            toggle.setChecked(bool(checked), block_signals=True)
-            return
-        except TypeError:
-            pass
-        except Exception:
-            pass
-
-        try:
-            toggle.blockSignals(True)
-        except Exception:
-            pass
-
-        try:
-            if hasattr(toggle, "setChecked"):
-                toggle.setChecked(bool(checked))
-        except Exception:
-            pass
-
-        # У кастомного fallback-переключателя есть анимируемый круг, который нужно
-        # принудительно переставить при немом обновлении состояния.
-        try:
-            toggle._circle_position = (toggle.width() - 18) if checked else 4.0  # type: ignore[attr-defined]
-            toggle.update()
-        except Exception:
-            pass
-
-        try:
-            toggle.blockSignals(False)
-        except Exception:
-            pass
+        set_toggle_checked(toggle, checked)
 
     def _confirm_reset_program_clicked(self) -> None:
         title = tr_catalog("page.control.button.reset", language=self._ui_language, default="Сбросить")
@@ -455,29 +277,32 @@ class ControlPage(BasePage):
         if self._program_settings_runtime_attached:
             return
         self._program_settings_runtime_attached = True
-        self._get_program_settings_runtime_service().subscribe(
+        self._require_app_context().program_settings_runtime_service.subscribe(
             self._apply_program_settings_snapshot,
             emit_initial=True,
         )
 
     def _apply_program_settings_snapshot(self, snapshot) -> None:
         """Применяет shared snapshot программных настроек к toggle-элементам."""
-        self._set_toggle_checked(self.auto_dpi_toggle, getattr(snapshot, "auto_dpi_enabled", False))
-        self._set_toggle_checked(self.defender_toggle, getattr(snapshot, "defender_disabled", False))
-        self._set_toggle_checked(self.max_block_toggle, getattr(snapshot, "max_blocked", False))
+        apply_program_settings_snapshot(
+            snapshot,
+            auto_dpi_toggle=self.auto_dpi_toggle,
+            defender_toggle=self.defender_toggle,
+            max_block_toggle=self.max_block_toggle,
+        )
 
     def _sync_program_settings(self) -> None:
         """Явно перечитывает shared snapshot программных настроек."""
-        snapshot = self._get_program_settings_runtime_service().refresh()
+        snapshot = self._require_app_context().program_settings_runtime_service.refresh()
         self._apply_program_settings_snapshot(snapshot)
 
     def _get_program_settings_runtime_service(self):
         app_context = getattr(self.window(), "app_context", None)
         service = getattr(app_context, "program_settings_runtime_service", None)
         if service is None:
-            from core.services import get_program_settings_runtime_service
+            from app_context import require_app_context
 
-            service = get_program_settings_runtime_service()
+            service = require_app_context().program_settings_runtime_service
         return service
 
     def _set_status(self, msg: str) -> None:
@@ -488,18 +313,13 @@ class ControlPage(BasePage):
             pass
 
     def _show_action_result_plan(self, plan, toggle=None) -> None:
-        if plan.revert_checked is not None and toggle is not None:
-            self._set_toggle_checked(toggle, plan.revert_checked)
-
-        if plan.final_status:
-            self._set_status(plan.final_status)
-
-        if plan.level == "success":
-            InfoBar.success(title=plan.title, content=plan.content, parent=self.window())
-        elif plan.level == "warning":
-            InfoBar.warning(title=plan.title, content=plan.content, parent=self.window())
-        else:
-            InfoBar.error(title=plan.title, content=plan.content, parent=self.window())
+        show_action_result_plan(
+            plan,
+            window=self.window(),
+            set_status=self._set_status,
+            info_bar_cls=InfoBar,
+            toggle=toggle,
+        )
 
     def _run_confirmation_dialog(self, dialog_plan, toggle=None) -> bool:
         box = MessageBox(dialog_plan.title, dialog_plan.content, self.window())
@@ -722,27 +542,24 @@ class ControlPage(BasePage):
             last_error=last_error,
             language=self._ui_language,
         )
-        self._last_known_dpi_running = plan.phase == "running"
-        self.status_title.setText(plan.title)
-        self.status_desc.setText(plan.description)
-        self.status_dot.set_color(plan.dot_color)
-        if plan.pulsing:
-            self.status_dot.start_pulse()
-        else:
-            self.status_dot.stop_pulse()
-        self.start_btn.setVisible(plan.show_start)
-        self._update_stop_winws_button_text()
-        self.stop_winws_btn.setVisible(plan.show_stop_only)
-        self.stop_and_exit_btn.setVisible(plan.show_stop_and_exit)
+        self._last_known_dpi_running = apply_status_plan(
+            plan,
+            status_title=self.status_title,
+            status_desc=self.status_desc,
+            status_dot=self.status_dot,
+            start_btn=self.start_btn,
+            stop_winws_btn=self.stop_winws_btn,
+            stop_and_exit_btn=self.stop_and_exit_btn,
+            update_stop_button_text=self._update_stop_winws_button_text,
+        )
             
     def update_strategy(self, name: str):
         """Обновляет отображение текущей стратегии"""
         self._update_stop_winws_button_text()
-        plan = ControlPageController.build_strategy_display_plan(
+        apply_strategy_display(
             name=name,
             language=self._ui_language,
             window=self.window() or self,
+            strategy_label=self.strategy_label,
+            strategy_desc=self.strategy_desc,
         )
-        self.strategy_label.setText(plan.title)
-        self.strategy_desc.setText(plan.description)
-        set_tooltip(self.strategy_label, plan.tooltip)

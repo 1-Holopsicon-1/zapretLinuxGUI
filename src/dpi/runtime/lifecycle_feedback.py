@@ -84,7 +84,7 @@ def show_launch_warning_top(controller, message: str) -> None:
 
 
 def verify_dpi_process_running(controller, verify_gen=None):
-    """Неблокирующая проверка запуска процесса DPI через QTimer."""
+    """Неблокирующая проверка старта через канонический monitor/runtime путь."""
     if verify_gen is None:
         verify_gen = controller._dpi_start_verify_generation
 
@@ -93,7 +93,25 @@ def verify_dpi_process_running(controller, verify_gen=None):
 
     max_retries = 25
     retry_delay_ms = 300
-    is_actually_running = controller.app.dpi_runtime.is_expected_running(silent=True)
+    runtime_service = getattr(controller.app, "dpi_runtime_service", None)
+    monitor_manager = getattr(controller.app, "process_monitor_manager", None)
+
+    if monitor_manager is not None and hasattr(monitor_manager, "refresh_now"):
+        try:
+            monitor_manager.refresh_now()
+        except Exception as e:
+            log(f"verify_dpi_process_running: refresh_now failed: {e}", "DEBUG")
+    elif runtime_service is not None:
+        try:
+            from dpi.runtime import get_canonical_winws_process_pids
+
+            runtime_service.observe_process_details(get_canonical_winws_process_pids())
+        except Exception as e:
+            log(f"verify_dpi_process_running: canonical fallback refresh failed: {e}", "DEBUG")
+
+    snapshot = runtime_service.snapshot() if runtime_service is not None else None
+    phase = str(getattr(snapshot, "phase", "") or "").strip().lower()
+    is_actually_running = bool(getattr(snapshot, "running", False)) and phase == "running"
 
     if is_actually_running:
         on_dpi_process_confirmed(controller, running=True, verify_gen=verify_gen)

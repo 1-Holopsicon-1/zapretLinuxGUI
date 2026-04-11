@@ -1,8 +1,5 @@
 """ISP block page and HTTP injection detection."""
 
-from __future__ import annotations
-
-import logging
 import re
 import socket
 import time
@@ -13,8 +10,6 @@ from blockcheck.config import (
     ISP_REDIRECT_MARKERS,
 )
 from blockcheck.models import SingleTestResult, TestStatus, TestType
-
-logger = logging.getLogger(__name__)
 
 
 def check_http_injection(
@@ -27,6 +22,7 @@ def check_http_injection(
     or an injected block page (common DPI technique).
     """
     start = time.time()
+    sock = None
 
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -39,7 +35,7 @@ def check_http_injection(
             f"Connection: close\r\n"
             f"User-Agent: Mozilla/5.0\r\n\r\n"
         )
-        sock.send(request.encode())
+        sock.sendall(request.encode())
 
         response = b""
         while len(response) < 16384:
@@ -50,7 +46,6 @@ def check_http_injection(
                 response += chunk
             except socket.timeout:
                 break
-        sock.close()
 
         elapsed = (time.time() - start) * 1000
         body = response.decode("utf-8", errors="ignore")
@@ -107,6 +102,12 @@ def check_http_injection(
             time_ms=round((time.time() - start) * 1000, 2),
             detail=str(e)[:100],
         )
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 def detect_isp_page(

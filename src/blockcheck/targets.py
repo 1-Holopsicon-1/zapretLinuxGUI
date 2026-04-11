@@ -1,7 +1,5 @@
 """Target loading — domains.txt, tcp_16_20_targets.json, user domains, defaults."""
 
-from __future__ import annotations
-
 import json
 import logging
 import os

@@ -5,7 +5,14 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox
 from PyQt6.QtGui import QPainter, QColor, QPainterPath, QIcon
 import qtawesome as qta
 
-from ui.theme import get_theme_tokens, get_card_gradient_qss, get_tinted_surface_gradient_qss, to_qcolor
+from ui.theme import (
+    get_cached_qta_pixmap,
+    get_card_gradient_qss,
+    get_theme_tokens,
+    get_themed_qta_icon,
+    get_tinted_surface_gradient_qss,
+    to_qcolor,
+)
 from ui.theme_refresh import ThemeRefreshController
 
 try:
@@ -250,14 +257,14 @@ class Win11ToggleRow(SwitchSettingCard if _HAS_FLUENT else QWidget):
         except Exception:
             try:
                 color = self._resolved_icon_color(theme_tokens)
-                icon_label.setPixmap(qta.icon(self._icon_name, color=color).pixmap(18, 18))
+                icon_label.setPixmap(get_cached_qta_pixmap(self._icon_name, color=color, size=18))
             except Exception:
                 return
 
     def _build_icon(self, tokens=None) -> QIcon:
         theme_tokens = tokens or get_theme_tokens()
         try:
-            return qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
+            return get_themed_qta_icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
         except Exception:
             return QIcon()
 
@@ -396,7 +403,13 @@ class Win11RadioOption(QWidget):
             return
         theme_tokens = tokens or get_theme_tokens()
         try:
-            self._icon_label.setPixmap(qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens)).pixmap(24, 24))
+                self._icon_label.setPixmap(
+                    get_cached_qta_pixmap(
+                        self._icon_name,
+                        color=self._resolved_icon_color(theme_tokens),
+                        size=24,
+                    )
+                )
         except Exception:
             return
 
@@ -620,14 +633,20 @@ class Win11NumberRow(FluentSettingCard if _HAS_FLUENT else QWidget):
             icon_label.setIcon(self._build_icon(theme_tokens))
         except Exception:
             try:
-                icon_label.setPixmap(qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens)).pixmap(18, 18))
+                icon_label.setPixmap(
+                    get_cached_qta_pixmap(
+                        self._icon_name,
+                        color=self._resolved_icon_color(theme_tokens),
+                        size=18,
+                    )
+                )
             except Exception:
                 return
 
     def _build_icon(self, tokens=None) -> QIcon:
         theme_tokens = tokens or get_theme_tokens()
         try:
-            return qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
+            return get_themed_qta_icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
         except Exception:
             return QIcon()
 
@@ -800,14 +819,20 @@ class Win11ComboRow(FluentSettingCard if _HAS_FLUENT else QWidget):
             icon_label.setIcon(self._build_icon(theme_tokens))
         except Exception:
             try:
-                icon_label.setPixmap(qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens)).pixmap(18, 18))
+                icon_label.setPixmap(
+                    get_cached_qta_pixmap(
+                        self._icon_name,
+                        color=self._resolved_icon_color(theme_tokens),
+                        size=18,
+                    )
+                )
             except Exception:
                 return
 
     def _build_icon(self, tokens=None) -> QIcon:
         theme_tokens = tokens or get_theme_tokens()
         try:
-            return qta.icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
+            return get_themed_qta_icon(self._icon_name, color=self._resolved_icon_color(theme_tokens))
         except Exception:
             return QIcon()
 

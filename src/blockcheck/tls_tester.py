@@ -1,7 +1,5 @@
 """HTTPS/TLS tester — extracted from blockcheck2.py with DPI classification."""
 
-from __future__ import annotations
-
 import re
 import socket
 import ssl
@@ -96,6 +94,8 @@ def test_https(
     last_exception: Exception | None = None
 
     for addr_family, sockaddr in connect_addrs:
+        sock = None
+        ssock = None
         try:
             sock = socket.socket(addr_family, socket.SOCK_STREAM)
             sock.settimeout(timeout)
@@ -119,7 +119,7 @@ def test_https(
                 f"Connection: close\r\n"
                 f"User-Agent: Mozilla/5.0\r\n\r\n"
             )
-            ssock.send(request.encode())
+            ssock.sendall(request.encode())
 
             response = b""
             while len(response) < 2048:
@@ -168,6 +168,17 @@ def test_https(
         except Exception as e:
             last_exception = e
             continue
+        finally:
+            if ssock is not None:
+                try:
+                    ssock.close()
+                except Exception:
+                    pass
+            elif sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
 
     if isinstance(last_exception, ssl.SSLError):
         e = last_exception

@@ -8,12 +8,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QThread
 from PyQt6.QtGui import QFont, QTextCursor
-import qtawesome as qta
 
 from .base_page import BasePage, ScrollBlockingTextEdit
 from dns.dns_check_page_controller import DNSCheckPageController
 from ui.compat_widgets import QuickActionsBar, SettingsCard
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.theme_semantic import get_semantic_palette
 from ui.text_catalog import tr as tr_catalog
 
@@ -92,14 +91,13 @@ class DNSCheckPage(BasePage):
             row.setSpacing(10)
             
             try:
-                import qtawesome as qta
                 icon_label = QLabel()
                 icon_label.setProperty("dnsIconName", icon_name)
-                icon_label.setPixmap(qta.icon(icon_name, color=tokens.accent_hex).pixmap(16, 16))
+                icon_label.setPixmap(get_cached_qta_pixmap(icon_name, color=tokens.accent_hex, size=16))
                 icon_label.setFixedWidth(20)
                 self._info_icon_labels.append(icon_label)
                 row.addWidget(icon_label)
-            except:
+            except Exception:
                 pass
             
             text_label = BodyLabel(tr_catalog(text_key, language=self._ui_language, default=default_text))
@@ -139,7 +137,7 @@ class DNSCheckPage(BasePage):
 
         self.check_button = PushButton()
         self.check_button.setText(tr_catalog("page.dns_check.button.start", language=self._ui_language, default="Начать проверку"))
-        self.check_button.setIcon(qta.icon("fa5s.play", color="#4CAF50"))
+        self.check_button.setIcon(get_themed_qta_icon("fa5s.play", color="#4CAF50"))
         self.check_button.setToolTip(
             tr_catalog(
                 "page.dns_check.action.start.description",
@@ -152,7 +150,7 @@ class DNSCheckPage(BasePage):
 
         self.quick_check_button = PushButton()
         self.quick_check_button.setText(tr_catalog("page.dns_check.button.quick", language=self._ui_language, default="Быстрая проверка"))
-        self.quick_check_button.setIcon(qta.icon("fa5s.bolt", color="#60cdff"))
+        self.quick_check_button.setIcon(get_themed_qta_icon("fa5s.bolt", color="#60cdff"))
         self.quick_check_button.setToolTip(
             tr_catalog(
                 "page.dns_check.action.quick.description",
@@ -165,7 +163,7 @@ class DNSCheckPage(BasePage):
 
         self.save_button = PushButton()
         self.save_button.setText(tr_catalog("page.dns_check.button.save", language=self._ui_language, default="Сохранить результаты"))
-        self.save_button.setIcon(qta.icon("fa5s.save", color="#ff9800"))
+        self.save_button.setIcon(get_themed_qta_icon("fa5s.save", color="#ff9800"))
         self.save_button.setToolTip(
             tr_catalog(
                 "page.dns_check.action.save.description",
@@ -233,12 +231,10 @@ class DNSCheckPage(BasePage):
                 pass
 
         try:
-            import qtawesome as qta
-
             for icon_label in list(self._info_icon_labels):
                 try:
                     icon_name = (icon_label.property("dnsIconName") or "fa5s.search").strip()
-                    icon_label.setPixmap(qta.icon(icon_name, color=tokens.accent_hex).pixmap(16, 16))
+                    icon_label.setPixmap(get_cached_qta_pixmap(icon_name, color=tokens.accent_hex, size=16))
                 except Exception:
                     pass
         except Exception:

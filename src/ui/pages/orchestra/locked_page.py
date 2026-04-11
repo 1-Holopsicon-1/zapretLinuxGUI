@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QComboBox, QWidget,
     QSpinBox, QFrame, QLineEdit, QPushButton
 )
-import qtawesome as qta
 
 from ..base_page import BasePage
 from ui.compat_widgets import set_tooltip
@@ -45,7 +44,7 @@ except ImportError:
     _HAS_FLUENT = False
 
 from ui.widgets.notification_banner import NotificationBanner
-from ui.theme import get_theme_tokens
+from ui.theme import get_theme_tokens, get_themed_qta_icon
 from ui.theme_refresh import ThemeRefreshController
 from ui.text_catalog import tr as tr_catalog
 from log import log
@@ -139,7 +138,7 @@ class LockedDomainRow(QFrame):
 
         if self._delete_btn is not None:
             self._delete_btn.setIcon(
-                qta.icon("mdi.lock-open-variant-outline", color=tokens.fg)
+                get_themed_qta_icon("mdi.lock-open-variant-outline", color=tokens.fg)
             )
 
     def _on_strategy_changed(self, value: int):
@@ -342,15 +341,15 @@ class OrchestraLockedPage(BasePage):
         tokens = tokens or get_theme_tokens()
 
         if hasattr(self, "lock_btn") and self.lock_btn is not None:
-            self.lock_btn.setIcon(qta.icon("mdi.plus", color=tokens.fg))
+            self.lock_btn.setIcon(get_themed_qta_icon("mdi.plus", color=tokens.fg))
 
         if hasattr(self, "refresh_btn") and self.refresh_btn is not None:
             refresh_icon = "mdi.loading" if self._refresh_loading else "mdi.refresh"
             refresh_color = tokens.fg_faint if self._refresh_loading else tokens.fg
-            self.refresh_btn.setIcon(qta.icon(refresh_icon, color=refresh_color))
+            self.refresh_btn.setIcon(get_themed_qta_icon(refresh_icon, color=refresh_color))
 
         if hasattr(self, "unlock_all_btn") and self.unlock_all_btn is not None:
-            self.unlock_all_btn.setIcon(qta.icon("mdi.lock-open-variant-outline", color=tokens.fg))
+            self.unlock_all_btn.setIcon(get_themed_qta_icon("mdi.lock-open-variant-outline", color=tokens.fg))
 
         # Refresh row widgets.
         try:

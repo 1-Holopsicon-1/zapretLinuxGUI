@@ -46,9 +46,9 @@ def prepare_selected_mode_for_start(selected_mode, launch_method: str):
         return selected_mode
 
     if method in ("direct_zapret2", "direct_zapret1"):
-        from core.services import get_direct_flow_coordinator
+        from app_context import require_app_context
 
-        snapshot = get_direct_flow_coordinator().get_startup_snapshot(
+        snapshot = require_app_context().direct_flow_coordinator.get_startup_snapshot(
             method,
             require_filters=True,
         )
@@ -84,9 +84,9 @@ def validate_direct_selected_mode(selected_mode, launch_method: str) -> None:
             if ("unknown.txt" in content_lower) or ("ipset-unknown.txt" in content_lower):
                 try:
                     from core.direct_preset_core.service import DirectPresetService
-                    from core.services import get_app_paths
+                    from app_context import require_app_context
 
-                    service = DirectPresetService(get_app_paths(), "winws2")
+                    service = DirectPresetService(require_app_context().app_paths, "winws2")
                     source = service.read_source_preset(preset_path)
                     if service.remove_placeholder_profiles(source):
                         service.write_source_preset(preset_path, source)
@@ -115,9 +115,9 @@ def collect_soft_launch_warnings(selected_mode, launch_method: str) -> list[str]
 
     try:
         from core.direct_preset_core.service import DirectPresetService
-        from core.services import get_app_paths
+        from app_context import require_app_context
 
-        service = DirectPresetService(get_app_paths(), "winws2")
+        service = DirectPresetService(require_app_context().app_paths, "winws2")
         source = service.read_source_preset(Path(preset_path))
         labels = service.collect_out_range_autofix_warning_labels(source)
     except Exception as e:
@@ -152,9 +152,9 @@ def sanitize_direct_preset_before_launch(selected_mode, launch_method: str) -> t
 
     try:
         from core.direct_preset_core.service import DirectPresetService
-        from core.services import get_app_paths
+        from app_context import require_app_context
 
-        service = DirectPresetService(get_app_paths(), "winws2")
+        service = DirectPresetService(require_app_context().app_paths, "winws2")
         source = service.read_source_preset(preset_path)
         changed = False
         warnings: list[str] = []

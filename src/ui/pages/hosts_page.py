@@ -156,6 +156,7 @@ class HostsPage(BasePage):
         self._worker = None
         self._thread = None
         self._applying = False
+        self._cleanup_in_progress = False
         self._runtime_cache = HostsPageController.create_runtime_cache()
         self._last_error = None  # Последняя ошибка
         self._current_operation = None
@@ -892,12 +893,15 @@ class HostsPage(BasePage):
         self._run_operation('adobe_add' if checked else 'adobe_remove')
 
     def _run_operation(self, operation: str, payload=None):
+        self._cleanup_in_progress = False
         runtime = start_hosts_operation(
             hosts_manager=self.hosts_manager,
             applying=self._applying,
             operation=operation,
             payload=payload,
             on_operation_complete=self._on_operation_complete,
+            on_thread_finished=self._on_hosts_thread_finished,
+            parent=self,
         )
         if runtime is None:
             return
@@ -906,7 +910,15 @@ class HostsPage(BasePage):
         self._worker = runtime["worker"]
         self._thread = runtime["thread"]
 
+    def _on_hosts_thread_finished(self) -> None:
+        self._worker = None
+        self._thread = None
+
     def _on_operation_complete(self, success: bool, message: str):
+        if self._cleanup_in_progress:
+            return
+        self._worker = None
+        self._thread = None
         state = complete_hosts_operation(
             current_operation=self._current_operation,
             success=success,
@@ -970,6 +982,7 @@ class HostsPage(BasePage):
         """Очистка потоков при закрытии"""
         from log import log
         try:
+            self._cleanup_in_progress = True
             if self._main_window is not None:
                 try:
                     self._main_window.removeEventFilter(self)
@@ -977,8 +990,23 @@ class HostsPage(BasePage):
                     pass
                 self._main_window = None
 
+            if self._catalog_watch_timer is not None:
+                try:
+                    self._catalog_watch_timer.stop()
+                    self._catalog_watch_timer.deleteLater()
+                except Exception:
+                    pass
+                self._catalog_watch_timer = None
+
             if self._thread and self._thread.isRunning():
                 log("Останавливаем hosts worker...", "DEBUG")
+                if self._worker is not None:
+                    stop = getattr(self._worker, "stop", None)
+                    if callable(stop):
+                        try:
+                            stop()
+                        except Exception:
+                            pass
                 self._thread.quit()
                 if not self._thread.wait(2000):
                     log("⚠ Hosts worker не завершился, принудительно завершаем", "WARNING")
@@ -987,5 +1015,7 @@ class HostsPage(BasePage):
                         self._thread.wait(500)
                     except:
                         pass
+            self._worker = None
+            self._thread = None
         except Exception as e:
             log(f"Ошибка при очистке hosts_page: {e}", "DEBUG")

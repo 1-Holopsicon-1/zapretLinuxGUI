@@ -28,8 +28,6 @@ class StrategyScanStartPlan:
     scan_protocol: str
     udp_games_scope: str
     mode: str
-    resume_next_index: int
-    resume_available: bool
     keep_current_results: bool
     scan_cursor: int
     status_text: str
@@ -52,7 +50,6 @@ class StrategyScanFinishPlan:
 @dataclass(slots=True)
 class StrategyScanProgressPlan:
     total: int
-    working_count: int
     status_text: str
 
 
@@ -663,7 +660,6 @@ class StrategyScanPageController:
         working = cls.count_working_results(result_rows)
         return StrategyScanProgressPlan(
             total=max(0, int(total)),
-            working_count=working,
             status_text=f"[{index + 1}/{total}] {strategy_name}  |  {working} рабочих",
         )
 
@@ -750,8 +746,6 @@ class StrategyScanPageController:
             scan_protocol=scan_protocol,
             udp_games_scope=udp_games_scope,
             mode=mode,
-            resume_next_index=resume_next_index,
-            resume_available=resume_available,
             keep_current_results=keep_current_results,
             scan_cursor=scan_cursor,
             status_text=status_text,

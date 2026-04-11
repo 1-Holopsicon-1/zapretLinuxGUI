@@ -458,7 +458,7 @@ class Zapret1StrategyDetailPage(BasePage):
         if not key:
             return None
         try:
-            payload = self._get_direct_ui_snapshot_service().load_target_detail_payload(
+            payload = self._require_app_context().direct_ui_snapshot_service.load_target_detail_payload(
                 "direct_zapret1",
                 key,
                 refresh=refresh,
@@ -473,9 +473,9 @@ class Zapret1StrategyDetailPage(BasePage):
         app_context = getattr(self.window(), "app_context", None)
         service = getattr(app_context, "direct_ui_snapshot_service", None)
         if service is None:
-            from core.services import get_direct_ui_snapshot_service
+            from app_context import require_app_context
 
-            service = get_direct_ui_snapshot_service()
+            service = require_app_context().direct_ui_snapshot_service
         return service
 
     def _request_target_payload(self, target_key: str, *, refresh: bool, reason: str) -> None:

@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QFrame,
     QLineEdit, QSpinBox, QComboBox, QPushButton
 )
-import qtawesome as qta
 
 try:
     from qfluentwidgets import (
@@ -45,7 +44,7 @@ except ImportError:
 
 from ..base_page import BasePage
 from ui.compat_widgets import set_tooltip
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.theme_refresh import ThemeRefreshController
 from ui.text_catalog import tr as tr_catalog
 from log import log
@@ -189,13 +188,13 @@ class BlockedDomainRow(QFrame):
 
         if self._lock_icon_label is not None:
             self._lock_icon_label.setPixmap(
-                qta.icon("mdi.lock", color=tokens.fg_faint).pixmap(14, 14)
+                get_cached_qta_pixmap("mdi.lock", color=tokens.fg_faint, size=14)
             )
 
         if self._add_btn is not None:
-            self._add_btn.setIcon(qta.icon("mdi.plus", color=tokens.fg))
+            self._add_btn.setIcon(get_themed_qta_icon("mdi.plus", color=tokens.fg))
         if self._delete_btn is not None:
-            self._delete_btn.setIcon(qta.icon("mdi.close-circle-outline", color=tokens.fg))
+            self._delete_btn.setIcon(get_themed_qta_icon("mdi.close-circle-outline", color=tokens.fg))
 
     def _on_strategy_changed(self, new_value: int):
         """При изменении номера стратегии - уведомляем родителя для автосохранения"""
@@ -410,15 +409,15 @@ class OrchestraBlockedPage(BasePage):
         tokens = tokens or get_theme_tokens()
 
         if hasattr(self, "block_btn") and self.block_btn is not None:
-            self.block_btn.setIcon(qta.icon("mdi.plus", color=tokens.fg))
+            self.block_btn.setIcon(get_themed_qta_icon("mdi.plus", color=tokens.fg))
 
         if hasattr(self, "refresh_btn") and self.refresh_btn is not None:
             refresh_icon = "mdi.loading" if self._refresh_loading else "mdi.refresh"
             refresh_color = tokens.fg_faint if self._refresh_loading else tokens.fg
-            self.refresh_btn.setIcon(qta.icon(refresh_icon, color=refresh_color))
+            self.refresh_btn.setIcon(get_themed_qta_icon(refresh_icon, color=refresh_color))
 
         if hasattr(self, "unblock_all_btn") and self.unblock_all_btn is not None:
-            self.unblock_all_btn.setIcon(qta.icon("mdi.delete-sweep", color=tokens.fg))
+            self.unblock_all_btn.setIcon(get_themed_qta_icon("mdi.delete-sweep", color=tokens.fg))
 
         try:
             if hasattr(self, "rows_layout") and self.rows_layout is not None:

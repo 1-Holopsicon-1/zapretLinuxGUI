@@ -94,6 +94,19 @@ class PresetRuntimeCoordinator(QObject):
             pass
         self.schedule_refresh_after_preset_switch()
 
+    def handle_preset_identity_changed(self, preset_file_name: str) -> None:
+        log(f"Идентичность активного пресета обновлена: {preset_file_name}", "INFO")
+        self._last_switched_preset_file_name = str(preset_file_name or "").strip()
+        self.setup_active_preset_file_watcher()
+        try:
+            parent = self.parent()
+            store = getattr(parent, "ui_state_store", None)
+            if store is not None:
+                store.bump_active_preset_revision()
+        except Exception:
+            pass
+        self.schedule_refresh_after_preset_switch()
+
     def request_dpi_restart_after_preset_switch(self) -> None:
         try:
             launch_method = str(self._get_launch_method() or "").strip().lower()
@@ -163,9 +176,9 @@ def resolve_active_preset_watch_path() -> str:
 
     try:
         if method == "direct_zapret2":
-            from core.services import get_direct_flow_coordinator
+            from app_context import require_app_context
 
-            return os.fspath(get_direct_flow_coordinator().get_selected_source_path("direct_zapret2"))
+            return os.fspath(require_app_context().direct_flow_coordinator.get_selected_source_path("direct_zapret2"))
     except Exception:
         return ""
 

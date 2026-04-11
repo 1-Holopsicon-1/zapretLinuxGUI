@@ -7,7 +7,6 @@ from collections.abc import Callable
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton
-import qtawesome as qta
 
 try:
     from qfluentwidgets import (
@@ -28,6 +27,7 @@ except ImportError:
     PrimaryPushButton = QPushButton  # type: ignore[assignment]
 
 from ui.compat_widgets import SettingsCard, RefreshButton, QuickActionsBar
+from ui.theme import get_themed_qta_icon
 
 
 @dataclass(slots=True)
@@ -92,7 +92,7 @@ def build_premium_activation_section(
 
     activate_btn = PrimaryPushButton()
     activate_btn.setText(tr("page.premium.button.create_code", "Создать код"))
-    activate_btn.setIcon(qta.icon("fa5s.link", color="#60cdff"))
+    activate_btn.setIcon(get_themed_qta_icon("fa5s.link", color="#60cdff"))
     activate_btn.clicked.connect(on_create_pair_code)
     key_row.addWidget(activate_btn)
 
@@ -144,7 +144,7 @@ def build_premium_device_info_section(
 
     open_bot_btn = PushButton()
     open_bot_btn.setText(tr("page.premium.button.open_bot", "Открыть бота"))
-    open_bot_btn.setIcon(qta.icon("fa5b.telegram", color="#229ED9"))
+    open_bot_btn.setIcon(get_themed_qta_icon("fa5b.telegram", color="#229ED9"))
     open_bot_btn.clicked.connect(on_open_bot)
 
     row_layout = QHBoxLayout()
@@ -187,7 +187,7 @@ def build_premium_actions_section(
 
     change_key_btn = PushButton()
     change_key_btn.setText(tr("page.premium.button.reset_activation", "Сбросить активацию"))
-    change_key_btn.setIcon(qta.icon("fa5s.exchange-alt", color="#ff9800"))
+    change_key_btn.setIcon(get_themed_qta_icon("fa5s.exchange-alt", color="#ff9800"))
     change_key_btn.setToolTip(
         tr(
             "page.premium.action.reset_activation.description",
@@ -199,7 +199,7 @@ def build_premium_actions_section(
 
     test_btn = PushButton()
     test_btn.setText(tr("page.premium.button.test_connection", "Проверить соединение"))
-    test_btn.setIcon(qta.icon("fa5s.plug", color="#60cdff"))
+    test_btn.setIcon(get_themed_qta_icon("fa5s.plug", color="#60cdff"))
     test_btn.setToolTip(
         tr(
             "page.premium.action.test_connection.description",
@@ -211,7 +211,7 @@ def build_premium_actions_section(
 
     extend_btn = PrimaryPushButton()
     extend_btn.setText(tr("page.premium.button.extend", "Продлить подписку"))
-    extend_btn.setIcon(qta.icon("fa5b.telegram", color="#229ED9"))
+    extend_btn.setIcon(get_themed_qta_icon("fa5b.telegram", color="#229ED9"))
     extend_btn.setToolTip(
         tr(
             "page.premium.action.extend.description",

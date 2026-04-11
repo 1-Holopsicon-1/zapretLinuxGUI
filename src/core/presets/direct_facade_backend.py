@@ -4,7 +4,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 import re
-import sys
 import time as _time
 from typing import Callable, Optional
 
@@ -13,54 +12,29 @@ from core.direct_preset_core.service import BasicUiPayload, DirectPresetService,
 from core.presets.template_support import resolve_reset_template as _template_support_resolve_reset_template
 from core.presets.template_support import reset_all_templates as _template_support_reset_all_templates
 from core.presets.template_support import restore_deleted_templates as _template_support_restore_deleted_templates
-from core.services import get_app_paths, get_direct_flow_coordinator
+from app_context import require_app_context
 
 from .models import PresetManifest
 from log import log
 
+def _get_app_paths():
+    return require_app_context().app_paths
 
-def _normalize_strategy_selection_value(value: object) -> str:
-    return str(value or "").strip() or "none"
 
-
-def _get_installed_app_context():
-    try:
-        core_services = sys.modules.get("core.services")
-        if core_services is None:
-            import core.services as core_services
-
-        getter = getattr(core_services, "get_installed_app_context", None)
-        if callable(getter):
-            return getter()
-    except Exception:
-        pass
-    return None
+def _get_direct_flow_coordinator():
+    return require_app_context().direct_flow_coordinator
 
 
 def _get_preset_repository():
-    app_context = _get_installed_app_context()
-    repository = getattr(app_context, "preset_repository", None)
-    if repository is not None:
-        return repository
-
-    core_services = sys.modules.get("core.services")
-    if core_services is None:
-        import core.services as core_services
-
-    return core_services.get_preset_repository()
+    return require_app_context().preset_repository
 
 
 def _get_selection_service():
-    app_context = _get_installed_app_context()
-    service = getattr(app_context, "preset_selection_service", None)
-    if service is not None:
-        return service
+    return require_app_context().preset_selection_service
 
-    core_services = sys.modules.get("core.services")
-    if core_services is None:
-        import core.services as core_services
 
-    return core_services.get_selection_service()
+def _normalize_strategy_selection_value(value: object) -> str:
+    return str(value or "").strip() or "none"
 
 
 def _collect_changed_strategy_selections(current: dict | None, requested: dict | None) -> dict[str, str]:
@@ -582,7 +556,7 @@ class DirectPresetFacadeBackend:
 
     def get_selected_manifest(self) -> PresetManifest | None:
         try:
-            return get_direct_flow_coordinator().get_selected_source_manifest(self.launch_method)
+            return require_app_context().direct_flow_coordinator.get_selected_source_manifest(self.launch_method)
         except Exception:
             return None
 
@@ -671,7 +645,7 @@ class DirectPresetFacadeBackend:
         normalized = _normalize_direct_preset_source_text(source_text)
         updated = _get_preset_repository().update_preset(self.engine, manifest.file_name, normalized, None)
         if self.is_selected_file_name(updated.file_name):
-            get_direct_flow_coordinator().refresh_selected_launch_profile(self.launch_method)
+            require_app_context().direct_flow_coordinator.refresh_selected_launch_profile(self.launch_method)
         return updated
 
     def get_debug_log_file(self) -> str:
@@ -814,10 +788,10 @@ class DirectPresetFacadeBackend:
         selected_file_name = self.get_selected_file_name()
         if not selected_file_name or self.get_manifest_by_file_name(selected_file_name) is None:
             return
-        get_direct_flow_coordinator().refresh_selected_launch_profile(self.launch_method)
+        require_app_context().direct_flow_coordinator.refresh_selected_launch_profile(self.launch_method)
 
     def select_file_name(self, file_name: str):
-        return get_direct_flow_coordinator().select_preset_file_name(self.launch_method, file_name)
+        return require_app_context().direct_flow_coordinator.select_preset_file_name(self.launch_method, file_name)
 
     def rename_by_file_name(self, file_name: str, new_name: str) -> PresetManifest:
         manifest = self.get_manifest_by_file_name(file_name)

@@ -236,7 +236,6 @@ class DPIStartWorker(QObject):
             success = self._run_launch_method()
 
             if success:
-                self.progress.emit("DPI успешно запущен")
                 self.finished.emit(True, "")
             else:
                 fatal_reason = ""
@@ -487,10 +486,10 @@ class DirectPresetSwitchWorker(QObject):
 
             self.progress.emit("Применяем пресет...")
 
-            from core.services import get_direct_flow_coordinator
+            from app_context import require_app_context
             from launcher_common import get_strategy_runner
 
-            profile = get_direct_flow_coordinator().ensure_launch_profile(
+            profile = require_app_context().direct_flow_coordinator.ensure_launch_profile(
                 self.launch_method,
                 require_filters=True,
             )

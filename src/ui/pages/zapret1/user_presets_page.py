@@ -7,6 +7,7 @@ import time
 import re
 from typing import Optional
 
+from app_context import require_app_context
 from PyQt6.QtCore import (
     Qt,
     pyqtSignal,
@@ -25,12 +26,9 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QFrame,
 )
-import qtawesome as qta
-
 from ui.pages.base_page import BasePage
 from ui.pages.preset_actions_menu import show_preset_actions_menu
 from ui.pages.preset_rating_menu import show_preset_rating_menu
-from core.services import get_preset_store_v1, get_user_presets_runtime_service
 from core.runtime.user_presets_runtime_service import UserPresetsRuntimeAdapter
 from ui.pages.direct_user_presets_page_controller import (
     DirectUserPresetsPageController,
@@ -39,7 +37,6 @@ from ui.pages.direct_user_presets_page_controller import (
 from ui.compat_widgets import (
     PrimaryActionButton,
     SettingsCard,
-    LineEdit,
     set_tooltip,
     style_semantic_caption_label,
 )
@@ -51,7 +48,7 @@ try:
         BodyLabel, CaptionLabel, StrongBodyLabel, SubtitleLabel,
         PushButton as FluentPushButton, PrimaryPushButton, ToolButton, PrimaryToolButton,
         MessageBox, InfoBar, MessageBoxBase, TransparentToolButton, TransparentPushButton, FluentIcon,
-        RoundMenu, Action, ListView,
+        RoundMenu, Action, ListView, LineEdit,
     )
     _HAS_FLUENT_LABELS = True
 except ImportError:
@@ -72,15 +69,14 @@ except ImportError:
     RoundMenu = None
     Action = None
     ListView = QListView
+    LineEdit = QLineEdit
     _HAS_FLUENT_LABELS = False
 
 
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.theme_semantic import get_semantic_palette
 from log import log
 
-
-_icon_cache: dict[str, object] = {}
 _DEFAULT_PRESET_ICON_COLOR = "#5caee8"
 _HEX_COLOR_RGB_RE = re.compile(r"^#(?:[0-9a-fA-F]{6})$")
 _HEX_COLOR_RGBA_RE = re.compile(r"^#(?:[0-9a-fA-F]{8})$")
@@ -346,7 +342,7 @@ class Zapret1UserPresetsPage(BasePage):
             tokens = get_theme_tokens()
             _back_btn = TransparentPushButton()
             _back_btn.setText(self._tr("page.z1_user_presets.back.control", "Управление"))
-            _back_btn.setIcon(qta.icon("fa5s.chevron-left", color=tokens.fg_muted))
+            _back_btn.setIcon(get_themed_qta_icon("fa5s.chevron-left", color=tokens.fg_muted))
             _back_btn.setIconSize(QSize(12, 12))
             _back_btn.clicked.connect(self.back_clicked.emit)
             self._back_btn = _back_btn
@@ -399,12 +395,12 @@ class Zapret1UserPresetsPage(BasePage):
                 activate_error_level="warning",
                 activate_error_mode="friendly",
                 copy_hierarchy_meta_on_duplicate=True,
-                get_preset_store=get_preset_store_v1,
+                get_preset_store=lambda: require_app_context().preset_store_v1,
             )
         )
 
     def _build_runtime_service(self):
-        return get_user_presets_runtime_service("preset_zapret1")
+        return require_app_context().user_presets_runtime_service_factory("preset_zapret1")
 
     def _build_runtime_adapter(self) -> UserPresetsRuntimeAdapter:
         return UserPresetsRuntimeAdapter(
@@ -505,6 +501,7 @@ class Zapret1UserPresetsPage(BasePage):
             store = self._get_preset_store()
             store.presets_changed.connect(self._on_store_changed)
             store.preset_switched.connect(self._on_store_switched)
+            store.preset_identity_changed.connect(self._on_store_switched)
             store.preset_updated.connect(self._on_store_updated)
         except Exception:
             pass
@@ -595,7 +592,7 @@ class Zapret1UserPresetsPage(BasePage):
         configs_layout = QHBoxLayout()
         configs_layout.setSpacing(12)
         self._configs_icon = QLabel()
-        self._configs_icon.setPixmap(qta.icon("fa5b.github", color=tokens.accent_hex).pixmap(18, 18))
+        self._configs_icon.setPixmap(get_cached_qta_pixmap("fa5b.github", color=tokens.accent_hex, size=18))
         configs_layout.addWidget(self._configs_icon)
         configs_title = StrongBodyLabel(
             self._tr(
@@ -770,7 +767,7 @@ class Zapret1UserPresetsPage(BasePage):
             semantic = get_semantic_palette(tokens.theme_name)
 
             if getattr(self, "_configs_icon", None) is not None:
-                self._configs_icon.setPixmap(qta.icon("fa5b.github", color=tokens.accent_hex).pixmap(18, 18))
+                self._configs_icon.setPixmap(get_cached_qta_pixmap("fa5b.github", color=tokens.accent_hex, size=18))
 
             # _restore_deleted_btn is ActionButton — self-styling, skip explicit update
 
@@ -779,7 +776,7 @@ class Zapret1UserPresetsPage(BasePage):
 
             if getattr(self, "reset_all_btn", None) is not None:
                 try:
-                    self.reset_all_btn.setIcon(qta.icon("fa5s.undo", color=tokens.fg))
+                    self.reset_all_btn.setIcon(get_themed_qta_icon("fa5s.undo", color=tokens.fg))
                 except Exception:
                     pass
 
@@ -940,7 +937,7 @@ class Zapret1UserPresetsPage(BasePage):
         try:
             self.reset_all_btn.setText(f"{ok}/{total}")
             icon_name = "fa5s.check" if total > 0 and ok >= total else "fa5s.exclamation-triangle"
-            self.reset_all_btn.setIcon(qta.icon(icon_name, color=get_theme_tokens().fg))
+            self.reset_all_btn.setIcon(get_themed_qta_icon(icon_name, color=get_theme_tokens().fg))
         except Exception:
             pass
         QTimer.singleShot(3000, self._restore_reset_all_button_label)
@@ -950,7 +947,7 @@ class Zapret1UserPresetsPage(BasePage):
             self.reset_all_btn.setText(
                 self._tr("page.z1_user_presets.button.reset_all", "Вернуть заводские")
             )
-            self.reset_all_btn.setIcon(qta.icon("fa5s.undo", color=get_theme_tokens().fg))
+            self.reset_all_btn.setIcon(get_themed_qta_icon("fa5s.undo", color=get_theme_tokens().fg))
         except Exception:
             pass
 

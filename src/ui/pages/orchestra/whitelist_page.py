@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel,
     QWidget, QLineEdit, QFrame, QPushButton
 )
-import qtawesome as qta
 
 try:
     from qfluentwidgets import (
@@ -37,10 +36,9 @@ except ImportError:
 
 from ..base_page import BasePage
 from ui.compat_widgets import set_tooltip
-from ui.theme import get_theme_tokens
+from ui.theme import get_cached_qta_pixmap, get_theme_tokens, get_themed_qta_icon
 from ui.theme_refresh import ThemeRefreshController
 from ui.text_catalog import tr as tr_catalog
-from core.services import get_orchestra_whitelist_runtime_service
 from log import log
 
 
@@ -138,11 +136,11 @@ class WhitelistDomainRow(QFrame):
 
         if self._lock_icon_label is not None:
             self._lock_icon_label.setPixmap(
-                qta.icon("mdi.lock", color=tokens.fg_faint).pixmap(14, 14)
+                get_cached_qta_pixmap("mdi.lock", color=tokens.fg_faint, size=14)
             )
 
         if self._delete_btn is not None:
-            self._delete_btn.setIcon(qta.icon("mdi.close-circle-outline", color=tokens.fg))
+            self._delete_btn.setIcon(get_themed_qta_icon("mdi.close-circle-outline", color=tokens.fg))
 
     def _on_delete_clicked(self):
         """При клике на удаление - уведомляем родителя"""
@@ -303,10 +301,10 @@ class OrchestraWhitelistPage(BasePage):
         tokens = tokens or get_theme_tokens()
 
         if hasattr(self, "add_btn") and self.add_btn is not None:
-            self.add_btn.setIcon(qta.icon("mdi.plus", color=tokens.fg))
+            self.add_btn.setIcon(get_themed_qta_icon("mdi.plus", color=tokens.fg))
 
         if hasattr(self, "clear_user_btn") and self.clear_user_btn is not None:
-            self.clear_user_btn.setIcon(qta.icon("mdi.delete-sweep", color=tokens.fg))
+            self.clear_user_btn.setIcon(get_themed_qta_icon("mdi.delete-sweep", color=tokens.fg))
 
         if hasattr(self, "restart_warning") and self.restart_warning is not None:
             self.restart_warning.setStyleSheet(
@@ -405,7 +403,7 @@ class OrchestraWhitelistPage(BasePage):
         return False
 
     def _sync_whitelist_view(self, *, refresh: bool) -> None:
-        snapshot = get_orchestra_whitelist_runtime_service().get_snapshot(
+        snapshot = self.window().app_context.orchestra_whitelist_runtime_service.get_snapshot(
             self.window(),
             refresh=refresh,
         )
@@ -549,7 +547,7 @@ class OrchestraWhitelistPage(BasePage):
         if not domain:
             return
 
-        if get_orchestra_whitelist_runtime_service().add_domain(self.window(), domain):
+        if self.window().app_context.orchestra_whitelist_runtime_service.add_domain(self.window(), domain):
             self.domain_input.clear()
             self._refresh_data()
             self._show_restart_warning()
@@ -568,14 +566,14 @@ class OrchestraWhitelistPage(BasePage):
 
     def _on_row_delete_requested(self, domain: str):
         """Удаление при нажатии кнопки X в ряду"""
-        if get_orchestra_whitelist_runtime_service().remove_domain(self.window(), domain):
+        if self.window().app_context.orchestra_whitelist_runtime_service.remove_domain(self.window(), domain):
             self._refresh_data()
             self._show_restart_warning()
             log(f"Удалён из белого списка: {domain}", "INFO")
 
     def _clear_user_domains(self):
         """Очищает все пользовательские домены из белого списка"""
-        snapshot = get_orchestra_whitelist_runtime_service().get_snapshot(
+        snapshot = self.window().app_context.orchestra_whitelist_runtime_service.get_snapshot(
             self.window(),
             refresh=True,
         )
@@ -606,7 +604,7 @@ class OrchestraWhitelistPage(BasePage):
             )
             confirmed = bool(box.exec())
         if confirmed:
-            removed = get_orchestra_whitelist_runtime_service().clear_user_domains(
+            removed = self.window().app_context.orchestra_whitelist_runtime_service.clear_user_domains(
                 self.window(),
                 user_domains,
             )

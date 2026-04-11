@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import os
+import re
 import subprocess
 import threading
 import time
@@ -31,6 +32,25 @@ except Exception:  # pragma: no cover - local test environments may not ship psu
     psutil = _PsutilStub()
 
 
+_INLINE_ARG_SPLIT_RE = re.compile(r"(?<=\S)\s+(?=--)")
+
+
+def _split_launch_line(raw_line: str) -> list[str]:
+    """Split a preset line into one or more CLI arguments.
+
+    Circular/source presets may store several `--...` arguments on one line to
+    keep a single logical strategy together. `subprocess.Popen()` still expects
+    every CLI argument as a separate list item, so we split only on whitespace
+    that introduces the next `--` argument.
+    """
+    stripped = str(raw_line or "").strip()
+    if not stripped:
+        return []
+    if not stripped.startswith("--"):
+        return [stripped]
+    return [part.strip() for part in _INLINE_ARG_SPLIT_RE.split(stripped) if part.strip()]
+
+
 def launch_args_from_preset_text(content: str) -> list[str]:
     """Build argv directly from a source preset file."""
     args: list[str] = []
@@ -40,7 +60,7 @@ def launch_args_from_preset_text(content: str) -> list[str]:
             continue
         if stripped.startswith("#"):
             continue
-        args.append(stripped)
+        args.extend(_split_launch_line(stripped))
     return args
 
 
@@ -219,27 +239,18 @@ class PresetRunnerStateMachine:
         return self._snapshot
 
 
-def publish_runner_runtime_state(
+def publish_runner_failure(
     *,
     launch_method: str,
-    state: PresetRunnerState,
-    preset_path: str = "",
-    pid: int | None = None,
     error: str = "",
 ) -> None:
-    """Best-effort bridge from runner state machine to GUI runtime state."""
-    if state not in {PresetRunnerState.STARTING, PresetRunnerState.RUNNING, PresetRunnerState.FAILED}:
-        return
-
+    """Best-effort bridge for runner-side launch failures only."""
     method = str(launch_method or "").strip().lower()
     if method not in {"direct_zapret1", "direct_zapret2"}:
         return
 
     payload = {
         "launch_method": method,
-        "phase": state.value,
-        "preset_path": str(preset_path or "").strip(),
-        "pid": int(pid) if isinstance(pid, int) else None,
         "error": str(error or "").strip(),
     }
 
@@ -251,14 +262,14 @@ def publish_runner_runtime_state(
             return
 
         target = app.activeWindow()
-        if target is None or not hasattr(target, "runner_runtime_state_requested"):
+        if target is None or not hasattr(target, "runner_failure_requested"):
             for widget in app.topLevelWidgets():
-                if hasattr(widget, "runner_runtime_state_requested"):
+                if hasattr(widget, "runner_failure_requested"):
                     target = widget
                     break
 
-        if target is not None and hasattr(target, "runner_runtime_state_requested"):
-            signal = getattr(target, "runner_runtime_state_requested", None)
+        if target is not None and hasattr(target, "runner_failure_requested"):
+            signal = getattr(target, "runner_failure_requested", None)
             if signal is not None:
                 signal.emit(dict(payload))
     except Exception:
@@ -363,15 +374,37 @@ def wait_for_process_stable_start(
     process: subprocess.Popen,
     readiness_check: Callable[[], bool] | None = None,
 ) -> bool:
-    if process.poll() is not None:
-        return False
-    if readiness_check is not None:
-        try:
-            if readiness_check():
+    startup_timeout = 2.5
+    stable_window = 1.0
+    probe_interval = 0.05
+
+    start_time = time.perf_counter()
+    ready_since: float | None = None
+
+    while (time.perf_counter() - start_time) < startup_timeout:
+        if process.poll() is not None:
+            return False
+
+        is_ready = False
+        if readiness_check is not None:
+            try:
+                is_ready = bool(readiness_check())
+            except Exception:
+                is_ready = False
+        else:
+            is_ready = True
+
+        if is_ready:
+            if ready_since is None:
+                ready_since = time.perf_counter()
+            elif (time.perf_counter() - ready_since) >= stable_window:
                 return True
-        except Exception:
-            pass
-    return process.poll() is None
+        else:
+            ready_since = None
+
+        time.sleep(probe_interval)
+
+    return False
 
 
 def is_process_alive_with_expected_name(pid: int, exe_path: str) -> bool:

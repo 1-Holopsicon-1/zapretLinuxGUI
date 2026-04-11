@@ -20,6 +20,13 @@ class SafeDNSWorker(QThread):
         super().__init__()
         self.skip_on_startup = skip_on_startup
         self.startup_mode = startup_mode
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def is_stop_requested(self) -> bool:
+        return self._stop_requested
     
     def run(self):
         """Выполнение DNS операций"""
@@ -28,11 +35,19 @@ class SafeDNSWorker(QThread):
             if self.skip_on_startup:
                 log("DNS worker: задержка перед применением", "DEBUG")
                 time.sleep(2)
+                if self.is_stop_requested():
+                    self.status_update.emit("⚪ DNS применение отменено")
+                    self.finished_with_result.emit(False)
+                    return
             
             from .dns_force import DNSForceManager, ensure_default_force_dns
             
             # Создаем ключ если нет
             ensure_default_force_dns()
+            if self.is_stop_requested():
+                self.status_update.emit("⚪ DNS применение отменено")
+                self.finished_with_result.emit(False)
+                return
             
             # Создаем менеджер
             manager = DNSForceManager(status_callback=self.status_update.emit)
@@ -42,6 +57,11 @@ class SafeDNSWorker(QThread):
                 if self.startup_mode:
                     log("Принудительный DNS отключен в настройках", "INFO")
                 self.status_update.emit("⚙️ Принудительный DNS отключен")
+                self.finished_with_result.emit(False)
+                return
+            
+            if self.is_stop_requested():
+                self.status_update.emit("⚪ DNS применение отменено")
                 self.finished_with_result.emit(False)
                 return
             
@@ -138,6 +158,7 @@ class DNSUIManager:
             
             # Очищаем воркер
             if self.dns_worker:
+                self.dns_worker.stop()
                 self.dns_worker.quit()
                 self.dns_worker.wait(500)
                 self.dns_worker.deleteLater()
@@ -152,6 +173,7 @@ class DNSUIManager:
             if self.dns_worker:
                 if self.dns_worker.isRunning():
                     log("Останавливаем DNS worker...", "DEBUG")
+                    self.dns_worker.stop()
                     self.dns_worker.quit()
                     if not self.dns_worker.wait(2000):
                         log("⚠ DNS worker не завершился, принудительно завершаем", "WARNING")
@@ -185,6 +207,7 @@ class DNSStartupManager:
         if worker is None:
             return
         try:
+            worker.stop()
             worker.deleteLater()
         except Exception:
             pass

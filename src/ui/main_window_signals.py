@@ -8,16 +8,18 @@ def connect_main_window_page_signals(window) -> None:
     composition/navigation instead of event wiring.
     """
     try:
-        from core.services import get_preset_store
-        store = get_preset_store()
+        from app_context import require_app_context
+        store = require_app_context().preset_store
         store.preset_switched.connect(window._preset_runtime_coordinator.handle_preset_switched)
+        store.preset_identity_changed.connect(window._preset_runtime_coordinator.handle_preset_identity_changed)
     except Exception:
         pass
 
     try:
-        from core.services import get_preset_store_v1
-        store_v1 = get_preset_store_v1()
+        from app_context import require_app_context
+        store_v1 = require_app_context().preset_store_v1
         store_v1.preset_switched.connect(window._preset_runtime_coordinator.handle_preset_switched)
+        store_v1.preset_identity_changed.connect(window._preset_runtime_coordinator.handle_preset_identity_changed)
     except Exception:
         pass
 

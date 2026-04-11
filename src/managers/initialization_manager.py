@@ -226,20 +226,20 @@ class InitializationManager:
         try:
             # Убедимся, что выбранные source-пресеты подготовлены до расчёта summary.
             if method == "direct_zapret2":
-                from core.services import get_direct_flow_coordinator
+                from app_context import require_app_context
 
                 try:
-                    get_direct_flow_coordinator().get_startup_snapshot("direct_zapret2")
+                    require_app_context().direct_flow_coordinator.get_startup_snapshot("direct_zapret2")
                 except Exception as e:
                     log(
                         f"direct_zapret2: не удалось подготовить выбранный source-пресет: {e}",
                         "ERROR",
                     )
             elif method == "direct_zapret1":
-                from core.services import get_direct_flow_coordinator
+                from app_context import require_app_context
 
                 try:
-                    get_direct_flow_coordinator().get_startup_snapshot("direct_zapret1")
+                    require_app_context().direct_flow_coordinator.get_startup_snapshot("direct_zapret1")
                 except Exception:
                     log("direct_zapret1: не удалось подготовить выбранный source-пресет", "ERROR")
 
@@ -419,10 +419,10 @@ class InitializationManager:
 
         # Для новых direct режимов проверяем сам source preset, а не legacy selections dict.
         if launch_method in ("direct_zapret2", "direct_zapret1"):
-            from core.services import get_direct_flow_coordinator
+            from app_context import require_app_context
 
             try:
-                get_direct_flow_coordinator().get_startup_snapshot(launch_method, require_filters=True)
+                require_app_context().direct_flow_coordinator.get_startup_snapshot(launch_method, require_filters=True)
             except Exception:
                 self._show_strategy_required_warning(for_bat=False)
                 self.app.set_status("⚠️ Выберите стратегию для запуска")
@@ -569,7 +569,7 @@ class InitializationManager:
             import time as _t
             t0 = _t.perf_counter()
             
-            from ui.theme import ThemeManager, ThemeHandler
+            from ui.theme import ThemeManager
             from config import THEME_FOLDER
             from PyQt6.QtWidgets import QApplication
             
@@ -581,11 +581,6 @@ class InitializationManager:
                 donate_checker=getattr(self.app, 'donate_checker', None),
                 apply_on_init=False
             )
-            
-            # Handler и привязка
-            self.app.theme_handler = ThemeHandler(self.app, target_widget=self.app)
-            self.app.theme_handler.set_theme_manager(self.app.theme_manager)
-            self.app.theme_handler.update_available_themes()
             
             # ✅ Получаем текущую тему из theme_manager
             current_theme = self.app.theme_manager.current_theme

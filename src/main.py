@@ -1,7 +1,6 @@
-from main.prelaunch import prepare_prelaunch
-
-
 def _run() -> None:
+    from main.prelaunch import prepare_prelaunch
+
     prepare_prelaunch()
     from main.entry import main as run_main
 

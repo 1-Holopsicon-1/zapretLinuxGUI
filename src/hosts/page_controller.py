@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 
@@ -185,14 +183,24 @@ class HostsOperationWorker(QObject):
         self._hosts_manager = hosts_manager
         self._operation = operation
         self._payload = payload
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
 
     def run(self):
+        if self._stop_requested:
+            self.finished.emit(False, "Операция отменена")
+            return
         try:
             result = self._controller.execute_operation(
                 hosts_manager=self._hosts_manager,
                 operation=self._operation,
                 payload=self._payload,
             )
+            if self._stop_requested:
+                self.finished.emit(False, "Операция отменена")
+                return
             self.finished.emit(result.success, result.message)
         except Exception as e:
             log(f"Ошибка в HostsOperationWorker: {e}", "ERROR")
@@ -371,7 +379,7 @@ class HostsPageController:
 
         if error_message is None:
             try:
-                active_domains = set(hosts_manager.get_active_domains() or set())
+                active_domains = set((hosts_manager.get_active_domains_map() or {}).keys())
             except Exception as exc:
                 error_message = str(exc)
                 active_domains = set()
@@ -577,14 +585,14 @@ class HostsPageController:
         service_names: list[str],
         active_domains_map: dict[str, str],
     ) -> HostsSelectionSyncPlan:
-        from hosts.proxy_domains import get_service_available_dns_profiles, get_service_has_geohide_ips
+        from hosts.proxy_domains import get_service_available_dns_profiles, service_has_proxy_profiles
 
         direct_profile = cls.get_direct_profile_name()
         entries: dict[str, HostsSelectionSyncEntry] = {}
         new_selection: dict[str, str] = {}
 
         for service_name in service_names:
-            direct_only = not get_service_has_geohide_ips(service_name)
+            direct_only = not service_has_proxy_profiles(service_name)
             available = list(get_service_available_dns_profiles(service_name) or [])
             selected_profile: str | None = None
             toggle_enabled = False
@@ -644,7 +652,7 @@ class HostsPageController:
             get_all_services,
             get_dns_profiles,
             get_service_available_dns_profiles,
-            get_service_has_geohide_ips,
+            service_has_proxy_profiles,
         )
 
         all_dns_profiles = [p for p in (get_dns_profiles() or []) if isinstance(p, str) and p.strip()]
@@ -663,7 +671,7 @@ class HostsPageController:
         ai: list[str] = []
         other: list[str] = []
         for service_name in ordered_services:
-            if not get_service_has_geohide_ips(service_name):
+            if not service_has_proxy_profiles(service_name):
                 no_geohide.append(service_name)
             elif cls._is_ai_service(service_name):
                 ai.append(service_name)

@@ -8,12 +8,6 @@ class UIManager:
     def __init__(self, app_instance):
         self.app = app_instance
 
-    def update_theme_gallery(self, available_themes: list = None) -> None:
-        """Обновляет галерею тем на странице оформления"""
-        if hasattr(self.app, 'theme_handler') and self.app.theme_handler:
-            self.app.theme_handler.update_available_themes()
-            log("Галерея тем обновлена", "DEBUG")
-
     def update_title_with_subscription_status(self, is_premium: bool, current_theme: str, 
                                             days_remaining: int, source: str = "api") -> None:
         """⚡ Обновляет заголовок окна с информацией о подписке"""

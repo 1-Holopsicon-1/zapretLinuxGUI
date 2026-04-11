@@ -70,50 +70,6 @@ def _install_animation_py314_compat() -> None:
                 pass
 
 
-def _install_qfluent_label_ctor_compat() -> None:
-    try:
-        from qfluentwidgets import (
-            SubtitleLabel,
-            TitleLabel,
-            BodyLabel,
-            StrongBodyLabel,
-            CaptionLabel,
-        )
-    except Exception:
-        return
-
-    classes = (SubtitleLabel, TitleLabel, BodyLabel, StrongBodyLabel, CaptionLabel)
-    for cls in classes:
-        try:
-            if getattr(cls, "_zapret_ctor_compat", False):
-                continue
-
-            original_init = cls.__init__
-
-            def _make_init(_orig):
-                def _compat_init(self, *args, **kwargs):
-                    if len(args) == 2 and not kwargs:
-                        text, parent = args
-                        try:
-                            _orig(self, parent)
-                            try:
-                                self.setText(str(text))
-                            except Exception:
-                                pass
-                            return
-                        except Exception:
-                            pass
-
-                    _orig(self, *args, **kwargs)
-
-                return _compat_init
-
-            cls.__init__ = _make_init(original_init)
-            cls._zapret_ctor_compat = True
-        except Exception:
-            pass
-
-
 def ensure_qt_runtime() -> QApplication:
     global _QT_RUNTIME_READY
 
@@ -131,7 +87,6 @@ def ensure_qt_runtime() -> QApplication:
 
     install_global_combo_popup_closer(app)
     _install_animation_py314_compat()
-    _install_qfluent_label_ctor_compat()
 
     from ui.theme import install_qtawesome_icon_theme_patch, connect_qfluent_accent_signal
 
@@ -142,24 +97,25 @@ def ensure_qt_runtime() -> QApplication:
     return app
 
 
+def _install_non_transient_scrollbars_style(app: QApplication) -> None:
+    from PyQt6.QtWidgets import QProxyStyle, QStyle
+
+    class _NoTransientScrollbarsStyle(QProxyStyle):
+        def styleHint(self, hint, option=None, widget=None, returnData=None):
+            if hint == QStyle.StyleHint.SH_ScrollBar_Transient:
+                return 0
+            return super().styleHint(hint, option, widget, returnData)
+
+    app.setStyle(_NoTransientScrollbarsStyle(app.style()))
+
+
 def application_bootstrap() -> QApplication:
     import ctypes
 
     app = ensure_qt_runtime()
     try:
         try:
-            import platform
-
-            if platform.system() == "Windows":
-                from PyQt6.QtWidgets import QProxyStyle, QStyle
-
-                class _NoTransientScrollbarsStyle(QProxyStyle):
-                    def styleHint(self, hint, option=None, widget=None, returnData=None):
-                        if hint == QStyle.StyleHint.SH_ScrollBar_Transient:
-                            return 0
-                        return super().styleHint(hint, option, widget, returnData)
-
-                app.setStyle(_NoTransientScrollbarsStyle(app.style()))
+            _install_non_transient_scrollbars_style(app)
         except Exception:
             pass
 
