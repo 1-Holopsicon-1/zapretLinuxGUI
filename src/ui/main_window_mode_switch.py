@@ -39,7 +39,7 @@ def handle_main_window_launch_method_changed(window, method: str) -> None:
 
 def complete_main_window_method_switch(window, method: str) -> None:
     from config import get_winws_exe_for_method
-    from launcher_common import invalidate_strategy_runner
+    from direct_launch.runners import invalidate_strategy_runner
     from utils.service_manager import cleanup_windivert_services
 
     direct_flow_coordinator = window.app_context.direct_flow_coordinator

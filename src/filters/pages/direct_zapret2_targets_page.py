@@ -10,7 +10,7 @@ from PyQt6.QtCore import pyqtSignal, QTimer, QEvent
 
 from core.runtime.direct_ui_snapshot_service import DirectBasicUiSnapshotWorker
 from ui.pages.base_page import BasePage
-from dpi.ui.direct_zapret2.strategies_build import build_z2_direct_shell
+from direct_control.zapret2.strategies_build import build_z2_direct_shell
 from filters.runtime.targets_payload_runtime import (
     apply_payload_snapshot,
     set_payload_loading,
@@ -405,7 +405,7 @@ class Zapret2StrategiesPageNew(BasePage):
 
     def _apply_changes(self):
         """Применяет изменения - перезапускает DPI если запущен"""
-        from dpi.policy.direct_runtime_apply_policy import request_direct_runtime_content_apply
+        from direct_launch.flow.apply_policy import request_direct_runtime_content_apply
         request_direct_runtime_content_apply(
             self.parent_app,
             launch_method="direct_zapret2",

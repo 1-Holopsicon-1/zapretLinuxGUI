@@ -55,7 +55,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET2_DIRECT_CONTROL: PageRouteSpec(
         page_name=PageName.ZAPRET2_DIRECT_CONTROL,
         attr_name="zapret2_direct_control_page",
-        module_name="dpi.ui.direct_zapret2.page",
+        module_name="direct_control.zapret2.page",
         class_name="Zapret2DirectControlPage",
         route_key="Zapret2DirectControlPage",
         is_top_level=True,
@@ -103,7 +103,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET1_DIRECT_CONTROL: PageRouteSpec(
         page_name=PageName.ZAPRET1_DIRECT_CONTROL,
         attr_name="zapret1_direct_control_page",
-        module_name="dpi.ui.direct_zapret1.page",
+        module_name="direct_control.zapret1.page",
         class_name="Zapret1DirectControlPage",
         route_key="Zapret1DirectControlPage",
         is_top_level=True,
@@ -187,7 +187,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.DPI_SETTINGS: PageRouteSpec(
         page_name=PageName.DPI_SETTINGS,
         attr_name="dpi_settings_page",
-        module_name="dpi.ui.dpi_settings_page",
+        module_name="settings.dpi.page",
         class_name="DpiSettingsPage",
         route_key="DpiSettingsPage",
         is_top_level=True,

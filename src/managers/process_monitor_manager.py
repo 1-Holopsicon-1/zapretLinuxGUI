@@ -1,7 +1,7 @@
 from PyQt6.QtCore import QObject
 from log import log
 
-from dpi.runtime import get_canonical_winws_process_pids
+from direct_launch.runtime import get_canonical_winws_process_pids
 
 
 class ProcessMonitorManager(QObject):

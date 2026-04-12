@@ -42,16 +42,16 @@ class DpiRuntimeService:
 
         return DpiRuntimeOwnershipMap(
             canonical_writers=(
-                "dpi.runtime.controller.DPIController._begin_runtime_start",
-                "dpi.runtime.controller.DPIController._mark_runtime_running",
-                "dpi.runtime.controller.DPIController._mark_runtime_failed",
-                "dpi.runtime.controller.DPIController._begin_runtime_stop",
-                "dpi.runtime.controller.DPIController._mark_runtime_stopped",
+                "direct_launch.runtime.controller.DPIController._begin_runtime_start",
+                "direct_launch.runtime.controller.DPIController._mark_runtime_running",
+                "direct_launch.runtime.controller.DPIController._mark_runtime_failed",
+                "direct_launch.runtime.controller.DPIController._begin_runtime_stop",
+                "direct_launch.runtime.controller.DPIController._mark_runtime_stopped",
             ),
             canonical_readers=(
                 "main.LupiDPIApp._apply_runner_failure_update",
-                "dpi.ui.direct_zapret1.page.Zapret1DirectControlPage._get_current_dpi_runtime_state",
-                "dpi.ui.direct_zapret2.page.Zapret2DirectControlPage._apply_runtime_state_snapshot",
+                "direct_control.zapret1.page.Zapret1DirectControlPage._get_current_dpi_runtime_state",
+                "direct_control.zapret2.page.Zapret2DirectControlPage._apply_runtime_state_snapshot",
             ),
             allowed_auxiliary_writers=(
                 "managers.initialization_manager.InitializationManager._init_process_monitor -> bootstrap_probe",

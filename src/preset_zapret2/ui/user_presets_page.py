@@ -834,7 +834,7 @@ class BaseZapret2UserPresetsPage(BasePage):
 
     def _on_dpi_reload_needed(self):
         try:
-            from dpi.policy.direct_runtime_apply_policy import request_direct_runtime_content_apply
+            from direct_launch.flow.apply_policy import request_direct_runtime_content_apply
             parent_app = getattr(self, "parent_app", None)
             if parent_app is not None:
                 request_direct_runtime_content_apply(

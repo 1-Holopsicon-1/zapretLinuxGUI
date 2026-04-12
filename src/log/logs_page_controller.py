@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 
 from config import LOGS_FOLDER, MAX_DEBUG_LOG_FILES, MAX_LOG_FILES, get_winws_exe_for_method
-from launcher_common import get_current_runner
+from direct_launch.runners import get_current_runner
 from log import LOG_FILE, cleanup_old_logs, global_logger, log
 from support_request_bundle import prepare_support_request
 

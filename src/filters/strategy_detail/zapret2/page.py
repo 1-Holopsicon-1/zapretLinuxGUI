@@ -520,7 +520,7 @@ class StrategyDetailPage(BasePage):
             self.show_loading()
         except Exception:
             pass
-        from dpi.policy.direct_runtime_apply_policy import request_direct_runtime_content_apply
+        from direct_launch.flow.apply_policy import request_direct_runtime_content_apply
         if self.parent_app:
             request_direct_runtime_content_apply(
                 self.parent_app,

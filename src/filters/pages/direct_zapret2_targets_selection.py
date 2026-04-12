@@ -20,7 +20,7 @@ def apply_strategy_selection(
 ) -> tuple[dict, bool]:
     try:
         from core.presets.direct_facade import DirectPresetFacade
-        from dpi.policy.direct_runtime_apply_policy import request_direct_runtime_content_apply
+        from direct_launch.flow.apply_policy import request_direct_runtime_content_apply
 
         if (strategy_id or "").strip().lower() == "custom":
             new_selections = dict(target_selections or {})

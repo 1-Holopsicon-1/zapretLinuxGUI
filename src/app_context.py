@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from core.direct_flow import DirectFlowCoordinator
+    from direct_launch.flow.direct_flow import DirectFlowCoordinator
     from core.paths import AppPaths
     from core.presets.preset_file_store import PresetFileStore
     from core.presets.runtime_store import DirectRuntimePresetStore
@@ -47,7 +47,7 @@ class AppContext:
 
 def build_app_context(*, initial_ui_state: AppUiState | None = None) -> AppContext:
     from config import get_zapret_userdata_dir
-    from core.direct_flow import DirectFlowCoordinator
+    from direct_launch.flow.direct_flow import DirectFlowCoordinator
     from core.paths import AppPaths
     from core.presets.preset_file_store import PresetFileStore
     from core.presets.runtime_store import DirectRuntimePresetStore

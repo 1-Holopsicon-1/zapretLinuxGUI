@@ -277,7 +277,7 @@ class InitializationManager:
     def _init_dpi_runtime(self):
         """Инициализация DPI runtime API."""
         try:
-            from dpi.runtime import DpiRuntimeApi
+            from direct_launch.runtime import DpiRuntimeApi
             from config import get_winws_exe_for_method, is_zapret2_mode
             from strategy_menu import get_strategy_launch_method
 
@@ -364,7 +364,7 @@ class InitializationManager:
     def _init_dpi_controller(self):
         """Инициализация DPI контроллера"""
         try:
-            from dpi.runtime import DPIController
+            from direct_launch.runtime import DPIController
             self.app.dpi_controller = DPIController(self.app)
             log("DPI Controller инициализирован", "INFO")
             self.init_tasks_completed.add('dpi_controller')
