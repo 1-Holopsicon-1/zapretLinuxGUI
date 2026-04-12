@@ -626,7 +626,9 @@ class PresetSubpageBase(BasePage):
             return ""
 
     def _require_app_context(self):
-        app_context = getattr(self.window(), "app_context", None)
+        app_context = getattr(self, "app_context", None)
+        if app_context is None:
+            app_context = getattr(self.window(), "app_context", None)
         if app_context is None:
             raise RuntimeError("AppContext is required for preset subpage")
         return app_context

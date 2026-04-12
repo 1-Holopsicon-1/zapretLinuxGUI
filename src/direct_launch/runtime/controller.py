@@ -38,10 +38,7 @@ from .workers import (
     DirectLaunchStopWorker,
     StopAndExitWorker,
 )
-from ui.main_window_page_dispatch import (
-    show_active_strategy_page_loading,
-)
-
+from ui.runtime_ui_bridge import ensure_runtime_ui_bridge
 
 class DirectLaunchController:
     """Основной orchestrator прямого запуска и остановки обхода."""
@@ -70,6 +67,9 @@ class DirectLaunchController:
 
     def _runtime_service(self):
         return getattr(self.app, "launch_runtime_service", None)
+
+    def _runtime_ui_bridge(self):
+        return ensure_runtime_ui_bridge(self.app)
 
     def transition_pipeline_in_progress(self, launch_method: str | None = None) -> bool:
         method = str(launch_method or "").strip().lower()
@@ -358,8 +358,9 @@ class DirectLaunchController:
         
         # Показываем индикатор только на уже загруженной странице стратегий
         # для активного метода запуска, без старого обязательного attr-контракта.
-        if hasattr(self.app, 'main_window'):
-            show_active_strategy_page_loading(self.app.main_window)
+        bridge = self._runtime_ui_bridge()
+        if bridge is not None:
+            bridge.show_active_strategy_page_loading()
         
         store = getattr(self.app, "ui_state_store", None)
         if store is not None:
@@ -395,8 +396,9 @@ class DirectLaunchController:
         method_name = resolve_method_name(launch_method)
         self.app.set_status(f"🛑 Остановка DPI ({method_name})...")
         
-        if hasattr(self.app, 'main_window'):
-            show_active_strategy_page_loading(self.app.main_window)
+        bridge = self._runtime_ui_bridge()
+        if bridge is not None:
+            bridge.show_active_strategy_page_loading()
         
         store = getattr(self.app, "ui_state_store", None)
         if store is not None:

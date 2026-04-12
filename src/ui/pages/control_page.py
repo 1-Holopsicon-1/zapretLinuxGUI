@@ -272,7 +272,9 @@ class ControlPage(BasePage):
         self._on_reset_program_clicked()
 
     def _require_app_context(self):
-        app_context = getattr(self.window(), "app_context", None)
+        app_context = getattr(self, "app_context", None)
+        if app_context is None:
+            app_context = getattr(self.window(), "app_context", None)
         if app_context is None:
             raise RuntimeError("AppContext is required for ControlPage")
         return app_context

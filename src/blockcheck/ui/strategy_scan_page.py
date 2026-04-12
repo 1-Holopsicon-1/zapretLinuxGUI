@@ -555,8 +555,11 @@ class StrategyScanPage(BasePage):
     def _on_apply_strategy(self, strategy_args: str, strategy_name: str):
         """Copy the working strategy into the selected source preset."""
         try:
+            app_context = getattr(self, "app_context", None)
+            if app_context is None:
+                app_context = getattr(self.window(), "app_context", None)
             result = StrategyScanPageController.apply_strategy(
-                app_context=self.window().app_context,
+                app_context=app_context,
                 strategy_args=strategy_args,
                 strategy_name=strategy_name,
                 scan_target=self._scan_target,

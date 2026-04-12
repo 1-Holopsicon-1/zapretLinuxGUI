@@ -4,7 +4,8 @@ import os
 
 from log import log
 from ui.page_names import PageName
-from ui.main_window_page_dispatch import call_loaded_page_method
+from ui.page_method_dispatch import request_blockcheck_diagnostics_focus
+from ui.window_adapter import ensure_window_adapter
 from utils import run_hidden
 
 
@@ -65,8 +66,7 @@ class WindowActionsMixin:
                 strategy_name = display_name
                 log(f"Установлено простое название для режима {launch_method}: {display_name}", "DEBUG")
 
-            if hasattr(self, "update_current_strategy_display"):
-                self.update_current_strategy_display(strategy_name)
+            ensure_window_adapter(self).update_current_strategy_display(strategy_name)
 
             if launch_method in ("direct_zapret2", "direct_zapret1", "orchestra"):
                 log(
@@ -87,7 +87,7 @@ class WindowActionsMixin:
     def show_subscription_dialog(self) -> None:
         """Переключается на страницу Premium."""
         try:
-            self.show_page(PageName.PREMIUM)
+            ensure_window_adapter(self).show_page(PageName.PREMIUM)
         except Exception as e:
             log(f"Ошибка при переходе на страницу Premium: {e}", level="❌ ERROR")
 
@@ -101,13 +101,10 @@ class WindowActionsMixin:
     def open_connection_test(self) -> None:
         """Переключает на вкладку диагностики соединений."""
         try:
-            if self.show_page(PageName.BLOCKCHECK):
-                self._route_search_result(PageName.BLOCKCHECK, "diagnostics")
-                call_loaded_page_method(
-                    self,
-                    PageName.BLOCKCHECK,
-                    "request_diagnostics_start_focus",
-                )
+            adapter = ensure_window_adapter(self)
+            if adapter.show_page(PageName.BLOCKCHECK):
+                adapter.route_search_result(PageName.BLOCKCHECK, "diagnostics")
+                request_blockcheck_diagnostics_focus(self)
                 log("Открыта вкладка диагностики в BlockCheck", "INFO")
         except Exception as e:
             log(f"Ошибка при открытии вкладки тестирования: {e}", "❌ ERROR")

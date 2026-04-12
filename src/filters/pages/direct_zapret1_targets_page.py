@@ -58,7 +58,9 @@ class Zapret1StrategiesPage(BasePage):
     back_clicked = pyqtSignal()
 
     def _require_app_context(self):
-        app_context = getattr(self.parent(), "app_context", None)
+        app_context = getattr(self, "app_context", None)
+        if app_context is None:
+            app_context = getattr(self.parent(), "app_context", None)
         if app_context is None:
             app_context = getattr(self.window(), "app_context", None)
         if app_context is None:

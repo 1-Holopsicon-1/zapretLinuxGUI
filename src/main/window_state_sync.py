@@ -4,7 +4,7 @@ import os
 
 from log import log
 from main.runtime_state import startup_elapsed_ms
-from ui.main_window_appearance_flow import on_animations_changed
+from ui.window_appearance_state import on_animations_changed
 from ui.holiday_effects import HolidayEffectsManager
 from app_state.main_window_state import AppUiState
 

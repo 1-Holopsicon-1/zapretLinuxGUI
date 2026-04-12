@@ -257,7 +257,9 @@ class StrategyDetailPage(BasePage):
             app_context=app_context,
             on_dpi_reload_needed=self._on_dpi_reload_needed,
         )
-        app_context = getattr(parent, "app_context", None)
+        app_context = getattr(self, "app_context", None)
+        if app_context is None:
+            app_context = getattr(parent, "app_context", None)
         if app_context is None:
             app_context = getattr(self.window(), "app_context", None)
         if app_context is None:
@@ -267,7 +269,7 @@ class StrategyDetailPage(BasePage):
         self._favorite_strategy_ids = set()
         self._preview_dialog = None
         self._preview_pinned = False
-        self._main_window = None
+        self._host_window = None
         self._strategies_data_by_id = {}
         self._content_built = False
         self._last_theme_overrides_key = None
@@ -290,22 +292,22 @@ class StrategyDetailPage(BasePage):
         self._content_built = True
 
         # Close hover/pinned preview when the main window hides/deactivates (e.g. tray).
-        QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._install_main_window_event_filter())
+        QTimer.singleShot(0, lambda: (not self._cleanup_in_progress) and self._install_host_window_event_filter())
 
         # Подключаемся к process_monitor для отслеживания статуса DPI
         self._connect_process_monitor()
         self._apply_pending_target_request_if_ready()
 
-    def _install_main_window_event_filter(self) -> None:
+    def _install_host_window_event_filter(self) -> None:
         if self._cleanup_in_progress:
             return
         try:
             w = self.window()
         except Exception:
             w = None
-        if not w or w is self._main_window:
+        if not w or w is self._host_window:
             return
-        self._main_window = w
+        self._host_window = w
         try:
             w.installEventFilter(self)
         except Exception:
@@ -313,7 +315,7 @@ class StrategyDetailPage(BasePage):
 
     def eventFilter(self, obj, event):  # noqa: N802 (Qt override)
         try:
-            if obj is self._main_window and event is not None:
+            if obj is self._host_window and event is not None:
                 et = event.type()
                 if et in (
                     QEvent.Type.Hide,
@@ -1207,7 +1209,9 @@ class StrategyDetailPage(BasePage):
         return payload
 
     def _require_app_context(self):
-        app_context = getattr(self.window(), "app_context", None)
+        app_context = getattr(self, "app_context", None)
+        if app_context is None:
+            app_context = getattr(self.window(), "app_context", None)
         if app_context is None:
             raise RuntimeError("AppContext is required for Zapret2 strategy detail page")
         return app_context
@@ -1872,7 +1876,7 @@ class StrategyDetailPage(BasePage):
         self._preview_pinned = False
 
     def _ensure_preview_dialog(self):
-        parent_win = self._main_window or self.window() or self
+        parent_win = self._host_window or self.window() or self
         self._preview_dialog = ensure_preview_dialog_instance(
             self._preview_dialog,
             parent_win=parent_win,
@@ -2363,11 +2367,11 @@ class StrategyDetailPage(BasePage):
             pass
 
         try:
-            if self._main_window is not None:
-                self._main_window.removeEventFilter(self)
+            if self._host_window is not None:
+                self._host_window.removeEventFilter(self)
         except Exception:
             pass
-        self._main_window = None
+        self._host_window = None
 
         try:
             if self._process_monitor_connected and self.parent_app and hasattr(self.parent_app, 'process_monitor'):

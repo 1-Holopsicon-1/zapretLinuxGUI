@@ -7,14 +7,17 @@ from PyQt6.QtGui import QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import QCompleter, QWidget
 
 from log import log
-from ui.page_names import PageName
-from ui.router import (
+from ui.navigation.schema import (
+    PAGE_ROUTE_SPECS,
+    get_eager_page_names_for_method,
     get_hidden_pages_for_method,
     get_nav_visibility,
     get_page_route_key,
     get_sidebar_pages_for_method,
     get_sidebar_search_pages_for_method,
 )
+from ui.page_names import PageName
+from ui.window_adapter import ensure_window_adapter
 from ui.text_catalog import (
     find_search_entries,
     format_search_result,
@@ -22,8 +25,7 @@ from ui.text_catalog import (
     normalize_language,
     tr as tr_catalog,
 )
-from ui.main_window_page_dispatch import call_loaded_page_method
-from ui.main_window_pages import get_eager_page_names
+from ui.page_method_dispatch import switch_page_tab
 
 
 @dataclass(frozen=True)
@@ -46,10 +48,10 @@ def add_nav_item(window, page_name: PageName, position, *, initial_visible: bool
 
     icon = window._nav_icons.get(page_name, window._default_nav_icon)
     text = get_nav_label(window, page_name)
-    eager_pages = set(get_eager_page_names(window))
+    eager_pages = set(get_eager_page_names_for_method(window._get_launch_method()))
 
     if page_name in eager_pages:
-        page = window._ensure_page(page_name)
+        page = ensure_window_adapter(window).ensure_page(page_name)
         if page is None:
             log(f"[NAV] _add eager {page_name.name}: page is None - skip", "DEBUG")
             return
@@ -66,7 +68,7 @@ def add_nav_item(window, page_name: PageName, position, *, initial_visible: bool
             routeKey=route_key,
             icon=icon,
             text=text,
-            onClick=lambda checked=False, target=page_name: window.show_page(target),
+            onClick=lambda checked=False, target=page_name, adapter=ensure_window_adapter(window): adapter.show_page(target),
             selectable=True,
             position=position,
         )
@@ -156,7 +158,7 @@ def init_navigation(window) -> None:
     window._nav_headers.append((appearance_header, appearance_pages, appearance_header_key))
 
     for hidden in get_hidden_pages_for_method(current_method):
-        page = window.pages.get(hidden)
+        page = ensure_window_adapter(window).pages.get(hidden)
         if page is not None:
             if not page.objectName():
                 page.setObjectName(page.__class__.__name__)
@@ -283,7 +285,10 @@ def get_nav_label(window, page_name: PageName) -> str:
 
 
 def get_sidebar_search_pages(window) -> set[PageName]:
-    return get_sidebar_search_pages_for_method(window._get_launch_method(), set(window._page_class_specs.keys()))
+    return get_sidebar_search_pages_for_method(
+        window._get_launch_method(),
+        set(PAGE_ROUTE_SPECS.keys()),
+    )
 
 
 def setup_sidebar_search_completer(window) -> None:
@@ -501,14 +506,14 @@ def route_sidebar_search_by_text(window, text: str, prefer_first: bool = False) 
 
 
 def route_search_result(window, page_name: PageName, tab_key: str = "") -> bool:
-    if not window.show_page(page_name):
+    if not ensure_window_adapter(window).show_page(page_name):
         return False
 
     if not tab_key:
         return True
 
     try:
-        return bool(call_loaded_page_method(window, page_name, "switch_to_tab", tab_key))
+        return bool(switch_page_tab(window, page_name, tab_key))
     except Exception:
         return False
 

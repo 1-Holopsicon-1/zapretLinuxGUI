@@ -1,4 +1,4 @@
-# ui/main_window.py
+# ui/window_ui_facade.py
 """
 Главное окно приложения — навигация через qfluentwidgets FluentWindow.
 
@@ -26,76 +26,33 @@ except ImportError:
     SearchLineEdit = QLineEdit
 
 from ui.page_names import PageName
-from ui.router import get_page_route_key
 from ui.text_catalog import tr as tr_catalog
-from ui.main_window_navigation import (
-    redirect_to_strategies_page_for_method,
+from ui.navigation.navigation_controller import ensure_navigation_controller
+from ui.mode_switch_workflow import (
+    auto_start_after_method_switch,
+    complete_launch_method_switch,
 )
-from ui.main_window_navigation_build import (
-    add_nav_item,
-    apply_nav_visibility_filter,
-    apply_ui_language_to_page,
-    attach_sidebar_search_to_titlebar,
-    get_nav_label,
-    get_sidebar_search_pages,
-    init_navigation,
-    on_sidebar_search_changed,
-    on_sidebar_search_result_activated,
-    on_sidebar_search_result_text_activated,
-    refresh_navigation_texts,
-    refresh_pages_language,
-    resolve_ui_language,
-    route_search_result,
-    route_sidebar_search_by_text,
-    setup_sidebar_search_completer,
-    sync_nav_visibility,
-    update_sidebar_search_suggestions,
-    update_titlebar_search_width,
-)
-from ui.main_window_pages import (
-    connect_lazy_page_signals,
-    connect_signal_once,
-    create_pages,
-    ensure_page,
-    ensure_page_in_stacked_widget,
-    get_eager_page_names,
-    get_loaded_page,
-    has_nav_item,
-    set_stacked_widget_current_page,
-)
-from ui.main_window_mode_switch import (
-    auto_start_after_main_window_method_switch,
-    complete_main_window_method_switch,
-)
-from ui.main_window_display import (
+from ui.window_display_state import (
     get_direct_strategy_summary,
-    set_status_text as set_main_window_status_text,
-    update_autostart_display as update_main_window_autostart_display,
-    update_current_strategy_display as update_main_window_current_strategy_display,
-    update_subscription_display as update_main_window_subscription_display,
+    set_status_text,
+    update_autostart_display,
+    update_current_strategy_display,
+    update_subscription_display,
 )
-from ui.main_window_page_dispatch import (
-    call_loaded_page_method,
-    show_active_strategy_page_loading,
-    show_active_strategy_page_success,
-)
-from ui.main_window_bootstrap_flow import (
-    create_preset_runtime_coordinator,
-    ensure_session_memory_defaults,
-    finalize_page_signal_bootstrap,
-    finish_ui_bootstrap,
+from ui.window_bootstrap_runtime import (
     get_current_launch_method_for_preset_runtime,
-    initialize_build_ui_state,
     resolve_active_preset_watch_path,
 )
-from ui.main_window_startup_metrics import (
+from ui.startup_ui_metrics import (
     log_startup_page_init_summary,
     pump_startup_ui,
     record_startup_page_init_metric,
 )
-from ui.main_window_state_flow import (
+from ui.window_state_refresh import (
     refresh_pages_after_preset_switch,
 )
+from ui.ui_workflows import ensure_ui_workflows
+from ui.ui_root import WindowUiRoot
 
 # ---------------------------------------------------------------------------
 # Navigation icon mapping (SectionName/PageName -> FluentIcon)
@@ -227,6 +184,19 @@ class MainWindowUI:
     Mixin: creates pages and registers them with FluentWindow navigation.
     """
 
+    def _get_ui_root(self) -> WindowUiRoot:
+        ui_root = getattr(self, "_ui_root", None)
+        if ui_root is None:
+            ui_root = WindowUiRoot(self)
+            self._ui_root = ui_root
+        return ui_root
+
+    def _get_navigation_controller(self):
+        return ensure_navigation_controller(self)
+
+    def _get_ui_workflows(self):
+        return ensure_ui_workflows(self)
+
     def build_ui(self, width: int, height: int):
         """Build UI: create pages and populate FluentWindow navigation sidebar.
 
@@ -234,10 +204,9 @@ class MainWindowUI:
         dedicated window geometry controller before this is called — do NOT
         resize here, that would overwrite the saved geometry.
         """
-        _ = width
-        _ = height
-        initialize_build_ui_state(
-            self,
+        self._get_ui_root().build(
+            width=width,
+            height=height,
             nav_icons=_NAV_ICONS,
             nav_labels=_NAV_LABELS,
             has_fluent=HAS_FLUENT,
@@ -245,20 +214,6 @@ class MainWindowUI:
             nav_scroll_position=NavigationItemPosition.SCROLL if HAS_FLUENT else None,
             sidebar_search_widget_cls=_SidebarSearchNavWidget if HAS_FLUENT else None,
         )
-        self._preset_runtime_coordinator = create_preset_runtime_coordinator(self)
-
-        self._page_signal_bootstrap_complete = False
-        create_pages(self)
-
-        # Register pages in navigation sidebar
-        init_navigation(self)
-
-        # После перехода на lazy pages уже созданные eager-страницы тоже должны
-        # получить те же подключения сигналов, что и ленивые страницы.
-        finalize_page_signal_bootstrap(self)
-
-        # Session memory
-        ensure_session_memory_defaults(self)
 
     def finish_ui_bootstrap(self) -> None:
         """Дозавершает тяжёлые связи главного окна после первого показа UI.
@@ -268,7 +223,7 @@ class MainWindowUI:
         пресета и часть сервисных связей можно подключить позже, отдельным
         шагом, не блокируя первый визуальный отклик.
         """
-        finish_ui_bootstrap(self)
+        self._get_ui_root().finish_bootstrap()
 
     @staticmethod
     def _get_current_launch_method_for_preset_runtime() -> str:
@@ -296,117 +251,56 @@ class MainWindowUI:
         return method or "direct_zapret2"
 
     def _add_nav_item(self, page_name: PageName, position) -> None:
-        add_nav_item(self, page_name, position)
+        self._get_navigation_controller().add_nav_item(page_name, position)
 
     # ------------------------------------------------------------------
     # Navigation setup (FluentWindow sidebar)
     # ------------------------------------------------------------------
 
     def _init_navigation(self):
-        init_navigation(self)
+        self._get_navigation_controller().init_navigation()
 
     def _attach_sidebar_search_to_titlebar(self) -> None:
-        attach_sidebar_search_to_titlebar(self)
+        self._get_navigation_controller().attach_sidebar_search_to_titlebar()
 
     def _update_titlebar_search_width(self) -> None:
-        update_titlebar_search_width(self)
-
-    def _sync_nav_visibility(self, method: str | None = None) -> None:
-        sync_nav_visibility(self, method)
+        self._get_navigation_controller().update_titlebar_search_width()
 
     def _on_sidebar_search_changed(self, text: str) -> None:
-        on_sidebar_search_changed(self, text)
+        self._get_navigation_controller().on_sidebar_search_changed(text)
 
     def _apply_nav_visibility_filter(self) -> None:
-        apply_nav_visibility_filter(self)
+        self._get_navigation_controller().apply_nav_visibility_filter()
 
     def _resolve_ui_language(self) -> str:
-        return resolve_ui_language(self)
+        return self._get_navigation_controller().resolve_ui_language()
 
     def _get_nav_label(self, page_name: PageName) -> str:
-        return get_nav_label(self, page_name)
+        return self._get_navigation_controller().get_nav_label(page_name)
 
     def _get_sidebar_search_pages(self) -> set[PageName]:
-        return get_sidebar_search_pages(self)
+        return self._get_navigation_controller().get_sidebar_search_pages()
 
     def _setup_sidebar_search_completer(self) -> None:
-        setup_sidebar_search_completer(self)
+        self._get_navigation_controller().setup_sidebar_search_completer()
 
     def _update_sidebar_search_suggestions(self) -> None:
-        update_sidebar_search_suggestions(self)
+        self._get_navigation_controller().update_sidebar_search_suggestions()
 
     def _on_sidebar_search_result_activated(self, index: QModelIndex) -> None:
-        on_sidebar_search_result_activated(self, index)
+        self._get_navigation_controller().on_sidebar_search_result_activated(index)
 
     def _on_sidebar_search_result_text_activated(self, text: str) -> None:
-        on_sidebar_search_result_text_activated(self, text)
+        self._get_navigation_controller().on_sidebar_search_result_text_activated(text)
 
     def _route_sidebar_search_by_text(self, text: str, prefer_first: bool = False) -> bool:
-        return route_sidebar_search_by_text(self, text, prefer_first=prefer_first)
-
-    def _route_search_result(self, page_name: PageName, tab_key: str = "") -> None:
-        route_search_result(self, page_name, tab_key)
-
-    def _refresh_navigation_texts(self) -> None:
-        refresh_navigation_texts(self)
-
-    def _apply_ui_language_to_page(self, page: QWidget | None) -> None:
-        apply_ui_language_to_page(self, page)
-
-    def _refresh_pages_language(self) -> None:
-        refresh_pages_language(self)
-
-    # ------------------------------------------------------------------
-    # Page creation (lazy + eager) — UNCHANGED logic
-    # ------------------------------------------------------------------
-
-    def _get_eager_page_names(self) -> tuple[PageName, ...]:
-        return get_eager_page_names(self)
-
-    def _create_pages(self):
-        create_pages(self)
-
-    def _connect_signal_once(self, key: str, signal_obj, slot_obj) -> None:
-        connect_signal_once(self, key, signal_obj, slot_obj)
-
-    def _connect_lazy_page_signals(self, page_name: PageName, page: QWidget) -> None:
-        connect_lazy_page_signals(self, page_name, page)
-
-
-    def _ensure_page_in_stacked_widget(self, page: QWidget | None) -> None:
-        ensure_page_in_stacked_widget(self, page)
-
-    def _ensure_page(self, name: PageName) -> QWidget | None:
-        return ensure_page(self, name)
-
-    def _get_loaded_page(self, name: PageName) -> QWidget | None:
-        return get_loaded_page(self, name)
+        return self._get_navigation_controller().route_sidebar_search_by_text(text, prefer_first=prefer_first)
 
     def get_loaded_page(self, name: PageName) -> QWidget | None:
-        return get_loaded_page(self, name)
-
-    def get_page(self, name: PageName) -> QWidget:
-        return self._ensure_page(name)
+        return self._get_ui_root().get_loaded_page(name)
 
     def show_page(self, name: PageName) -> bool:
-        """Switch to the given page. Works with FluentWindow's switchTo()."""
-        page = self._ensure_page(name)
-        if page is None:
-            return False
-        self._ensure_page_in_stacked_widget(page)
-        use_nav_route = has_nav_item(self, name)
-
-        switched = set_stacked_widget_current_page(self, page, animate=use_nav_route)
-        if not switched:
-            return False
-
-        try:
-            route_key = get_page_route_key(name)
-            if route_key and use_nav_route:
-                self.navigationInterface.setCurrentItem(route_key)
-        except Exception:
-            pass
-        return True
+        return self._get_ui_root().show_page(name)
 
     # ------------------------------------------------------------------
     # All handler methods — PRESERVED from original
@@ -416,28 +310,28 @@ class MainWindowUI:
         refresh_pages_after_preset_switch(self)
 
     def _complete_method_switch(self, method: str):
-        complete_main_window_method_switch(self, method)
+        complete_launch_method_switch(self, method)
 
     def _redirect_to_strategies_page_for_method(self, method: str) -> None:
-        redirect_to_strategies_page_for_method(self, method)
+        self._get_ui_workflows().redirect_to_strategies_page_for_method(method)
 
     def _auto_start_after_method_switch(self, method: str):
-        auto_start_after_main_window_method_switch(self, method)
+        auto_start_after_method_switch(self, method)
 
     def _get_direct_strategy_summary(self, max_items: int = 2) -> str:
         return get_direct_strategy_summary(self, max_items=max_items)
 
     def update_current_strategy_display(self, strategy_name: str):
-        update_main_window_current_strategy_display(self, strategy_name)
+        update_current_strategy_display(self, strategy_name)
 
     def update_autostart_display(self, enabled: bool, strategy_name: str = None):
-        update_main_window_autostart_display(self, enabled, strategy_name)
+        update_autostart_display(self, enabled, strategy_name)
 
     def update_subscription_display(self, is_premium: bool, days: int = None):
-        update_main_window_subscription_display(self, is_premium, days)
+        update_subscription_display(self, is_premium, days)
 
     def set_status_text(self, text: str, status: str = "neutral"):
-        set_main_window_status_text(self, text, status)
+        set_status_text(self, text, status)
 
     def _navigate_to_dpi_settings(self):
         self.show_page(PageName.DPI_SETTINGS)

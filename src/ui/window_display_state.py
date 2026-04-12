@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from log import log
 from ui.page_names import PageName
+from ui.window_adapter import ensure_window_adapter
 
 
 def get_direct_strategy_summary(window, max_items: int = 2) -> str:
@@ -70,7 +71,7 @@ def set_status_text(window, text: str, status: str = "neutral") -> None:
 
 
 def open_subscription_dialog(window) -> None:
-    window.show_page(PageName.PREMIUM)
+    ensure_window_adapter(window).show_page(PageName.PREMIUM)
 
 
 def on_autostart_enabled(window) -> None:

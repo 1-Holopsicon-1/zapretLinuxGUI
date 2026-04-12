@@ -295,7 +295,9 @@ class Zapret2DirectControlPage(BasePage):
         return display_name, display_name
 
     def _require_app_context(self):
-        app_context = getattr(self.window(), "app_context", None)
+        app_context = getattr(self, "app_context", None)
+        if app_context is None:
+            app_context = getattr(self.window(), "app_context", None)
         if app_context is None:
             raise RuntimeError("AppContext is required for Zapret2 direct control page")
         return app_context

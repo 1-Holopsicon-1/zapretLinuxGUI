@@ -8,6 +8,7 @@ from main.runtime_state import (
     startup_elapsed_ms,
 )
 from ui.holiday_effects import HolidayEffectsManager
+from ui.app_window_locator import register_app_window
 from ui.window_close_controller import WindowCloseController
 from ui.window_geometry_controller import WindowGeometryController
 from ui.window_notification_controller import WindowNotificationController
@@ -17,6 +18,7 @@ def window_bootstrap_for(window_cls, *, start_in_tray: bool):
     app_context = build_app_context(initial_ui_state=window_cls._build_initial_ui_state())
     install_app_context(app_context)
     window = window_cls(start_in_tray=start_in_tray, app_context=app_context)
+    register_app_window(window)
     return app_context, window
 
 

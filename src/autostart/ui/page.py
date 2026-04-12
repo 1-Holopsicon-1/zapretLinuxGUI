@@ -316,7 +316,9 @@ class AutostartPage(BasePage):
         enabled: bool,
         strategy_name: str | None = None,
     ) -> None:
-        app_runtime_state = getattr(self.window(), "app_runtime_state", None)
+        app_runtime_state = getattr(self, "app_runtime_state", None)
+        if app_runtime_state is None:
+            app_runtime_state = getattr(self.window(), "app_runtime_state", None)
         if self._ui_state_store is not None:
             if strategy_name:
                 self._ui_state_store.set_current_strategy_summary(strategy_name)

@@ -243,7 +243,7 @@ class InitializationManager:
                     log("direct_zapret1: не удалось подготовить выбранный source-пресет", "ERROR")
 
             if method in ("direct_zapret2", "direct_zapret1"):
-                from ui.main_window_display import get_direct_strategy_summary
+                from ui.window_display_state import get_direct_strategy_summary
 
                 return get_direct_strategy_summary(self.app)
         except Exception as e:
