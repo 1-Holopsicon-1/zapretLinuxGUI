@@ -58,18 +58,18 @@ class LaunchRuntimeService:
 
         return LaunchRuntimeOwnershipMap(
             canonical_writers=(
-                "direct_launch.runtime.controller.DirectLaunchController._begin_runtime_start",
-                "direct_launch.runtime.controller.DirectLaunchController._mark_runtime_running",
-                "direct_launch.runtime.controller.DirectLaunchController._mark_runtime_failed",
-                "direct_launch.runtime.controller.DirectLaunchController._begin_runtime_stop",
-                "direct_launch.runtime.controller.DirectLaunchController._mark_runtime_stopped",
+                "winws_runtime.runtime.controller.DirectLaunchController._begin_runtime_start",
+                "winws_runtime.runtime.controller.DirectLaunchController._mark_runtime_running",
+                "winws_runtime.runtime.controller.DirectLaunchController._mark_runtime_failed",
+                "winws_runtime.runtime.controller.DirectLaunchController._begin_runtime_stop",
+                "winws_runtime.runtime.controller.DirectLaunchController._mark_runtime_stopped",
             ),
             canonical_readers=(
                 "main.LupiDPIApp._apply_runner_failure_update",
-                "direct_launch.runtime.lifecycle_feedback.verify_dpi_process_running",
-                "direct_control.zapret1.page.Zapret1DirectControlPage._get_current_dpi_runtime_state",
+                "winws_runtime.runtime.lifecycle_feedback.verify_dpi_process_running",
+                "ui_direct_control.zapret1.page.Zapret1DirectControlPage._get_current_dpi_runtime_state",
                 "ui.pages.control_page.ControlPage._get_current_dpi_runtime_state",
-                "direct_control.zapret2.page.Zapret2DirectControlPage._on_ui_state_changed",
+                "ui_direct_control.zapret2.page.Zapret2DirectControlPage._on_ui_state_changed",
                 "tray.SystemTrayManager._is_launch_running/_launch_phase via AppRuntimeState",
             ),
             allowed_auxiliary_writers=(

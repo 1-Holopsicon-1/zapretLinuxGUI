@@ -511,10 +511,10 @@ _SMOOTH_SCROLL_ENABLED_NAME = "SmoothScrollEnabled"  # REG_DWORD (0 | 1)
 _EDITOR_SMOOTH_SCROLL_ENABLED_NAME = "EditorSmoothScrollEnabled"  # REG_DWORD (0 | 1)
 
 def get_smooth_scroll_enabled() -> bool:
-    """Включена ли плавная прокрутка страниц. По умолчанию True."""
+    """Включена ли плавная прокрутка страниц. По умолчанию False."""
     from config import REGISTRY_PATH
     val = reg(REGISTRY_PATH, _SMOOTH_SCROLL_ENABLED_NAME)
-    return True if val is None else bool(val)
+    return False if val is None else bool(val)
 
 def set_smooth_scroll_enabled(value: bool) -> bool:
     """Сохраняет флаг плавной прокрутки."""

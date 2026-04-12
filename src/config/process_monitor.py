@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from direct_launch.runtime import get_canonical_winws_process_pids
+from winws_runtime.runtime import get_canonical_winws_process_pids
 
 
 class ProcessMonitorThread(QThread):

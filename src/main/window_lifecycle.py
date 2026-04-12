@@ -10,6 +10,7 @@ from main.runtime_state import (
 )
 from ui.navigation.schema import iter_page_names_for_cleanup
 from ui.page_names import PageName
+from ui.window_adapter import sync_titlebar_search_width
 
 
 class WindowLifecycleMixin:
@@ -202,7 +203,7 @@ class WindowLifecycleMixin:
         """Обновляем геометрию при изменении размера окна."""
         super().resizeEvent(event)
         try:
-            ensure_window_adapter(self).update_titlebar_search_width()
+            sync_titlebar_search_width(self)
         except Exception:
             pass
         geometry_controller = getattr(self, "window_geometry_controller", None)

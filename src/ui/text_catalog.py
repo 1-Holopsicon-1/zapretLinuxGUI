@@ -211,14 +211,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Блокирует запуск/установку MAX и домены в hosts",
         "en": "Blocks MAX launch/installation and hosts domains",
     },
-    "page.control.setting.reset.title": {
-        "ru": "Сбросить программу",
-        "en": "Reset application",
-    },
-    "page.control.setting.reset.desc": {
-        "ru": "Очистить кэш проверок запуска (без удаления пресетов/настроек)",
-        "en": "Clear launch checks cache (without deleting presets/settings)",
-    },
     "page.control.button.connection_test": {
         "ru": "Тест соединения",
         "en": "Connection Test",
@@ -226,14 +218,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.control.button.open_folder": {
         "ru": "Открыть папку",
         "en": "Open Folder",
-    },
-    "page.control.button.reset": {
-        "ru": "Сбросить",
-        "en": "Reset",
-    },
-    "page.control.button.reset_confirm": {
-        "ru": "Сбросить (подтвердить)",
-        "en": "Reset (confirm)",
     },
     "page.z2_control.title": {
         "ru": "Управление Zapret 2",
@@ -484,8 +468,8 @@ TEXTS: dict[str, dict[str, str]] = {
         "en": "Strategies",
     },
     "page.z1_strategy_detail.empty.no_strategies": {
-        "ru": "Нет доступных стратегий. Проверьте %APPDATA%\\zapret\\direct_zapret1\\",
-        "en": "No strategies available. Check %APPDATA%\\zapret\\direct_zapret1\\",
+        "ru": "Нет доступных стратегий. Проверьте целостность встроенного каталога стратегий и перезапустите приложение.",
+        "en": "No strategies available. Check the bundled strategy catalog and restart the application.",
     },
     "page.z1_strategy_detail.tree.disabled.name": {
         "ru": "Выключено",
@@ -3747,10 +3731,6 @@ TEXTS: dict[str, dict[str, str]] = {
         "ru": "Получить конфиги",
         "en": "Get configs",
     },
-    "page.z1_user_presets.button.restore_deleted": {
-        "ru": "Восстановить удалённые пресеты",
-        "en": "Restore deleted presets",
-    },
     "page.z1_user_presets.button.import": {
         "ru": "Импорт",
         "en": "Import",
@@ -4214,10 +4194,6 @@ TEXTS: dict[str, dict[str, str]] = {
     "page.z2_user_presets.configs.button": {
         "ru": "Получить конфиги",
         "en": "Get configs",
-    },
-    "page.z2_user_presets.button.restore_deleted": {
-        "ru": "Восстановить удалённые пресеты",
-        "en": "Restore deleted presets",
     },
     "page.z2_user_presets.button.import": {
         "ru": "Импорт",
@@ -5544,22 +5520,6 @@ TEXTS_PAGES_FINAL: dict[str, dict[str, str]] = {
     "page.z2_control.setting.max_block.desc": {
         "ru": "Блокирует запуск/установку MAX и домены в hosts",
         "en": "Blocks MAX launch/installation and hosts domains",
-    },
-    "page.z2_control.setting.reset.title": {
-        "ru": "Сбросить программу",
-        "en": "Reset Application",
-    },
-    "page.z2_control.setting.reset.desc": {
-        "ru": "Очистить кэш проверок запуска (без удаления пресетов/настроек)",
-        "en": "Clear launch checks cache (without deleting presets/settings)",
-    },
-    "page.z2_control.button.reset": {
-        "ru": "Сбросить",
-        "en": "Reset",
-    },
-    "page.z2_control.button.reset_confirm": {
-        "ru": "Сбросить?",
-        "en": "Reset?",
     },
     "page.z2_control.dialog.defender_disable.title": {
         "ru": "Отключение Windows Defender",

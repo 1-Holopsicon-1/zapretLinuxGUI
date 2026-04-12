@@ -16,12 +16,12 @@ from importlib import import_module
 
 _PAGE_EXPORTS: dict[str, tuple[str, str]] = {
     "ControlPage": (".control_page", "ControlPage"),
-    "Zapret2DirectControlPage": ("direct_control.zapret2.page", "Zapret2DirectControlPage"),
+    "Zapret2DirectControlPage": ("ui_direct_control.zapret2.page", "Zapret2DirectControlPage"),
     "Zapret2PresetDetailPage": ("preset_zapret2.ui.preset_detail_page", "Zapret2PresetDetailPage"),
     "Zapret2StrategiesPageNew": ("filters.pages.direct_zapret2_targets_page", "Zapret2StrategiesPageNew"),
     "Zapret2UserPresetsPage": ("preset_zapret2.ui.user_presets_page", "Zapret2UserPresetsPage"),
     "StrategyDetailPage": ("filters.strategy_detail.zapret2.page", "StrategyDetailPage"),
-    "Zapret1DirectControlPage": ("direct_control.zapret1.page", "Zapret1DirectControlPage"),
+    "Zapret1DirectControlPage": ("ui_direct_control.zapret1.page", "Zapret1DirectControlPage"),
     "Zapret1PresetDetailPage": ("preset_zapret1.ui.preset_detail_page", "Zapret1PresetDetailPage"),
     "Zapret1StrategiesPage": ("filters.pages.direct_zapret1_targets_page", "Zapret1StrategiesPage"),
     "Zapret1StrategyDetailPage": ("filters.strategy_detail.zapret1.page", "Zapret1StrategyDetailPage"),

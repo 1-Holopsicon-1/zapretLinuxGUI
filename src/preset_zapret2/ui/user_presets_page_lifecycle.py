@@ -215,7 +215,6 @@ def apply_user_presets_language(
     back_btn,
     configs_title_label,
     get_configs_btn,
-    restore_deleted_btn,
     create_btn,
     import_btn,
     open_folder_btn,
@@ -247,11 +246,6 @@ def apply_user_presets_language(
         )
     if get_configs_btn is not None:
         get_configs_btn.setText(tr_fn("page.z2_user_presets.configs.button", "Получить конфиги"))
-
-    if restore_deleted_btn is not None:
-        restore_deleted_btn.setText(
-            tr_fn("page.z2_user_presets.button.restore_deleted", "Восстановить удалённые пресеты")
-        )
 
     if create_btn is not None:
         set_tooltip(create_btn, tr_fn("page.z2_user_presets.tooltip.create", "Создать новый пресет"))

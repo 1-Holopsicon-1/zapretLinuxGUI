@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QWidget
 
-from ui.navigation.navigation_controller import ensure_navigation_controller
+from ui.navigation.text_sync import on_ui_language_changed
 from ui.page_contracts import PageSignalName, get_page_signal
 from ui.page_names import PageName
 from ui.window_appearance_state import (
@@ -69,7 +69,7 @@ def connect_common_page_signals(window, page_name: PageName, page: QWidget) -> N
             "appearance.ui_language_changed",
             page,
             PageSignalName.UI_LANGUAGE_CHANGED,
-            lambda language, w=window: ensure_navigation_controller(w).on_ui_language_changed(language),
+            lambda language, w=window: on_ui_language_changed(w, language),
         )
 
     if page_name == PageName.ABOUT:

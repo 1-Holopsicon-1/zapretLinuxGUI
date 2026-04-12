@@ -1248,7 +1248,7 @@ class StrategyScanPageController:
         scan_protocol: str,
         scan_udp_games_scope: str,
     ) -> StrategyApplyResult:
-        from core.presets.direct_facade import DirectPresetFacade
+        from direct_preset.facade import DirectPresetFacade
 
         facade = DirectPresetFacade.from_launch_method(
             "direct_zapret2",

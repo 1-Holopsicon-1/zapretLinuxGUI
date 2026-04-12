@@ -23,7 +23,6 @@ class UserPresetsPageBuildWidgets:
     configs_title_label: object
     get_configs_btn: object
     toolbar_layout: object
-    restore_deleted_btn: object
     create_btn: object
     import_btn: object
     open_folder_btn: object
@@ -47,7 +46,6 @@ def build_user_presets_page_shell(
     fluent_icon,
     get_cached_qta_pixmap_fn,
     on_open_new_configs_post,
-    on_restore_deleted,
     on_create_clicked,
     on_import_clicked,
     on_open_folder_clicked,
@@ -92,13 +90,6 @@ def build_user_presets_page_shell(
     configs_card.add_layout(configs_layout)
 
     toolbar_layout = PresetsToolbarLayout(parent)
-    restore_deleted_btn = toolbar_layout.create_action_button(
-        tr_fn("page.z1_user_presets.button.restore_deleted", "Восстановить удалённые пресеты"),
-        "fa5s.undo",
-    )
-    restore_deleted_btn.clicked.connect(on_restore_deleted)
-    restore_deleted_btn.setVisible(False)
-
     create_btn = toolbar_layout.create_primary_tool_button(
         primary_tool_button_cls,
         fluent_icon.ADD if fluent_icon else None,
@@ -152,7 +143,6 @@ def build_user_presets_page_shell(
         create_btn,
         import_btn,
         open_folder_btn,
-        restore_deleted_btn,
         reset_all_btn,
         presets_info_btn,
         info_btn,
@@ -207,7 +197,6 @@ def build_user_presets_page_shell(
         configs_title_label=configs_title_label,
         get_configs_btn=get_configs_btn,
         toolbar_layout=toolbar_layout,
-        restore_deleted_btn=restore_deleted_btn,
         create_btn=create_btn,
         import_btn=import_btn,
         open_folder_btn=open_folder_btn,

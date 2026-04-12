@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from log import log
 from ui.page_method_dispatch import request_blockcheck_diagnostics_focus
-from ui.window_adapter import ensure_window_adapter
+from ui.window_adapter import route_window_search_result, show_page
 from utils import run_hidden
 
 
@@ -35,9 +35,8 @@ class WindowActionsMixin:
     def open_connection_test(self) -> None:
         """Переключает на вкладку диагностики соединений."""
         try:
-            adapter = ensure_window_adapter(self)
-            if adapter.show_page(PageName.BLOCKCHECK):
-                adapter.route_search_result(PageName.BLOCKCHECK, "diagnostics")
+            if show_page(self, PageName.BLOCKCHECK):
+                route_window_search_result(self, PageName.BLOCKCHECK, "diagnostics")
                 request_blockcheck_diagnostics_focus(self)
                 log("Открыта вкладка диагностики в BlockCheck", "INFO")
         except Exception as e:

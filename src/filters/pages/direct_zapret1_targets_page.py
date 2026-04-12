@@ -10,7 +10,7 @@ from typing import Any
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QHBoxLayout
 
-from core.runtime.direct_ui_snapshot_service import DirectBasicUiSnapshotWorker
+from direct_preset.runtime import DirectBasicUiSnapshotWorker
 from ui.page_dependencies import require_page_app_context
 from filters.ui import TargetsList
 from filters.runtime.targets_payload_runtime import (

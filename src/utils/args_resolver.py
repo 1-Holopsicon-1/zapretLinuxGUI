@@ -2,7 +2,7 @@
 Общая функция для разрешения путей в аргументах командной строки winws/winws2.
 
 Используется в:
-- direct_launch/runners/*
+- winws_runtime/runners/*
 - filters/ui/strategy_tree.py и связанные workflow
 """
 

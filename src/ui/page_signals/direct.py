@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QWidget
 
-from direct_launch.runtime import handle_launch_method_changed_runtime
-from ui.navigation.navigation_controller import ensure_navigation_controller
+from winws_runtime.runtime import handle_launch_method_changed_runtime
+from ui.navigation.sidebar_builder import sync_nav_visibility
 from ui.navigation_targets import (
     resolve_preset_detail_back_page_for_method,
     resolve_preset_detail_root_page_for_method,
@@ -23,6 +23,13 @@ from ui.strategy_detail_workflow import (
     open_zapret1_target_detail,
 )
 from ui.strategy_selection_workflow import on_strategy_selected_from_page
+from ui.workflows.common import get_current_launch_method
+from ui.workflows.direct import (
+    open_zapret2_preset_detail_for_method,
+    open_zapret1_preset_detail,
+    redirect_to_strategies_page_for_method,
+    show_active_zapret2_control_page as show_active_zapret2_control_page_for_window,
+)
 from ui.window_display_state import on_direct_mode_changed
 
 from .helpers import (
@@ -33,26 +40,23 @@ from .helpers import (
 
 
 def _show_active_zapret2_control_page(window) -> None:
-    from ui.ui_workflows import ensure_ui_workflows
-
-    ensure_ui_workflows(window).show_active_zapret2_control_page()
+    show_active_zapret2_control_page_for_window(window, allow_internal=False)
 
 
 def _open_zapret2_preset_detail(window, preset_name: str) -> None:
-    from ui.ui_workflows import ensure_ui_workflows
-
-    ensure_ui_workflows(window).open_zapret2_preset_detail(preset_name)
+    open_zapret2_preset_detail_for_method(
+        window,
+        get_current_launch_method(),
+        preset_name,
+        allow_internal=True,
+    )
 
 
 def _open_zapret1_preset_detail(window, preset_name: str) -> None:
-    from ui.ui_workflows import ensure_ui_workflows
-
-    ensure_ui_workflows(window).open_zapret1_preset_detail(preset_name)
+    open_zapret1_preset_detail(window, preset_name)
 
 
 def _on_launch_method_changed(window, method: str) -> None:
-    from ui.ui_workflows import ensure_ui_workflows
-
     plan = handle_launch_method_changed_runtime(window, method)
 
     if plan.dispatch_action == "restart":
@@ -74,12 +78,12 @@ def _on_launch_method_changed(window, method: str) -> None:
         pass
 
     try:
-        ensure_navigation_controller(window).sync_nav_visibility(method)
+        sync_nav_visibility(window, method)
     except Exception:
         pass
 
     try:
-        ensure_ui_workflows(window).redirect_to_strategies_page_for_method(method)
+        redirect_to_strategies_page_for_method(window, method)
     except Exception:
         pass
 

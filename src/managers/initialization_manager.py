@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import threading
 import time as _time
 
-from app_notifications import advisory_notification
+from app_notifications import advisory_notification, notification_action
 from PyQt6.QtCore import QObject, pyqtSignal, Qt
 from log import log
 
@@ -194,7 +194,7 @@ class InitializationManager:
 
                 # Прогреваем кэш выборов/source preset только для поддерживаемых direct-режимов.
                 if method in ("direct_zapret1", "direct_zapret2"):
-                    from core.presets.direct_facade import DirectPresetFacade
+                    from direct_preset.facade import DirectPresetFacade
 
                     DirectPresetFacade.from_launch_method(
                         method,
@@ -277,7 +277,7 @@ class InitializationManager:
     def _init_launch_runtime_api(self):
         """Инициализация launch runtime API."""
         try:
-            from direct_launch.runtime import DirectLaunchRuntimeApi
+            from winws_runtime.runtime import DirectLaunchRuntimeApi
             from config import get_winws_exe_for_method, is_zapret2_mode
             from settings.dpi.strategy_settings import get_strategy_launch_method
 
@@ -364,7 +364,7 @@ class InitializationManager:
     def _init_launch_controller(self):
         """Инициализация launch controller."""
         try:
-            from direct_launch.runtime import DirectLaunchController
+            from winws_runtime.runtime import DirectLaunchController
             self.app.launch_controller = DirectLaunchController(self.app)
             log("Launch controller инициализирован", "INFO")
             self.init_tasks_completed.add('launch_controller')
@@ -435,31 +435,53 @@ class InitializationManager:
         self.app.launch_controller.start_dpi_async()
 
     def _show_strategy_required_warning(self, for_bat: bool = False) -> None:
-        """Показывает popup-предупреждение без смены текущей страницы."""
+        """Показывает fluent-предупреждение о том, что выбранный direct-пресет пуст для запуска."""
+        launch_method = ""
+        try:
+            from settings.dpi.strategy_settings import get_strategy_launch_method
+
+            launch_method = str(get_strategy_launch_method() or "").strip().lower()
+        except Exception:
+            pass
+
         if for_bat:
             subtitle = (
                 "Для запуска Zapret выберите готовый пресет в разделе «Стратегии»."
             )
+            button_text = "Открыть стратегии"
         else:
             subtitle = (
                 "Для запуска Zapret выберите хотя бы одну стратегию "
                 "в разделе «Стратегии»."
             )
+            button_text = "Выбрать стратегию"
 
         try:
-            from ui.start_strategy_warning_dialog import show_start_strategy_warning
+            controller = getattr(self.app, "window_notification_controller", None)
+            if controller is None:
+                raise RuntimeError("WindowNotificationController недоступен")
 
-            show_start_strategy_warning(parent=self.app, subtitle=subtitle)
-            return
+            controller.notify(
+                advisory_notification(
+                    level="warning",
+                    title="Стратегия не выбрана",
+                    content=subtitle,
+                    source="launch.strategy_required",
+                    presentation="infobar",
+                    queue="immediate",
+                    duration=-1,
+                    dedupe_key=f"launch.strategy_required:{launch_method or 'unknown'}:{'bat' if for_bat else 'direct'}",
+                    buttons=[
+                        notification_action(
+                            "open_strategy_page",
+                            button_text,
+                            value=launch_method,
+                        ),
+                    ],
+                )
+            )
         except Exception as e:
-            log(f"Не удалось открыть фирменное предупреждение запуска: {e}", "DEBUG")
-
-        try:
-            from PyQt6.QtWidgets import QMessageBox
-
-            QMessageBox.warning(self.app, "Стратегия не выбрана", subtitle)
-        except Exception:
-            pass
+            log(f"Не удалось показать fluent-предупреждение о стратегии: {e}", "DEBUG")
 
     # ═══════════════════════════════════════════════════════════════════
     # ФАЗА 2: Инициализация менеджеров (разбито на логические группы)

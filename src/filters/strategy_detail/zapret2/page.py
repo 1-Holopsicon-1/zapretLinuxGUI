@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QFrame, QMenu,
 )
 
-from core.runtime.direct_ui_snapshot_service import DirectTargetDetailSnapshotWorker
+from direct_preset.runtime import DirectTargetDetailSnapshotWorker
 from ui.page_dependencies import require_page_app_context
 try:
     from qfluentwidgets import (
@@ -258,7 +258,7 @@ class StrategyDetailPage(BasePage):
         )
 
         # Direct preset facade for target settings storage
-        from core.presets.direct_facade import DirectPresetFacade
+        from direct_preset.facade import DirectPresetFacade
 
         self._direct_facade = DirectPresetFacade.from_launch_method(
             "direct_zapret2",
@@ -523,7 +523,7 @@ class StrategyDetailPage(BasePage):
             self.show_loading()
         except Exception:
             pass
-        from direct_launch.flow.apply_policy import request_direct_runtime_content_apply
+        from winws_runtime.flow.apply_policy import request_direct_runtime_content_apply
         if self.parent_app:
             request_direct_runtime_content_apply(
                 self.parent_app,

@@ -109,7 +109,6 @@ class DirectUserPresetsActionsApi(Protocol):
     def reset_preset_to_template(self, *, file_name: str, display_name: str) -> UserPresetActionResult: ...
     def delete_preset(self, *, file_name: str, display_name: str) -> UserPresetActionResult: ...
     def export_preset(self, *, file_name: str, file_path: str, display_name: str) -> UserPresetActionResult: ...
-    def restore_deleted_presets(self) -> UserPresetActionResult: ...
     def open_presets_info(self) -> UserPresetActionResult: ...
     def open_new_configs_post(self) -> UserPresetActionResult: ...
 
@@ -117,7 +116,6 @@ class DirectUserPresetsActionsApi(Protocol):
 class DirectUserPresetsStorageApi(Protocol):
     def get_preset_store(self): ...
     def get_hierarchy_store(self): ...
-    def has_deleted_presets(self) -> bool: ...
     def is_builtin_preset_file(self, name: str) -> bool: ...
     def is_builtin_preset_file_with_cache(self, name: str, cached_metadata: dict[str, dict[str, object]] | None) -> bool: ...
     def toggle_preset_pin(self, name: str, display_name: str) -> bool: ...
@@ -212,9 +210,6 @@ class _DirectUserPresetsActionsApiImpl:
     def export_preset(self, *, file_name: str, file_path: str, display_name: str) -> UserPresetActionResult:
         return self._controller.export_preset(file_name=file_name, file_path=file_path, display_name=display_name)
 
-    def restore_deleted_presets(self) -> UserPresetActionResult:
-        return self._controller.restore_deleted_presets()
-
     def open_presets_info(self) -> UserPresetActionResult:
         return self._controller.open_presets_info()
 
@@ -231,9 +226,6 @@ class _DirectUserPresetsStorageApiImpl:
 
     def get_hierarchy_store(self):
         return self._controller.get_hierarchy_store()
-
-    def has_deleted_presets(self) -> bool:
-        return self._controller.has_deleted_presets()
 
     def is_builtin_preset_file(self, name: str) -> bool:
         return self._controller.is_builtin_preset_file(name)
@@ -290,7 +282,7 @@ class DirectUserPresetsPageController:
         return self._require_app_context().app_paths
 
     def _get_direct_facade(self):
-        from core.presets.direct_facade import DirectPresetFacade
+        from direct_preset.facade import DirectPresetFacade
 
         return DirectPresetFacade.from_launch_method(
             self._config.launch_method,
@@ -475,32 +467,6 @@ class DirectUserPresetsPageController:
             structure_changed=False,
         )
 
-    def restore_deleted_presets(self) -> UserPresetActionResult:
-        facade = self._get_direct_facade()
-        facade.restore_deleted()
-        selected_file_name = facade.get_selected_file_name()
-        if selected_file_name:
-            facade.notify_preset_identity_changed(selected_file_name)
-
-        return UserPresetActionResult(
-            ok=True,
-            log_level="INFO",
-            log_message="Восстановлены удалённые пресеты",
-            infobar_level=None,
-            infobar_title="",
-            infobar_content="",
-            structure_changed=True,
-            switched_file_name=selected_file_name,
-        )
-
-    def has_deleted_presets(self) -> bool:
-        try:
-            from core.presets.template_support import get_deleted_template_names
-
-            return bool(get_deleted_template_names(self._config.launch_method))
-        except Exception:
-            return False
-
     @staticmethod
     def open_presets_info() -> UserPresetActionResult:
         try:
@@ -530,7 +496,7 @@ class DirectUserPresetsPageController:
     @staticmethod
     def open_new_configs_post() -> UserPresetActionResult:
         try:
-            from direct_launch.flow.direct_flow import DirectFlowCoordinator
+            from winws_runtime.flow.direct_flow import DirectFlowCoordinator
 
             webbrowser.open(DirectFlowCoordinator.PRESETS_DOWNLOAD_URL)
             return UserPresetActionResult(

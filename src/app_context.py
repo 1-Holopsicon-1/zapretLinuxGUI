@@ -8,17 +8,17 @@ if TYPE_CHECKING:
     from app_state.app_runtime_state import AppRuntimeState
     from app_state.launch_runtime_service import LaunchRuntimeService
     from app_state.main_window_state import AppUiState, MainWindowStateStore
-    from direct_launch.flow.direct_flow import DirectFlowCoordinator
+    from winws_runtime.flow.direct_flow import DirectFlowCoordinator
     from core.paths import AppPaths
     from core.presets.preset_file_store import PresetFileStore
     from core.presets.runtime_store import DirectRuntimePresetStore
     from core.presets.selection_service import PresetSelectionService
-    from core.runtime.direct_ui_snapshot_service import DirectUiSnapshotService
+    from direct_preset.runtime import DirectUiSnapshotService
     from core.runtime.orchestra_whitelist_runtime_service import OrchestraWhitelistRuntimeService
     from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
     from core.runtime.program_settings_runtime_service import ProgramSettingsRuntimeService
     from core.runtime.user_presets_runtime_service import UserPresetsRuntimeService
-    from core.presets.direct_facade import DirectPresetFacade
+    from direct_preset.facade import DirectPresetFacade
     from app_state.strategy_feedback_store import StrategyFeedbackStore
 
 
@@ -49,12 +49,12 @@ def build_app_context(*, initial_ui_state: AppUiState | None = None) -> AppConte
     from app_state.launch_runtime_service import LaunchRuntimeService
     from app_state.main_window_state import AppUiState, MainWindowStateStore
     from config import get_zapret_userdata_dir
-    from direct_launch.flow.direct_flow import DirectFlowCoordinator
+    from winws_runtime.flow.direct_flow import DirectFlowCoordinator
     from core.paths import AppPaths
     from core.presets.preset_file_store import PresetFileStore
     from core.presets.runtime_store import DirectRuntimePresetStore
     from core.presets.selection_service import PresetSelectionService
-    from core.runtime.direct_ui_snapshot_service import DirectUiSnapshotService
+    from direct_preset.runtime import DirectUiSnapshotService
     from core.runtime.orchestra_whitelist_runtime_service import OrchestraWhitelistRuntimeService
     from core.runtime.preset_runtime_coordinator import PresetRuntimeCoordinator
     from core.runtime.program_settings_runtime_service import ProgramSettingsRuntimeService

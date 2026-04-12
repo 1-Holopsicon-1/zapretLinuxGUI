@@ -39,7 +39,13 @@ except Exception:
         return None
 
 from ui.popup_menu import exec_popup_menu
-from ui.window_adapter import ensure_window_adapter
+from ui.window_adapter import (
+    hide_window,
+    persist_window_geometry,
+    release_input_interaction_states,
+    request_exit,
+    show_window,
+)
 
 
 def _toggle_github_api_removal(*, status_callback=None) -> bool:
@@ -880,7 +886,7 @@ class SystemTrayManager:
 
     def _save_window_geometry(self):
         try:
-            ensure_window_adapter(self.parent).persist_window_geometry()
+            persist_window_geometry(self.parent)
         except Exception as e:
             log(f"Ошибка сохранения геометрии окна: {e}", "ERROR")
 
@@ -918,12 +924,12 @@ class SystemTrayManager:
             pass
 
         try:
-            ensure_window_adapter(self.parent).release_input_interaction_states()
+            release_input_interaction_states(self.parent)
         except Exception:
             pass
 
         try:
-            ensure_window_adapter(self.parent).hide_window()
+            hide_window(self.parent)
         except Exception as e:
             log(f"Не удалось скрыть окно в трей: {e}", "WARNING")
             return False
@@ -944,10 +950,10 @@ class SystemTrayManager:
         return True
 
     def exit_only(self):
-        ensure_window_adapter(self.parent).request_exit(stop_dpi=False)
+        request_exit(self.parent, stop_dpi=False)
 
     def exit_and_stop(self):
-        ensure_window_adapter(self.parent).request_exit(stop_dpi=True)
+        request_exit(self.parent, stop_dpi=True)
 
     def show_console(self):
         from discord.discord_restart import toggle_discord_restart
@@ -981,7 +987,7 @@ class SystemTrayManager:
             pass
 
         try:
-            ensure_window_adapter(self.parent).show_window()
+            show_window(self.parent)
         except Exception:
             pass
 

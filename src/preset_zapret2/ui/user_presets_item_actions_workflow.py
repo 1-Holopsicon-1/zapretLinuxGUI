@@ -345,34 +345,6 @@ def export_preset_action(
             parent=parent_window,
         )
 
-
-def restore_deleted_presets_action(
-    *,
-    actions_api,
-    runtime_service,
-    info_bar_cls,
-    tr_fn,
-    parent_window,
-    log_fn,
-) -> None:
-    try:
-        result = actions_api.restore_deleted_presets()
-        if result.structure_changed:
-            runtime_service.mark_presets_structure_changed()
-        log_fn(result.log_message, result.log_level)
-    except Exception as exc:
-        log_fn(f"Ошибка восстановления удалённых пресетов: {exc}", "ERROR")
-        info_bar_cls.error(
-            title=tr_fn("common.error.title", "Ошибка"),
-            content=tr_fn(
-                "page.z2_user_presets.error.restore_deleted",
-                "Ошибка восстановления: {error}",
-                error=exc,
-            ),
-            parent=parent_window,
-        )
-
-
 def open_presets_info_action(
     *,
     actions_api,

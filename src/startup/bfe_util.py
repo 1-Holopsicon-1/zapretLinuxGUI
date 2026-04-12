@@ -170,7 +170,6 @@ def ensure_bfe_running() -> tuple[bool, dict | None]:
             duration=16000,
             dedupe_key="startup.bfe",
         )
-    from startup.check_cache import startup_cache
     from log import log
     
     # 1. Сначала проверяем кэш службы
@@ -179,12 +178,6 @@ def ensure_bfe_running() -> tuple[bool, dict | None]:
         # Запускаем фоновую проверку для обновления кэша
         async_checker.check_async("BFE")
         return cached_status, None
-    
-    # 2. Проверяем startup кэш
-    has_cache, cached_result = startup_cache.is_cached_and_valid("bfe_check")
-    if has_cache:
-        # Используем кэшированный результат
-        return cached_result, None
     
     log("Выполняется проверка службы Base Filtering Engine (BFE)", "🧹 bfe_util")
     
@@ -205,9 +198,8 @@ def ensure_bfe_running() -> tuple[bool, dict | None]:
                     "Это не блокирует запуск программы, но сетевые компоненты Windows могут работать нестабильно."
                 )
         
-        # 4. Сохраняем результат в кэши
+        # 4. Сохраняем результат в живой service-кэш
         service_cache.set("BFE", is_running)
-        startup_cache.cache_result("bfe_check", is_running)
         
         # 5. Запускаем периодическую фоновую проверку
         if is_running:
@@ -218,7 +210,6 @@ def ensure_bfe_running() -> tuple[bool, dict | None]:
     except Exception as e:
         log(f"Ошибка при проверке службы BFE: {e}", "❌ ERROR")
         service_cache.set("BFE", False, ttl=30)  # кэшируем ошибку на 30 секунд
-        startup_cache.cache_result("bfe_check", False)
         return False, _build_bfe_notification(
             f"Не удалось проверить службу Base Filtering Engine.\n\nПодробности: {e}"
         )

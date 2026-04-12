@@ -208,7 +208,7 @@ class PresetSubpageBase(BasePage):
         if not method:
             return None
         if self._direct_facade is None:
-            from core.presets.direct_facade import DirectPresetFacade
+            from direct_preset.facade import DirectPresetFacade
 
             self._direct_facade = DirectPresetFacade.from_launch_method(
                 method,

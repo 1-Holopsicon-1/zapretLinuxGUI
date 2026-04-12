@@ -136,7 +136,7 @@ def _get_direct_preset_facade(*, app_context=None):
     try:
         method = (get_strategy_launch_method() or "").strip().lower()
         if method in ("direct_zapret2", "direct_zapret1") and app_context is not None:
-            from core.presets.direct_facade import DirectPresetFacade
+            from direct_preset.facade import DirectPresetFacade
 
             return DirectPresetFacade.from_launch_method(
                 method,

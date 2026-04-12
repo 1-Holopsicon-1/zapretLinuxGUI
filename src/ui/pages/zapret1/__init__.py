@@ -6,7 +6,7 @@ from importlib import import_module
 
 
 _PAGE_EXPORTS: dict[str, tuple[str, str]] = {
-    "Zapret1DirectControlPage": ("direct_control.zapret1.page", "Zapret1DirectControlPage"),
+    "Zapret1DirectControlPage": ("ui_direct_control.zapret1.page", "Zapret1DirectControlPage"),
     "Zapret1StrategiesPage": ("filters.pages.direct_zapret1_targets_page", "Zapret1StrategiesPage"),
     "Zapret1UserPresetsPage": ("preset_zapret1.ui.user_presets_page", "Zapret1UserPresetsPage"),
     "Zapret1StrategyDetailPage": ("filters.strategy_detail.zapret1.page", "Zapret1StrategyDetailPage"),

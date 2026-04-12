@@ -57,7 +57,6 @@ from preset_zapret1.ui.user_presets_item_actions_workflow import (
     open_presets_info_action,
     rename_preset_action,
     reset_preset_action,
-    restore_deleted_presets_action,
     show_rating_menu_action,
     toggle_pin_preset_action,
 )
@@ -412,7 +411,6 @@ class Zapret1UserPresetsPage(BasePage):
             fluent_icon=FluentIcon,
             get_cached_qta_pixmap_fn=get_cached_qta_pixmap,
             on_open_new_configs_post=self._open_new_configs_post,
-            on_restore_deleted=self._on_restore_deleted,
             on_create_clicked=self._on_create_clicked,
             on_import_clicked=self._on_import_clicked,
             on_open_folder_clicked=self._open_presets_folder,
@@ -431,7 +429,6 @@ class Zapret1UserPresetsPage(BasePage):
         self._configs_title_label = shell.configs_title_label
         self._get_configs_btn = shell.get_configs_btn
         self._toolbar_layout = shell.toolbar_layout
-        self._restore_deleted_btn = shell.restore_deleted_btn
         self.create_btn = shell.create_btn
         self.import_btn = shell.import_btn
         self.open_folder_btn = shell.open_folder_btn
@@ -619,8 +616,6 @@ class Zapret1UserPresetsPage(BasePage):
             presets_model=self._presets_model,
             presets_list=getattr(self, "presets_list", None),
             get_selected_source_preset_file_name_light_fn=self._get_selected_source_preset_file_name_light,
-            storage_api=self._storage_api(),
-            restore_deleted_btn=self._restore_deleted_btn,
             ui_language=self._ui_language,
             schedule_layout_resync_fn=self._schedule_layout_resync,
             update_presets_view_height_fn=self._update_presets_view_height,
@@ -787,19 +782,9 @@ class Zapret1UserPresetsPage(BasePage):
             log_fn=log,
         )
 
-    def _on_restore_deleted(self):
-        restore_deleted_presets_action(
-            actions_api=self._actions_api(),
-            runtime_service=self._runtime_service,
-            info_bar_cls=InfoBar,
-            tr_fn=self._tr,
-            parent_window=self.window(),
-            log_fn=log,
-        )
-
     def _on_dpi_reload_needed(self):
         try:
-            from direct_launch.flow.apply_policy import request_direct_runtime_content_apply
+            from winws_runtime.flow.apply_policy import request_direct_runtime_content_apply
             parent_app = getattr(self, "parent_app", None)
             if parent_app is not None:
                 request_direct_runtime_content_apply(
@@ -835,7 +820,6 @@ class Zapret1UserPresetsPage(BasePage):
             back_btn=self._back_btn,
             configs_title_label=self._configs_title_label,
             get_configs_btn=self._get_configs_btn,
-            restore_deleted_btn=self._restore_deleted_btn,
             create_btn=self.create_btn,
             import_btn=self.import_btn,
             open_folder_btn=self.open_folder_btn,

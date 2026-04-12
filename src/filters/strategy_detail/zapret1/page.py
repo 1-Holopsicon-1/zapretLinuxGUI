@@ -8,7 +8,7 @@ from typing import Any
 from PyQt6.QtCore import pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 
-from core.runtime.direct_ui_snapshot_service import DirectTargetDetailSnapshotWorker
+from direct_preset.runtime import DirectTargetDetailSnapshotWorker
 from ui.pages.base_page import BasePage
 from ui.compat_widgets import ActionButton, RefreshButton, SettingsCard
 from app_state.main_window_state import AppUiState, MainWindowStateStore

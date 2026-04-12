@@ -56,8 +56,6 @@ def rebuild_presets_rows(
     presets_model,
     presets_list,
     get_selected_source_preset_file_name_light_fn,
-    storage_api,
-    restore_deleted_btn,
     ui_language: str,
     schedule_layout_resync_fn,
     update_presets_view_height_fn,
@@ -82,9 +80,6 @@ def rebuild_presets_rows(
         runtime_service.ensure_preset_list_current_index()
         if view_state:
             runtime_service.restore_presets_view_state(view_state)
-
-        restore_deleted_btn.setVisible(storage_api.has_deleted_presets())
-
         update_presets_view_height_fn()
         schedule_layout_resync_fn()
         if started_at is not None:

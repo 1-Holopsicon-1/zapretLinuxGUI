@@ -6,7 +6,7 @@ from log import log
 def get_direct_strategy_summary(window, max_items: int = 2) -> str:
     try:
         from settings.dpi.strategy_settings import get_strategy_launch_method
-        from core.presets.direct_facade import DirectPresetFacade
+        from direct_preset.facade import DirectPresetFacade
 
         method = (get_strategy_launch_method() or "").strip().lower()
         if method not in ("direct_zapret1", "direct_zapret2"):

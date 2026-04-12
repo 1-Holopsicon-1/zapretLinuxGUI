@@ -121,7 +121,7 @@ def cleanup_user_presets_page(*, set_cleanup_in_progress_fn, layout_resync_timer
         pass
 
 
-def apply_user_presets_language(*, tr_fn, back_btn, configs_title_label, get_configs_btn, restore_deleted_btn, create_btn, import_btn, open_folder_btn, reset_all_btn, presets_info_btn, info_btn, preset_search_input, presets_delegate, ui_language: str, viewport, layout, toolbar_layout, refresh_presets_view_from_cache_fn) -> None:
+def apply_user_presets_language(*, tr_fn, back_btn, configs_title_label, get_configs_btn, create_btn, import_btn, open_folder_btn, reset_all_btn, presets_info_btn, info_btn, preset_search_input, presets_delegate, ui_language: str, viewport, layout, toolbar_layout, refresh_presets_view_from_cache_fn) -> None:
     if back_btn is not None:
         back_btn.setText(tr_fn("page.z1_user_presets.back.control", "Управление"))
     if configs_title_label is not None:
@@ -133,10 +133,6 @@ def apply_user_presets_language(*, tr_fn, back_btn, configs_title_label, get_con
         )
     if get_configs_btn is not None:
         get_configs_btn.setText(tr_fn("page.z1_user_presets.configs.button", "Получить конфиги"))
-    if restore_deleted_btn is not None:
-        restore_deleted_btn.setText(
-            tr_fn("page.z1_user_presets.button.restore_deleted", "Восстановить удалённые пресеты")
-        )
     if create_btn is not None:
         set_tooltip(create_btn, tr_fn("page.z1_user_presets.tooltip.create", "Создать новый пресет"))
     if import_btn is not None:
