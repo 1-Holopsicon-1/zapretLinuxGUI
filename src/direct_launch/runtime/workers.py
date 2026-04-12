@@ -20,8 +20,8 @@ class PreparedDpiStartRequest:
     method_name: str
 
 
-class DPIStartWorker(QObject):
-    """Worker для асинхронного запуска DPI"""
+class DirectLaunchStartWorker(QObject):
+    """Worker для асинхронного запуска прямого launch-runtime."""
 
     finished = pyqtSignal(bool, str)  # success, error_message
     progress = pyqtSignal(str)        # status_message
@@ -31,7 +31,7 @@ class DPIStartWorker(QObject):
         self.app_instance = app_instance
         self.selected_mode = selected_mode
         self.launch_method = launch_method
-        self.dpi_runtime = app_instance.dpi_runtime
+        self.launch_runtime_api = app_instance.launch_runtime_api
         self._last_error_message: str = ""
 
     def _get_winws_exe(self) -> str:
@@ -104,7 +104,7 @@ class DPIStartWorker(QObject):
         return True
 
     def _stop_previous_process_if_needed(self, *, skip_stop: bool) -> None:
-        process_running = self.dpi_runtime.is_any_running(silent=True)
+        process_running = self.launch_runtime_api.is_any_running(silent=True)
         if (not process_running) or skip_stop:
             return
 
@@ -128,14 +128,14 @@ class DPIStartWorker(QObject):
             except Exception as e:
                 log(f"Ошибка low-level остановки перед новым стартом: {e}", "DEBUG")
             try:
-                self.app_instance.dpi_runtime.cleanup_windivert_service()
+                self.app_instance.launch_runtime_api.cleanup_windivert_service()
             except Exception as e:
                 log(f"Ошибка cleanup_windivert_service перед новым стартом: {e}", "DEBUG")
 
         max_wait = 10
         for attempt in range(max_wait):
             time.sleep(0.5)
-            if not self.dpi_runtime.is_any_running(silent=True):
+            if not self.launch_runtime_api.is_any_running(silent=True):
                 log(f"✅ Предыдущий процесс остановлен (попытка {attempt + 1})", "DEBUG")
                 break
         else:
@@ -216,7 +216,7 @@ class DPIStartWorker(QObject):
             self.progress.emit("Подготовка к запуску...")
 
             is_preset_file, preset_path = self._extract_preset_launch_input()
-            process_running = self.dpi_runtime.is_any_running(silent=True)
+            process_running = self.launch_runtime_api.is_any_running(silent=True)
             skip_stop = process_running and self._can_reuse_running_process(
                 is_preset_file=is_preset_file,
                 preset_path=preset_path,
@@ -256,7 +256,7 @@ class DPIStartWorker(QObject):
                 self.finished.emit(False, error_msg)
 
         except Exception as e:
-            exe_path = getattr(self.dpi_runtime, "expected_exe_path", None)
+            exe_path = getattr(self.launch_runtime_api, "expected_exe_path", None)
             diagnosis = diagnose_startup_error(e, exe_path)
             for line in diagnosis.split("\n"):
                 log(line, "❌ ERROR")
@@ -272,7 +272,7 @@ class DPIStartWorker(QObject):
             return self._start_direct_preset_with_runner(preset_path, strategy_name)
 
         except Exception as e:
-            exe_path = self._get_winws_exe() if hasattr(self.app_instance, "dpi_runtime") else None
+            exe_path = self._get_winws_exe() if hasattr(self.app_instance, "launch_runtime_api") else None
             diagnosis = diagnose_startup_error(e, exe_path)
             for line in diagnosis.split("\n"):
                 log(line, "❌ ERROR")
@@ -360,7 +360,7 @@ class DPIStartWorker(QObject):
                 return False
 
         except Exception as e:
-            exe_path = self._get_winws_exe() if hasattr(self.app_instance, "dpi_runtime") else None
+            exe_path = self._get_winws_exe() if hasattr(self.app_instance, "launch_runtime_api") else None
             diagnosis = diagnose_startup_error(e, exe_path)
             for line in diagnosis.split("\n"):
                 log(line, "❌ ERROR")
@@ -370,8 +370,8 @@ class DPIStartWorker(QObject):
             return False
 
 
-class DPIStopWorker(QObject):
-    """Worker для асинхронной остановки DPI"""
+class DirectLaunchStopWorker(QObject):
+    """Worker для асинхронной остановки прямого launch-runtime."""
 
     finished = pyqtSignal(bool, str)
     progress = pyqtSignal(str)
@@ -390,7 +390,7 @@ class DPIStopWorker(QObject):
         try:
             self.progress.emit("Остановка DPI...")
 
-            if not self.app_instance.dpi_runtime.is_any_running(silent=True):
+            if not self.app_instance.launch_runtime_api.is_any_running(silent=True):
                 self.progress.emit("DPI уже остановлен")
                 self.finished.emit(True, "DPI уже был остановлен")
                 return
@@ -423,11 +423,11 @@ class DPIStopWorker(QObject):
             runner = get_strategy_runner(self._get_winws_exe())
             success = runner.stop()
 
-            if not success or self.app_instance.dpi_runtime.is_any_running(silent=True):
+            if not success or self.app_instance.launch_runtime_api.is_any_running(silent=True):
                 kill_winws_all()
 
-            self.app_instance.dpi_runtime.cleanup_windivert_service()
-            return not self.app_instance.dpi_runtime.is_any_running(silent=True)
+            self.app_instance.launch_runtime_api.cleanup_windivert_service()
+            return not self.app_instance.launch_runtime_api.is_any_running(silent=True)
 
         except Exception as e:
             log(f"Ошибка прямой остановки: {e}", "❌ ERROR")
@@ -443,11 +443,11 @@ class DPIStopWorker(QObject):
                 if hasattr(self.app_instance, "orchestra_page"):
                     self.app_instance.orchestra_page.stop_monitoring()
 
-            if self.app_instance.dpi_runtime.is_any_running(silent=True):
+            if self.app_instance.launch_runtime_api.is_any_running(silent=True):
                 kill_winws_all()
 
-            self.app_instance.dpi_runtime.cleanup_windivert_service()
-            return not self.app_instance.dpi_runtime.is_any_running(silent=True)
+            self.app_instance.launch_runtime_api.cleanup_windivert_service()
+            return not self.app_instance.launch_runtime_api.is_any_running(silent=True)
 
         except Exception as e:
             log(f"Ошибка остановки оркестратора: {e}", "❌ ERROR")
@@ -557,11 +557,11 @@ class StopAndExitWorker(QObject):
 
                 runner = get_strategy_runner(self._get_winws_exe())
                 runner.stop()
-                self.app_instance.dpi_runtime.stop_all_processes()
-                self.app_instance.dpi_runtime.cleanup_windivert_service()
+                self.app_instance.launch_runtime_api.stop_all_processes()
+                self.app_instance.launch_runtime_api.cleanup_windivert_service()
             else:
-                self.app_instance.dpi_runtime.stop_all_processes()
-                self.app_instance.dpi_runtime.cleanup_windivert_service()
+                self.app_instance.launch_runtime_api.stop_all_processes()
+                self.app_instance.launch_runtime_api.cleanup_windivert_service()
 
             self.progress.emit("Завершение работы...")
             self.finished.emit()

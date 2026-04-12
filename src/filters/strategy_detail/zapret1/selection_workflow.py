@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from filters.strategy_detail.shared_filter_mode import save_target_filter_mode
+
 
 def handle_filter_mode_change_v1(
     *,
@@ -19,12 +21,12 @@ def handle_filter_mode_change_v1(
         return
 
     try:
-        ok = direct_facade.update_target_filter_mode(
-            target_key,
-            new_mode,
-            save_and_sync=True,
+        ok = save_target_filter_mode(
+            direct_facade,
+            target_key=target_key,
+            mode=new_mode,
         )
-        if ok is False:
+        if not ok:
             raise RuntimeError(
                 tr_fn(
                     "page.z1_strategy_detail.error.filter_mode_save",

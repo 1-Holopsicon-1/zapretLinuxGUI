@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from filters.strategy_detail.shared_filter_mode import (
+    apply_filter_mode_selector_texts,
+    sync_basic_target_controls,
+)
+
 
 def update_selected_label(
     *,
@@ -62,32 +67,19 @@ def sync_target_controls(
     filter_mode_selector,
     current_strategy_id: str,
     target_key: str,
-    target_supports_filter_switch_fn,
+    target_info,
     load_target_filter_mode_fn,
 ) -> None:
-    enabled = (current_strategy_id or "none") != "none"
-
-    if enable_toggle is not None:
-        enable_toggle.blockSignals(True)
-        if hasattr(enable_toggle, "setChecked"):
-            enable_toggle.setChecked(enabled)
-        enable_toggle.blockSignals(False)
-
-    if edit_args_btn is not None:
-        edit_args_btn.setEnabled(enabled)
-
-    if filter_mode_frame is None:
-        return
-
-    can_switch = bool(target_supports_filter_switch_fn())
-    filter_mode_frame.setVisible(can_switch)
-    if not can_switch or filter_mode_selector is None:
-        return
-
-    saved_mode = load_target_filter_mode_fn(target_key)
-    filter_mode_selector.blockSignals(True)
-    filter_mode_selector.setChecked(saved_mode == "ipset")
-    filter_mode_selector.blockSignals(False)
+    sync_basic_target_controls(
+        enable_toggle=enable_toggle,
+        edit_args_btn=edit_args_btn,
+        filter_mode_frame=filter_mode_frame,
+        filter_mode_selector=filter_mode_selector,
+        current_strategy_id=current_strategy_id,
+        target_key=target_key,
+        target_info=target_info,
+        load_target_filter_mode_fn=load_target_filter_mode_fn,
+    )
 
 
 def refresh_args_preview(
@@ -154,11 +146,11 @@ def apply_strategy_detail_v1_language(
     if filter_label is not None:
         filter_label.setText(tr_fn("page.z1_strategy_detail.filter.label", "Фильтр:"))
 
-    if filter_mode_selector is not None:
-        if hasattr(filter_mode_selector, "setOnText"):
-            filter_mode_selector.setOnText(tr_fn("page.z1_strategy_detail.filter.ipset", "IPset"))
-        if hasattr(filter_mode_selector, "setOffText"):
-            filter_mode_selector.setOffText(tr_fn("page.z1_strategy_detail.filter.hostlist", "Hostlist"))
+    apply_filter_mode_selector_texts(
+        filter_mode_selector,
+        ipset_text=tr_fn("page.z1_strategy_detail.filter.ipset", "IPset"),
+        hostlist_text=tr_fn("page.z1_strategy_detail.filter.hostlist", "Hostlist"),
+    )
 
     if search_edit is not None:
         search_edit.setPlaceholderText(

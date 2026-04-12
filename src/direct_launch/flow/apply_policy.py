@@ -9,9 +9,9 @@ if TYPE_CHECKING:
     from main import LupiDPIApp
 
 
-def _is_dpi_running(app: "LupiDPIApp") -> bool:
+def _is_launch_running(app: "LupiDPIApp") -> bool:
     try:
-        controller = getattr(app, "dpi_controller", None)
+        controller = getattr(app, "launch_controller", None)
         if controller is not None:
             return bool(controller.is_running())
     except Exception as e:
@@ -50,18 +50,18 @@ def request_direct_runtime_content_apply(
         log(f"Direct runtime apply skipped: unsupported method {method}", "DEBUG")
         return False
 
-    if not hasattr(app, "dpi_controller") or not app.dpi_controller:
-        log("Direct runtime apply skipped: dpi_controller not found", "DEBUG")
+    if not hasattr(app, "launch_controller") or not app.launch_controller:
+        log("Direct runtime apply skipped: launch_controller not found", "DEBUG")
         return False
 
-    if not _is_dpi_running(app):
+    if not _is_launch_running(app):
         log(f"Direct runtime apply skipped: DPI not running ({method})", "DEBUG")
         return False
 
     preset_path = _get_selected_direct_preset_path(app, method)
     if preset_path is None or not preset_path.exists():
         log(f"Direct runtime apply: active preset missing for {method}, stopping DPI", "WARNING")
-        app.dpi_controller.stop_dpi_async()
+        app.launch_controller.stop_dpi_async()
         return True
 
     try:
@@ -72,7 +72,7 @@ def request_direct_runtime_content_apply(
 
     if not any(flag in content for flag in _direct_filter_flags(method)):
         log(f"Direct runtime apply: preset has no active filters for {method}, stopping DPI", "INFO")
-        app.dpi_controller.stop_dpi_async()
+        app.launch_controller.stop_dpi_async()
         return True
 
     target_info = f" [{target_key}]" if target_key else ""

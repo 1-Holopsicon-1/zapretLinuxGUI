@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QWidget
+from filters.strategy_detail.shared_filter_mode import apply_filter_mode_selector_texts
 
 
 @dataclass(slots=True)
@@ -112,6 +113,11 @@ def build_strategy_detail_v1_main_sections(
     on_sort_combo_changed,
     on_open_args_editor,
     on_strategy_selected,
+    on_favorite_toggled,
+    on_working_mark_requested,
+    on_preview_requested,
+    on_preview_pinned_requested,
+    on_preview_hide_requested,
 ):
     toolbar_card = settings_card_cls()
     toolbar_layout = QVBoxLayout()
@@ -144,10 +150,11 @@ def build_strategy_detail_v1_main_sections(
     filter_row.addWidget(filter_label)
 
     filter_mode_selector = switch_button_cls(parent=parent)
-    if hasattr(filter_mode_selector, "setOnText"):
-        filter_mode_selector.setOnText(tr_fn("page.z1_strategy_detail.filter.ipset", "IPset"))
-    if hasattr(filter_mode_selector, "setOffText"):
-        filter_mode_selector.setOffText(tr_fn("page.z1_strategy_detail.filter.hostlist", "Hostlist"))
+    apply_filter_mode_selector_texts(
+        filter_mode_selector,
+        ipset_text=tr_fn("page.z1_strategy_detail.filter.ipset", "IPset"),
+        hostlist_text=tr_fn("page.z1_strategy_detail.filter.hostlist", "Hostlist"),
+    )
     if hasattr(filter_mode_selector, "checkedChanged"):
         filter_mode_selector.checkedChanged.connect(
             lambda checked: on_filter_mode_changed("ipset" if checked else "hostlist")
@@ -221,11 +228,11 @@ def build_strategy_detail_v1_main_sections(
         parent=parent,
         tree_cls=direct_tree_cls,
         on_row_clicked=on_strategy_selected,
-        on_favorite_toggled=lambda *_args: None,
-        on_working_mark_requested=lambda *_args: None,
-        on_preview_requested=lambda *_args: None,
-        on_preview_pinned_requested=lambda *_args: None,
-        on_preview_hide_requested=lambda: None,
+        on_favorite_toggled=on_favorite_toggled,
+        on_working_mark_requested=on_working_mark_requested,
+        on_preview_requested=on_preview_requested,
+        on_preview_pinned_requested=on_preview_pinned_requested,
+        on_preview_hide_requested=on_preview_hide_requested,
     )
     list_layout.addWidget(tree, 1)
 

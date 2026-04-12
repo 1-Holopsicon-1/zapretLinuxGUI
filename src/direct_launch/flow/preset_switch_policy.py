@@ -19,14 +19,14 @@ def request_runtime_preset_switch(
     method = str(launch_method or "").strip().lower()
     target_preset = str(preset_file_name or "").strip()
 
-    if not hasattr(app, "dpi_controller") or not app.dpi_controller:
-        log("Runtime preset switch skipped: dpi_controller not found", "DEBUG")
+    if not hasattr(app, "launch_controller") or not app.launch_controller:
+        log("Runtime preset switch skipped: launch_controller not found", "DEBUG")
         return False
 
     try:
-        controller = getattr(app, "dpi_controller", None)
+        controller = getattr(app, "launch_controller", None)
         if controller is None:
-            log("Runtime preset switch skipped: dpi_controller not found", "DEBUG")
+            log("Runtime preset switch skipped: launch_controller not found", "DEBUG")
             return False
         if not controller.is_running():
             log(f"Runtime preset switch skipped: DPI not running ({method})", "DEBUG")
@@ -42,12 +42,12 @@ def request_runtime_preset_switch(
             f"Runtime preset switch ({method}, reason={reason}{preset_info}) -> direct preset switch pipeline",
             "INFO",
         )
-        app.dpi_controller.switch_direct_preset_async(method)
+        app.launch_controller.switch_direct_preset_async(method)
         return True
 
     log(
         f"Runtime preset switch ({method or 'unknown'}, reason={reason}{preset_info}) -> restart pipeline",
         "INFO",
     )
-    app.dpi_controller.restart_dpi_async()
+    app.launch_controller.restart_dpi_async()
     return True

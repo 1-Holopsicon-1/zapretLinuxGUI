@@ -56,10 +56,10 @@ except ImportError:
     SearchLineEdit = LineEdit
 
 from ui.pages.base_page import BasePage
-from ui.main_window_state import AppUiState, MainWindowStateStore
+from app_state.main_window_state import AppUiState, MainWindowStateStore
 from ui.compat_widgets import ActionButton, ResetActionButton, SettingsRow, set_tooltip, SettingsCard
 from ui.widgets.win11_controls import Win11ToggleRow, Win11ComboRow, Win11NumberRow
-from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree, StrategyTreeRow
+from filters.ui import StrategyTree, StrategyTreeRow
 from ui.popup_menu import exec_popup_menu
 from strategy_menu.args_preview_dialog import ArgsPreviewDialog
 from blobs.service import get_blobs_info
@@ -89,6 +89,7 @@ from filters.strategy_detail.shared import (
     build_strategies_tree_widget,
     run_args_editor_dialog,
 )
+from filters.strategy_detail.shared_filter_mode import apply_filter_mode_selector_texts
 from filters.strategy_detail.zapret2.common import (
     STRATEGY_TECHNIQUE_FILTERS,
     TCP_EMBEDDED_FAKE_TECHNIQUES,
@@ -658,8 +659,11 @@ class StrategyDetailPage(BasePage):
             self._tr("page.z2_strategy_detail.filter_mode.description", "Hostlist - по доменам, IPset - по IP"),
         )
         self._filter_mode_selector = SwitchButton(parent=self)
-        self._filter_mode_selector.setOnText(self._tr("page.z2_strategy_detail.filter.ipset", "IPset"))
-        self._filter_mode_selector.setOffText(self._tr("page.z2_strategy_detail.filter.hostlist", "Hostlist"))
+        apply_filter_mode_selector_texts(
+            self._filter_mode_selector,
+            ipset_text=self._tr("page.z2_strategy_detail.filter.ipset", "IPset"),
+            hostlist_text=self._tr("page.z2_strategy_detail.filter.hostlist", "Hostlist"),
+        )
         self._filter_mode_selector.checkedChanged.connect(
             lambda checked: self._on_filter_mode_changed("ipset" if checked else "hostlist")
         )
@@ -1060,7 +1064,7 @@ class StrategyDetailPage(BasePage):
         # Лёгкий список стратегий: item-based, без сотен QWidget в layout
         self._strategies_tree = build_strategies_tree_widget(
             parent=self,
-            tree_cls=DirectZapret2StrategiesTree,
+            tree_cls=StrategyTree,
             on_row_clicked=self._on_row_clicked,
             on_favorite_toggled=self._on_favorite_toggled,
             on_working_mark_requested=self._on_tree_working_mark_requested,
@@ -1576,7 +1580,7 @@ class StrategyDetailPage(BasePage):
         if app_runtime_state is None:
             return False
         try:
-            return bool(app_runtime_state.is_dpi_running())
+            return bool(app_runtime_state.is_launch_running())
         except Exception:
             return False
 
@@ -1604,7 +1608,7 @@ class StrategyDetailPage(BasePage):
                 payload=payload,
                 policy=policy,
                 retry_count=retry_count,
-                dpi_running=self._is_dpi_running_now(),
+                launch_running=self._is_dpi_running_now(),
                 is_visible=self.isVisible(),
                 custom_strategy_id=CUSTOM_STRATEGY_ID,
                 tr=self._tr,
@@ -3212,10 +3216,11 @@ class StrategyDetailPage(BasePage):
                 self._tr("page.z2_strategy_detail.filter_mode.description", "Hostlist - по доменам, IPset - по IP")
             )
         if getattr(self, "_filter_mode_selector", None) is not None:
-            if hasattr(self._filter_mode_selector, "setOnText"):
-                self._filter_mode_selector.setOnText(self._tr("page.z2_strategy_detail.filter.ipset", "IPset"))
-            if hasattr(self._filter_mode_selector, "setOffText"):
-                self._filter_mode_selector.setOffText(self._tr("page.z2_strategy_detail.filter.hostlist", "Hostlist"))
+            apply_filter_mode_selector_texts(
+                self._filter_mode_selector,
+                ipset_text=self._tr("page.z2_strategy_detail.filter.ipset", "IPset"),
+                hostlist_text=self._tr("page.z2_strategy_detail.filter.hostlist", "Hostlist"),
+            )
 
         if getattr(self, "_out_range_mode_label", None) is not None:
             self._out_range_mode_label.setText(self._tr("page.z2_strategy_detail.out_range.mode", "Режим:"))

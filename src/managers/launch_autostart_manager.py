@@ -1,8 +1,8 @@
 from PyQt6.QtCore import QObject
 from log import log
 
-class DPIManager(QObject):
-    """⚡ Упрощенный менеджер для управления DPI операциями"""
+class LaunchAutostartManager(QObject):
+    """⚡ Упрощенный менеджер для автозапуска launch-контура."""
     
     def __init__(self, app_instance):
         super().__init__()
@@ -43,10 +43,10 @@ class DPIManager(QObject):
             self.app.update_current_strategy_display(display_name)
 
         log(f"Автозапуск передан в единый DPI controller pipeline: {resolved_method}", "INFO")
-        self.app.dpi_controller.start_dpi_async(selected_mode=None, launch_method=resolved_method)
+        self.app.launch_controller.start_dpi_async(selected_mode=None, launch_method=resolved_method)
 
     def _mark_runtime_stopped(self) -> None:
-        runtime_service = getattr(self.app, "dpi_runtime_service", None)
+        runtime_service = getattr(self.app, "launch_runtime_service", None)
         if runtime_service is None:
             return
         runtime_service.mark_stopped(clear_error=True)

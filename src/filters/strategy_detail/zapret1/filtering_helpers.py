@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ui.widgets.direct_zapret2_strategies_tree import StrategyTreeRow
+from filters.ui import StrategyTreeRow
 
 
 def normalize_search_text(text: str) -> str:

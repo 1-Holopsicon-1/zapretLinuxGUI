@@ -34,7 +34,7 @@ from ui.compat_widgets import (
     enable_setting_card_group_auto_height,
     set_tooltip,
 )
-from ui.main_window_state import AppUiState, MainWindowStateStore
+from app_state.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 from ui.window_action_controller import (
     open_connection_test,
@@ -785,11 +785,11 @@ class Zapret2DirectControlPage(BasePage):
         self._ui_state_unsubscribe = store.subscribe(
             self._on_ui_state_changed,
             fields={
-                "dpi_phase",
-                "dpi_running",
-                "dpi_busy",
-                "dpi_busy_text",
-                "dpi_last_error",
+                "launch_phase",
+                "launch_running",
+                "launch_busy",
+                "launch_busy_text",
+                "launch_last_error",
                 "current_strategy_summary",
                 "active_preset_revision",
                 "mode_revision",
@@ -814,10 +814,10 @@ class Zapret2DirectControlPage(BasePage):
                 self._schedule_advanced_settings_reload(force=True)
             else:
                 self.run_when_page_ready(self._apply_pending_direct_refresh_if_ready)
-        self.set_loading(bool(state.dpi_busy), str(state.dpi_busy_text or ""))
+        self.set_loading(bool(state.launch_busy), str(state.launch_busy_text or ""))
         self.update_status(
-            state.dpi_phase or ("running" if state.dpi_running else "stopped"),
-            str(state.dpi_last_error or ""),
+            state.launch_phase or ("running" if state.launch_running else "stopped"),
+            str(state.launch_last_error or ""),
         )
         self.update_strategy(str(state.current_strategy_summary or ""))
 

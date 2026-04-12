@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from filters.strategy_detail.shared_filter_mode import apply_filter_mode_selector_state as _apply_filter_mode_selector_state
+
 
 def apply_strategies_summary_label(label, text: str, *, previous_text: str | None = None) -> tuple[bool, str]:
     normalized = str(text or "")
@@ -183,13 +185,7 @@ def apply_args_editor_state(edit_args_btn, *, enabled: bool) -> None:
 
 
 def apply_filter_mode_selector_state(selector, *, mode: str) -> None:
-    normalized_mode = str(mode or "").strip().lower()
-    selector.blockSignals(True)
-    try:
-        selector.setChecked(normalized_mode == "ipset")
-    except Exception:
-        pass
-    selector.blockSignals(False)
+    _apply_filter_mode_selector_state(selector, mode=mode)
 
 
 def apply_tree_selected_strategy_state(tree, *, strategy_id: str) -> None:

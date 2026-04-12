@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ui.main_window_state import AppUiState, MainWindowStateStore
+from app_state.main_window_state import AppUiState, MainWindowStateStore
 
 
 class AppRuntimeState:
@@ -31,14 +31,14 @@ class AppRuntimeState:
         except Exception:
             return AppUiState()
 
-    def is_dpi_running(self) -> bool:
-        return bool(self.snapshot().dpi_running)
+    def is_launch_running(self) -> bool:
+        return bool(self.snapshot().launch_running)
 
-    def current_dpi_phase(self) -> str:
-        return str(self.snapshot().dpi_phase or "").strip().lower()
+    def current_launch_phase(self) -> str:
+        return str(self.snapshot().launch_phase or "").strip().lower()
 
-    def last_dpi_error(self) -> str:
-        return str(self.snapshot().dpi_last_error or "").strip()
+    def last_launch_error(self) -> str:
+        return str(self.snapshot().launch_last_error or "").strip()
 
     def is_autostart_enabled(self) -> bool:
         return bool(self.snapshot().autostart_enabled)
@@ -61,6 +61,7 @@ class AppRuntimeState:
             return False
 
         return bool(store.update(**changes))
+
     def set_autostart(self, enabled: bool) -> bool:
         return self.apply_runtime_state(autostart_enabled=enabled)
 

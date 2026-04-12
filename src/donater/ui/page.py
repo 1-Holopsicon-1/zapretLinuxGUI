@@ -60,7 +60,7 @@ from donater.ui.status_workflow import (
     apply_status_check_success,
     render_server_status_label,
 )
-from ui.main_window_state import AppUiState, MainWindowStateStore
+from app_state.main_window_state import AppUiState, MainWindowStateStore
 from ui.theme_semantic import get_semantic_palette
 from ui.text_catalog import tr as tr_catalog
 

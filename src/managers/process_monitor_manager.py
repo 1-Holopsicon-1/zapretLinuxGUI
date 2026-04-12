@@ -35,7 +35,7 @@ class ProcessMonitorManager(QObject):
         self._process_details = normalized
         self.app.process_details = normalized
 
-        runtime_service = getattr(self.app, "dpi_runtime_service", None)
+        runtime_service = getattr(self.app, "launch_runtime_service", None)
         if runtime_service is not None:
             runtime_service.observe_process_details(normalized)
 

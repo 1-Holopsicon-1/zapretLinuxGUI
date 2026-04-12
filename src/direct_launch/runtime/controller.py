@@ -34,14 +34,17 @@ from .lifecycle_feedback import (
 )
 from .thread_runtime import start_worker_thread
 from .workers import (
-    DPIStartWorker,
-    DPIStopWorker,
+    DirectLaunchStartWorker,
+    DirectLaunchStopWorker,
     StopAndExitWorker,
+)
+from ui.main_window_page_dispatch import (
+    show_active_strategy_page_loading,
 )
 
 
-class DPIController:
-    """Основной контроллер для управления DPI"""
+class DirectLaunchController:
+    """Основной orchestrator прямого запуска и остановки обхода."""
     
     def __init__(self, app_instance):
         self.app = app_instance
@@ -66,7 +69,7 @@ class DPIController:
         self._dpi_start_verify_retry = 0
 
     def _runtime_service(self):
-        return getattr(self.app, "dpi_runtime_service", None)
+        return getattr(self.app, "launch_runtime_service", None)
 
     def transition_pipeline_in_progress(self, launch_method: str | None = None) -> bool:
         method = str(launch_method or "").strip().lower()
@@ -355,12 +358,12 @@ class DPIController:
         
         # Показываем индикатор только на уже загруженной странице стратегий
         # для активного метода запуска, без старого обязательного attr-контракта.
-        if hasattr(self.app, 'main_window') and hasattr(self.app.main_window, '_show_active_strategy_page_loading'):
-            self.app.main_window._show_active_strategy_page_loading()
+        if hasattr(self.app, 'main_window'):
+            show_active_strategy_page_loading(self.app.main_window)
         
         store = getattr(self.app, "ui_state_store", None)
         if store is not None:
-            store.set_dpi_busy(True, "Запуск Zapret...")
+            store.set_launch_busy(True, "Запуск Zapret...")
 
         self._begin_runtime_start(request.launch_method, request.selected_mode)
 
@@ -368,7 +371,7 @@ class DPIController:
             self,
             thread_attr="_dpi_start_thread",
             worker_attr="_dpi_start_worker",
-            worker=DPIStartWorker(self.app, request.selected_mode, request.launch_method),
+            worker=DirectLaunchStartWorker(self.app, request.selected_mode, request.launch_method),
             finished_slot=self._on_dpi_start_finished,
             progress_slot=self.app.set_status,
             cleanup_log_label="потока запуска",
@@ -392,12 +395,12 @@ class DPIController:
         method_name = resolve_method_name(launch_method)
         self.app.set_status(f"🛑 Остановка DPI ({method_name})...")
         
-        if hasattr(self.app, 'main_window') and hasattr(self.app.main_window, '_show_active_strategy_page_loading'):
-            self.app.main_window._show_active_strategy_page_loading()
+        if hasattr(self.app, 'main_window'):
+            show_active_strategy_page_loading(self.app.main_window)
         
         store = getattr(self.app, "ui_state_store", None)
         if store is not None:
-            store.set_dpi_busy(True, "Остановка Zapret...")
+            store.set_launch_busy(True, "Остановка Zapret...")
 
         self._begin_runtime_stop()
 
@@ -408,7 +411,7 @@ class DPIController:
             self,
             thread_attr="_dpi_stop_thread",
             worker_attr="_dpi_stop_worker",
-            worker=DPIStopWorker(self.app, launch_method),
+            worker=DirectLaunchStopWorker(self.app, launch_method),
             finished_slot=self._on_dpi_stop_finished,
             progress_slot=self.app.set_status,
             cleanup_log_label="потока остановки",
@@ -459,7 +462,7 @@ class DPIController:
         Returns:
             True если процесс запущен, False иначе
         """
-        return self.app.dpi_runtime.is_any_running(silent=True)
+        return self.app.launch_runtime_api.is_any_running(silent=True)
 
     def restart_dpi_async(self):
         """

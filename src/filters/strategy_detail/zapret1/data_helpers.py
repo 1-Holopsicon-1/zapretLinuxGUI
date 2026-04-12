@@ -74,26 +74,3 @@ def load_current_strategy_id_v1(
         return str(selections.get(target_key) or "none").strip() or "none"
     except Exception:
         return "none"
-
-
-def target_supports_filter_switch_v1(target_info: dict) -> bool:
-    host = str(target_info.get("base_filter_hostlist") or "").strip()
-    ipset = str(target_info.get("base_filter_ipset") or "").strip()
-    return bool(host and ipset)
-
-
-def load_target_filter_mode_v1(
-    *,
-    direct_facade,
-    target_key: str,
-    current_payload,
-) -> str:
-    if not direct_facade:
-        return "hostlist"
-    payload = current_payload
-    if payload is not None and str(getattr(payload, "target_key", "") or "") == str(target_key or "").strip().lower():
-        return str(getattr(payload, "filter_mode", "") or "hostlist")
-    try:
-        return direct_facade.get_target_filter_mode(target_key)
-    except Exception:
-        return "hostlist"

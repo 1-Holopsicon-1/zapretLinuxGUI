@@ -4,6 +4,10 @@ from PyQt6.QtCore import QTimer
 
 from log import log
 from strategy_menu import get_strategy_launch_method
+from ui.main_window_page_dispatch import (
+    show_active_strategy_page_loading,
+    show_active_strategy_page_success,
+)
 
 from .thread_runtime import start_worker_thread
 from .workers import DirectPresetSwitchWorker
@@ -60,8 +64,8 @@ def process_pending_direct_preset_switch(controller) -> None:
         controller._direct_preset_switch_completed_generation = target_generation
         return
 
-    if hasattr(controller.app, "main_window") and hasattr(controller.app.main_window, "_show_active_strategy_page_loading"):
-        controller.app.main_window._show_active_strategy_page_loading()
+    if hasattr(controller.app, "main_window"):
+        show_active_strategy_page_loading(controller.app.main_window)
 
     start_worker_thread(
         controller,
@@ -161,10 +165,10 @@ def handle_direct_preset_switch_finished(controller, success, error_message, gen
     try:
         store = getattr(controller.app, "ui_state_store", None)
         if store is not None:
-            store.set_dpi_busy(False)
+            store.set_launch_busy(False)
 
-        if hasattr(controller.app, "main_window") and hasattr(controller.app.main_window, "_show_active_strategy_page_success"):
-            controller.app.main_window._show_active_strategy_page_success()
+        if hasattr(controller.app, "main_window"):
+            show_active_strategy_page_success(controller.app.main_window)
 
         controller._direct_preset_switch_completed_generation = max(
             int(controller._direct_preset_switch_completed_generation or 0),

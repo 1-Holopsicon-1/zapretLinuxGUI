@@ -21,7 +21,7 @@ from filters.pages.direct_zapret2_targets_selection import (
     apply_strategy_selection,
     update_current_strategies_display,
 )
-from ui.main_window_state import AppUiState, MainWindowStateStore
+from app_state.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 from log import log
 

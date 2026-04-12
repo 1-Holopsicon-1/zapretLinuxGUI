@@ -318,16 +318,16 @@ def controller_transition_in_progress(launch_method: str) -> bool:
             return False
 
         target = app.activeWindow()
-        if target is None or not hasattr(target, "dpi_controller"):
+        if target is None or not hasattr(target, "launch_controller"):
             for widget in app.topLevelWidgets():
-                if hasattr(widget, "dpi_controller"):
+                if hasattr(widget, "launch_controller"):
                     target = widget
                     break
 
         if target is None:
             return False
 
-        controller = getattr(target, "dpi_controller", None)
+        controller = getattr(target, "launch_controller", None)
         checker = getattr(controller, "transition_pipeline_in_progress", None)
         if callable(checker):
             return bool(checker(method))

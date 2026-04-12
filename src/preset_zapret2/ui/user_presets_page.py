@@ -76,7 +76,7 @@ from preset_zapret2.ui.user_presets_runtime_helpers import (
     schedule_preset_search,
     update_presets_view_height,
 )
-from ui.main_window_state import MainWindowStateStore
+from app_state.main_window_state import MainWindowStateStore
 
 try:
     from qfluentwidgets import (
@@ -128,6 +128,7 @@ from ui.presets_menu import (
     fluent_icon,
     make_menu_action,
 )
+from ui.presets_menu.common import tr_text as _tr_text
 
 class BaseZapret2UserPresetsPage(BasePage):
     preset_open_requested = pyqtSignal(str)  # file_name

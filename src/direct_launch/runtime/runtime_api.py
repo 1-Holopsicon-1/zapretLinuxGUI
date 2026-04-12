@@ -13,8 +13,8 @@ from .process_probe import (
 )
 
 
-class DpiRuntimeApi:
-    """Низкоуровневый runtime-слой DPI: статус процесса, ожидаемый exe и очистка WinDivert."""
+class DirectLaunchRuntimeApi:
+    """Низкоуровневый runtime-слой запуска: статус процесса, ожидаемый exe и очистка WinDivert."""
 
     def __init__(
         self,
@@ -23,7 +23,7 @@ class DpiRuntimeApi:
         app_instance: Optional["LupiDPIApp"] = None,
     ):
         """
-        Инициализирует DpiRuntimeApi.
+        Инициализирует DirectLaunchRuntimeApi.
 
         Args:
             expected_exe_path: Путь к ожидаемому winws.exe/winws2.exe

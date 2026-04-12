@@ -18,6 +18,8 @@ _WIDGET_EXPORTS: dict[str, tuple[str, str]] = {
     "FilterButtonGroup": ("filters.ui", "FilterButtonGroup"),
     "CollapsibleGroup": ("filters.ui", "CollapsibleGroup"),
     "StrategyRadioItem": ("filters.ui", "StrategyRadioItem"),
+    "StrategyTree": ("filters.ui", "StrategyTree"),
+    "StrategyTreeRow": ("filters.ui", "StrategyTreeRow"),
     "TargetsList": ("filters.ui", "TargetsList"),
 }
 

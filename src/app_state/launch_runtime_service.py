@@ -3,11 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from ui.main_window_state import MainWindowStateStore
+from app_state.main_window_state import MainWindowStateStore
 
 
 @dataclass(frozen=True, slots=True)
-class DpiRuntimeSnapshot:
+class LaunchRuntimeSnapshot:
     phase: str = "stopped"
     running: bool = False
     expected_process: str = ""
@@ -19,34 +19,34 @@ class DpiRuntimeSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
-class DpiRuntimeOwnershipMap:
+class LaunchRuntimeOwnershipMap:
     canonical_writers: tuple[str, ...]
     canonical_readers: tuple[str, ...]
     allowed_auxiliary_writers: tuple[str, ...]
     single_source_of_truth: str
 
 
-class DpiRuntimeService:
+class LaunchRuntimeService:
     """Единственная точка записи runtime-состояния DPI."""
 
     @staticmethod
-    def build_ownership_map() -> DpiRuntimeOwnershipMap:
+    def build_ownership_map() -> LaunchRuntimeOwnershipMap:
         """Явная карта владения DPI runtime state.
 
         Здесь фиксируется канонический контракт:
         - состояние DPI хранится только в `MainWindowStateStore`;
-        - записывать его должен только `DpiRuntimeService`;
+        - записывать его должен только `LaunchRuntimeService`;
         - страницы direct-control и главное окно должны читать уже готовый snapshot,
           а не собирать параллельный источник истины локально.
         """
 
-        return DpiRuntimeOwnershipMap(
+        return LaunchRuntimeOwnershipMap(
             canonical_writers=(
-                "direct_launch.runtime.controller.DPIController._begin_runtime_start",
-                "direct_launch.runtime.controller.DPIController._mark_runtime_running",
-                "direct_launch.runtime.controller.DPIController._mark_runtime_failed",
-                "direct_launch.runtime.controller.DPIController._begin_runtime_stop",
-                "direct_launch.runtime.controller.DPIController._mark_runtime_stopped",
+                "direct_launch.runtime.controller.DirectLaunchController._begin_runtime_start",
+                "direct_launch.runtime.controller.DirectLaunchController._mark_runtime_running",
+                "direct_launch.runtime.controller.DirectLaunchController._mark_runtime_failed",
+                "direct_launch.runtime.controller.DirectLaunchController._begin_runtime_stop",
+                "direct_launch.runtime.controller.DirectLaunchController._mark_runtime_stopped",
             ),
             canonical_readers=(
                 "main.LupiDPIApp._apply_runner_failure_update",
@@ -55,10 +55,10 @@ class DpiRuntimeService:
             ),
             allowed_auxiliary_writers=(
                 "managers.initialization_manager.InitializationManager._init_process_monitor -> bootstrap_probe",
-                "managers.dpi_manager.DPIManager._mark_runtime_stopped",
+                "managers.launch_autostart_manager.LaunchAutostartManager._mark_runtime_stopped",
                 "main.LupiDPIApp._apply_runner_failure_update",
             ),
-            single_source_of_truth="ui.main_window_state.MainWindowStateStore",
+            single_source_of_truth="app_state.main_window_state.MainWindowStateStore",
         )
 
     def __init__(self, app_instance_or_store) -> None:
@@ -77,24 +77,24 @@ class DpiRuntimeService:
             return store
         return None
 
-    def snapshot(self) -> DpiRuntimeSnapshot:
+    def snapshot(self) -> LaunchRuntimeSnapshot:
         store = self._store()
         if store is None:
-            return DpiRuntimeSnapshot()
+            return LaunchRuntimeSnapshot()
         try:
             state = store.snapshot()
-            return DpiRuntimeSnapshot(
-                phase=str(state.dpi_phase or "stopped").strip().lower() or "stopped",
-                running=bool(state.dpi_running),
-                expected_process=str(state.dpi_expected_process or "").strip().lower(),
-                expected_preset_path=str(state.dpi_expected_preset_path or "").strip(),
-                pid=state.dpi_pid if isinstance(state.dpi_pid, int) else None,
-                last_error=str(state.dpi_last_error or "").strip(),
-                last_exit_code=state.dpi_last_exit_code if isinstance(state.dpi_last_exit_code, int) else None,
+            return LaunchRuntimeSnapshot(
+                phase=str(state.launch_phase or "stopped").strip().lower() or "stopped",
+                running=bool(state.launch_running),
+                expected_process=str(state.launch_expected_process or "").strip().lower(),
+                expected_preset_path=str(state.launch_expected_preset_path or "").strip(),
+                pid=state.launch_pid if isinstance(state.launch_pid, int) else None,
+                last_error=str(state.launch_last_error or "").strip(),
+                last_exit_code=state.launch_last_exit_code if isinstance(state.launch_last_exit_code, int) else None,
                 launch_method=str(getattr(state, "launch_method", "") or "").strip().lower(),
             )
         except Exception:
-            return DpiRuntimeSnapshot()
+            return LaunchRuntimeSnapshot()
 
     def current_phase(self) -> str:
         return self.snapshot().phase
@@ -310,13 +310,13 @@ class DpiRuntimeService:
         last_exit_code: int | None,
     ) -> dict[str, object]:
         return {
-            "dpi_phase": str(phase or "stopped").strip().lower() or "stopped",
-            "dpi_running": bool(running),
-            "dpi_expected_process": str(expected_process or "").strip().lower(),
-            "dpi_expected_preset_path": str(expected_preset_path or "").strip(),
-            "dpi_pid": int(pid) if isinstance(pid, int) else None,
-            "dpi_last_error": str(last_error or "").strip(),
-            "dpi_last_exit_code": int(last_exit_code) if isinstance(last_exit_code, int) else None,
+            "launch_phase": str(phase or "stopped").strip().lower() or "stopped",
+            "launch_running": bool(running),
+            "launch_expected_process": str(expected_process or "").strip().lower(),
+            "launch_expected_preset_path": str(expected_preset_path or "").strip(),
+            "launch_pid": int(pid) if isinstance(pid, int) else None,
+            "launch_last_error": str(last_error or "").strip(),
+            "launch_last_exit_code": int(last_exit_code) if isinstance(last_exit_code, int) else None,
         }
 
     @staticmethod

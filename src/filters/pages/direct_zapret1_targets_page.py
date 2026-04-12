@@ -19,7 +19,7 @@ from filters.runtime.targets_payload_runtime import (
 )
 from ui.pages.base_page import BasePage
 from ui.compat_widgets import QuickActionsBar, RefreshButton
-from ui.main_window_state import AppUiState, MainWindowStateStore
+from app_state.main_window_state import AppUiState, MainWindowStateStore
 from ui.text_catalog import tr as tr_catalog
 from ui.theme import get_themed_qta_icon
 from log import log

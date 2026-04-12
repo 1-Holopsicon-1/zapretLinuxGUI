@@ -11,13 +11,27 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton
 from core.runtime.direct_ui_snapshot_service import DirectTargetDetailSnapshotWorker
 from ui.pages.base_page import BasePage
 from ui.compat_widgets import ActionButton, RefreshButton, SettingsCard
-from ui.main_window_state import AppUiState, MainWindowStateStore
-from ui.widgets.direct_zapret2_strategies_tree import DirectZapret2StrategiesTree
+from app_state.main_window_state import AppUiState, MainWindowStateStore
+from filters.ui import StrategyTree
 from ui.text_catalog import tr as tr_catalog
 from filters.strategy_detail.shared import (
     build_detail_subtitle_widgets,
     build_strategies_tree_widget,
     run_args_editor_dialog,
+)
+from filters.strategy_detail.shared_filter_mode import (
+    load_target_filter_mode,
+    target_supports_filter_switch,
+)
+from filters.strategy_detail.shared_interactions import (
+    build_preview_strategy_data,
+    close_preview_dialog,
+    ensure_preview_dialog_instance,
+    get_preview_rating,
+    save_strategy_mark,
+    show_preview_dialog_for_strategy,
+    toggle_favorite,
+    toggle_preview_rating,
 )
 from filters.strategy_detail.zapret2.apply import apply_tree_selected_strategy_state
 from filters.strategy_detail.zapret1.controller import StrategyDetailPageV1Controller
@@ -31,10 +45,8 @@ from filters.strategy_detail.zapret1.args_workflow import (
 from filters.strategy_detail.zapret1.data_helpers import (
     get_target_details_v1,
     load_current_strategy_id_v1,
-    load_target_filter_mode_v1,
     load_target_payload_sync_v1,
     require_app_context_v1,
-    target_supports_filter_switch_v1,
 )
 from filters.strategy_detail.zapret1.feedback_helpers import (
     hide_success_feedback_v1,
@@ -78,6 +90,7 @@ from filters.strategy_detail.zapret1.runtime_helpers import (
     update_selected_label,
 )
 from log import log
+from strategy_menu.args_preview_dialog import ArgsPreviewDialog
 
 try:
     from qfluentwidgets import (
@@ -134,6 +147,11 @@ class Zapret1StrategyDetailPage(BasePage):
         self._ui_state_store = None
         self._ui_state_unsubscribe = None
         self._cleanup_in_progress = False
+        self._marks_store = None
+        self._favorites_store = None
+        self._favorite_strategy_ids: set[str] = set()
+        self._preview_dialog = None
+        self._preview_pinned = False
 
         self._strategies: dict[str, dict] = {}
         self._current_strategy_id: str = "none"
@@ -141,7 +159,7 @@ class Zapret1StrategyDetailPage(BasePage):
         self._search_text: str = ""
 
         self._breadcrumb = None
-        self._tree: DirectZapret2StrategiesTree | None = None
+        self._tree: StrategyTree | None = None
         self._refresh_btn: RefreshButton | None = None
         self._search_edit: Any = None
         self._sort_combo: Any = None
@@ -233,7 +251,7 @@ class Zapret1StrategyDetailPage(BasePage):
             combo_box_cls=ComboBox,
             switch_button_cls=SwitchButton,
             build_tree_widget_fn=build_strategies_tree_widget,
-            direct_tree_cls=DirectZapret2StrategiesTree,
+            direct_tree_cls=StrategyTree,
             on_enable_toggled=self._on_enable_toggled,
             on_filter_mode_changed=self._on_filter_mode_changed,
             on_reload_target=self._reload_target,
@@ -241,6 +259,11 @@ class Zapret1StrategyDetailPage(BasePage):
             on_sort_combo_changed=self._on_sort_combo_changed,
             on_open_args_editor=self._open_args_editor,
             on_strategy_selected=self._on_strategy_selected,
+            on_favorite_toggled=self._on_favorite_toggled,
+            on_working_mark_requested=self._on_tree_working_mark_requested,
+            on_preview_requested=self._on_tree_preview_requested,
+            on_preview_pinned_requested=self._on_tree_preview_pinned_requested,
+            on_preview_hide_requested=self._on_tree_preview_hide_requested,
         )
         self._toolbar_card = main_widgets.toolbar_card
         self._state_label = main_widgets.state_label
@@ -384,6 +407,7 @@ class Zapret1StrategyDetailPage(BasePage):
             self._spinner.hide()
 
     def _apply_loaded_target_payload(self) -> None:
+        self._ensure_interaction_stores()
         apply_loaded_target_payload_v1(
             payload=getattr(self, "_target_payload", None),
             set_strategies_fn=lambda value: setattr(self, "_strategies", value),
@@ -393,6 +417,7 @@ class Zapret1StrategyDetailPage(BasePage):
             sync_target_controls_fn=self._sync_target_controls,
             show_success_fn=self.show_success,
         )
+        self._refresh_marks_and_favorites_for_target()
 
     def show_target(self, target_key: str, direct_facade=None) -> None:
         show_target_v1(
@@ -457,6 +482,7 @@ class Zapret1StrategyDetailPage(BasePage):
     def _reload_target_error_fallback(self) -> None:
         self._strategies = {}
         self._rebuild_tree_rows()
+        self._favorite_strategy_ids = set()
         self._refresh_args_preview()
         self._update_selected_label()
         self._sync_target_controls()
@@ -488,6 +514,42 @@ class Zapret1StrategyDetailPage(BasePage):
             empty_label=self._empty_label,
             strategies=self._strategies,
         )
+
+    def _ensure_interaction_stores(self) -> None:
+        if self._marks_store is not None and self._favorites_store is not None:
+            return
+        try:
+            app_context = self._require_app_context()
+        except Exception:
+            return
+        self._marks_store = getattr(app_context, "strategy_marks_store", None)
+        self._favorites_store = getattr(app_context, "strategy_favorites_store", None)
+
+    def _refresh_marks_and_favorites_for_target(self) -> None:
+        self._ensure_interaction_stores()
+        tree = self._tree
+        target_key = str(self._target_key or "").strip()
+        if tree is None or not target_key:
+            return
+
+        favorite_ids: set[str] = set()
+        if self._favorites_store is not None:
+            try:
+                favorite_ids = set(self._favorites_store.get_favorites(target_key))
+            except Exception:
+                favorite_ids = set()
+        self._favorite_strategy_ids = set(favorite_ids)
+
+        for strategy_id in list(tree.get_strategy_ids() or []):
+            if strategy_id != "none":
+                tree.set_favorite_state(strategy_id, strategy_id in favorite_ids)
+            if self._marks_store is None:
+                continue
+            try:
+                state = self._marks_store.get_mark(target_key, strategy_id)
+            except Exception:
+                state = None
+            tree.set_working_state(strategy_id, state)
 
     # ------------------------------------------------------------------
     # Header updates
@@ -543,7 +605,7 @@ class Zapret1StrategyDetailPage(BasePage):
         )
 
     def _target_supports_filter_switch(self) -> bool:
-        return target_supports_filter_switch_v1(self._target_info)
+        return target_supports_filter_switch(self._target_info)
 
     def _sync_target_controls(self) -> None:
         sync_target_controls(
@@ -553,12 +615,12 @@ class Zapret1StrategyDetailPage(BasePage):
             filter_mode_selector=self._filter_mode_selector,
             current_strategy_id=self._current_strategy_id,
             target_key=self._target_key,
-            target_supports_filter_switch_fn=self._target_supports_filter_switch,
+            target_info=self._target_info,
             load_target_filter_mode_fn=self._load_target_filter_mode,
         )
 
     def _load_target_filter_mode(self, target_key: str) -> str:
-        return load_target_filter_mode_v1(
+        return load_target_filter_mode(
             direct_facade=self._direct_facade,
             target_key=target_key,
             current_payload=getattr(self, "_target_payload", None),
@@ -680,6 +742,109 @@ class Zapret1StrategyDetailPage(BasePage):
             log_fn=log,
         )
 
+    def _get_preview_strategy_data(self, strategy_id: str) -> dict:
+        strategy = dict(self._strategies.get(str(strategy_id or "").strip(), {}) or {})
+        return build_preview_strategy_data(
+            strategy_id=strategy_id,
+            strategy_data={
+                "name": strategy.get("name", strategy_id),
+                "args": strategy.get("args", ""),
+            },
+        )
+
+    def _get_preview_rating(self, strategy_id: str, target_key: str):
+        if self._marks_store is None:
+            return None
+        return get_preview_rating(
+            self._marks_store,
+            strategy_id=strategy_id,
+            target_key=target_key,
+        )
+
+    def _toggle_preview_rating(self, strategy_id: str, rating: str, target_key: str):
+        if self._marks_store is None:
+            return None
+        ok, resulting_state, resulting_rating = toggle_preview_rating(
+            self._marks_store,
+            strategy_id=strategy_id,
+            rating=rating,
+            target_key=target_key,
+        )
+        if ok and self._tree is not None:
+            self._tree.set_working_state(strategy_id, resulting_state)
+        return resulting_rating
+
+    def _close_preview_dialog(self, force: bool = False):
+        self._preview_dialog, self._preview_pinned = close_preview_dialog(
+            self._preview_dialog,
+            preview_pinned=self._preview_pinned,
+            force=force,
+        )
+
+    def _on_preview_closed(self) -> None:
+        self._preview_dialog = None
+        self._preview_pinned = False
+
+    def _ensure_preview_dialog(self):
+        parent_win = self.window() or self
+        self._preview_dialog = ensure_preview_dialog_instance(
+            self._preview_dialog,
+            parent_win=parent_win,
+            on_closed=self._on_preview_closed,
+            dialog_cls=ArgsPreviewDialog,
+        )
+        return self._preview_dialog
+
+    def _show_preview_dialog(self, strategy_id: str, global_pos) -> None:
+        if not (self._target_key and strategy_id and strategy_id != "none"):
+            return
+        dlg = self._ensure_preview_dialog()
+        if dlg is None:
+            return
+        show_preview_dialog_for_strategy(
+            dlg,
+            target_key=self._target_key,
+            strategy_id=strategy_id,
+            global_pos=global_pos,
+            strategy_data=self._get_preview_strategy_data(strategy_id),
+            rating_getter=self._get_preview_rating,
+            rating_toggler=self._toggle_preview_rating,
+        )
+
+    def _on_tree_preview_requested(self, strategy_id: str, global_pos):
+        pass
+
+    def _on_tree_preview_pinned_requested(self, strategy_id: str, global_pos):
+        self._show_preview_dialog(strategy_id, global_pos)
+
+    def _on_tree_preview_hide_requested(self) -> None:
+        pass
+
+    def _on_tree_working_mark_requested(self, strategy_id: str, is_working):
+        if self._marks_store is None or self._tree is None:
+            return
+        ok, resulting_state, _ = save_strategy_mark(
+            self._marks_store,
+            strategy_id=strategy_id,
+            is_working=is_working,
+            target_key=self._target_key,
+        )
+        if ok:
+            self._tree.set_working_state(strategy_id, resulting_state)
+
+    def _on_favorite_toggled(self, strategy_id: str, is_favorite: bool) -> None:
+        if self._favorites_store is None:
+            return
+        ok, updated_ids = toggle_favorite(
+            self._favorites_store,
+            strategy_id=strategy_id,
+            is_favorite=is_favorite,
+            target_key=self._target_key,
+            favorite_ids=self._favorite_strategy_ids,
+        )
+        if ok:
+            self._favorite_strategy_ids = set(updated_ids)
+
     # ------------------------------------------------------------------
     # Feedback indicators
     # ------------------------------------------------------------------
@@ -755,6 +920,10 @@ class Zapret1StrategyDetailPage(BasePage):
         )
 
     def cleanup(self) -> None:
+        try:
+            self._close_preview_dialog(force=True)
+        except Exception:
+            pass
         cleanup_page_v1(
             set_cleanup_in_progress_fn=lambda value: setattr(self, "_cleanup_in_progress", value),
             set_pending_target_key_fn=lambda value: setattr(self, "_pending_target_key", value),

@@ -41,7 +41,7 @@ class StrategyTreeRow:
     is_working: Optional[bool] = None
 
 
-class DirectZapret2StrategiesTree(QTreeWidget):
+class StrategyTree(QTreeWidget):
     """
     Лёгкий список стратегий на базе QTreeWidget (без множества QWidget-строк).
 

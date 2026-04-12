@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+from filters.strategy_detail.shared_filter_mode import (
+    load_target_filter_mode as _load_target_filter_mode,
+    save_target_filter_mode as _save_target_filter_mode,
+)
+
 
 @dataclass(slots=True)
 class StrategyDetailSortOption:
@@ -495,13 +500,15 @@ class StrategyDetailPageController:
 
     @staticmethod
     def save_target_filter_mode(facade, *, target_key: str, mode: str) -> None:
-        facade.update_target_filter_mode(target_key, mode, save_and_sync=True)
+        _save_target_filter_mode(facade, target_key=target_key, mode=mode)
 
     @staticmethod
     def load_target_filter_mode(facade, *, payload, target_key: str) -> str:
-        if payload is not None and str(getattr(payload, "target_key", "") or "") == str(target_key or "").strip().lower():
-            return str(getattr(payload, "filter_mode", "") or "hostlist")
-        return facade.get_target_filter_mode(target_key)
+        return _load_target_filter_mode(
+            facade,
+            target_key=target_key,
+            current_payload=payload,
+        )
 
     @staticmethod
     def save_target_sort(facade, *, target_key: str, sort_order: str) -> None:
@@ -693,7 +700,7 @@ class StrategyDetailPageController:
         payload,
         policy,
         retry_count: int,
-        dpi_running: bool,
+        launch_running: bool,
         is_visible: bool,
         custom_strategy_id: str,
         tr,
@@ -720,7 +727,7 @@ class StrategyDetailPageController:
                 next_retry_count = int(retry_count or 0) + 1
             else:
                 next_retry_count = 0
-                if (not dpi_running) or (not is_visible):
+                if (not launch_running) or (not is_visible):
                     should_suppress_warning = True
                 else:
                     should_show_warning = True

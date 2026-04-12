@@ -7,15 +7,15 @@ from typing import Callable, Iterable
 
 @dataclass(frozen=True, slots=True)
 class AppUiState:
-    dpi_phase: str = "stopped"
-    dpi_running: bool = False
-    dpi_busy: bool = False
-    dpi_busy_text: str = ""
-    dpi_expected_process: str = ""
-    dpi_expected_preset_path: str = ""
-    dpi_pid: int | None = None
-    dpi_last_error: str = ""
-    dpi_last_exit_code: int | None = None
+    launch_phase: str = "stopped"
+    launch_running: bool = False
+    launch_busy: bool = False
+    launch_busy_text: str = ""
+    launch_expected_process: str = ""
+    launch_expected_preset_path: str = ""
+    launch_pid: int | None = None
+    launch_last_error: str = ""
+    launch_last_exit_code: int | None = None
     current_strategy_summary: str = ""
     autostart_enabled: bool = False
     subscription_is_premium: bool = False
@@ -96,10 +96,10 @@ class MainWindowStateStore:
 
         return True
 
-    def set_dpi_running(self, running: bool) -> bool:
-        return self.update(dpi_running=bool(running))
+    def set_launch_running(self, running: bool) -> bool:
+        return self.update(launch_running=bool(running))
 
-    def set_dpi_runtime(
+    def set_launch_runtime(
         self,
         *,
         phase: str | None = None,
@@ -113,26 +113,26 @@ class MainWindowStateStore:
         changes: dict[str, object] = {}
 
         if phase is not None:
-            changes["dpi_phase"] = str(phase or "stopped").strip().lower() or "stopped"
+            changes["launch_phase"] = str(phase or "stopped").strip().lower() or "stopped"
         if running is not None:
-            changes["dpi_running"] = bool(running)
+            changes["launch_running"] = bool(running)
         if expected_process is not None:
-            changes["dpi_expected_process"] = str(expected_process or "").strip().lower()
+            changes["launch_expected_process"] = str(expected_process or "").strip().lower()
         if expected_preset_path is not None:
-            changes["dpi_expected_preset_path"] = str(expected_preset_path or "").strip()
+            changes["launch_expected_preset_path"] = str(expected_preset_path or "").strip()
         if pid is not None:
-            changes["dpi_pid"] = int(pid) if isinstance(pid, int) else None
+            changes["launch_pid"] = int(pid) if isinstance(pid, int) else None
         if last_error is not None:
-            changes["dpi_last_error"] = str(last_error or "").strip()
+            changes["launch_last_error"] = str(last_error or "").strip()
         if last_exit_code is not None:
-            changes["dpi_last_exit_code"] = int(last_exit_code) if isinstance(last_exit_code, int) else None
+            changes["launch_last_exit_code"] = int(last_exit_code) if isinstance(last_exit_code, int) else None
 
         return self.update(**changes)
 
-    def set_dpi_busy(self, busy: bool, text: str = "") -> bool:
+    def set_launch_busy(self, busy: bool, text: str = "") -> bool:
         if not busy:
             text = ""
-        return self.update(dpi_busy=bool(busy), dpi_busy_text=str(text or ""))
+        return self.update(launch_busy=bool(busy), launch_busy_text=str(text or ""))
 
     def set_current_strategy_summary(self, summary: str) -> bool:
         return self.update(current_strategy_summary=str(summary or ""))

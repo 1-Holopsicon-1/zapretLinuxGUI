@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from log import log
 
 from ui.smooth_scroll import apply_editor_smooth_scroll_preference
 from ui.text_catalog import tr as tr_catalog
@@ -194,4 +195,60 @@ def build_detail_subtitle_widgets(
         subtitle_label=subtitle_label,
         subtitle_strategy_label=subtitle_strategy_label,
     )
+
+
+def coerce_global_pos_to_qpoint(global_pos):
+    try:
+        return global_pos.toPoint()
+    except Exception:
+        return global_pos
+
+
+def ensure_preview_dialog(
+    existing_dialog,
+    *,
+    parent_win,
+    on_closed,
+    dialog_cls,
+):
+    dialog = existing_dialog
+    if dialog is not None:
+        try:
+            dialog.isVisible()
+            return dialog
+        except RuntimeError:
+            dialog = None
+        except Exception:
+            return dialog
+
+    try:
+        dialog = dialog_cls(parent_win)
+        dialog.closed.connect(on_closed)
+        return dialog
+    except Exception:
+        return None
+
+
+def show_strategy_preview_dialog(
+    dialog,
+    *,
+    strategy_data: dict,
+    strategy_id: str,
+    target_key: str,
+    global_pos,
+    rating_getter,
+    rating_toggler,
+    log_fn=log,
+) -> None:
+    try:
+        dialog.set_strategy_data(
+            strategy_data,
+            strategy_id=strategy_id,
+            target_key=target_key,
+            rating_getter=rating_getter,
+            rating_toggler=rating_toggler,
+        )
+        dialog.show_animated(coerce_global_pos_to_qpoint(global_pos))
+    except Exception as exc:
+        log_fn(f"Preview dialog failed: {exc}", "DEBUG")
 

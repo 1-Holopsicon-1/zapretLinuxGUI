@@ -59,10 +59,7 @@ def build_dynamic_network_ui(
         qta_module=qta_module,
         icon_color=tokens.fg_faint,
         indicator_off_qss=dns_provider_card_cls.indicator_off(),
-        on_select={
-            "cursor": None,
-            "handler": lambda _event: on_auto_selected(),
-        },
+        on_select=lambda _event: on_auto_selected(),
     )
     dns_cards_layout.addWidget(auto_widgets.card)
 

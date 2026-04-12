@@ -4,6 +4,7 @@ from PyQt6.QtCore import QTimer
 
 from app_notifications import advisory_notification, notification_action
 from log import log
+from ui.main_window_page_dispatch import show_active_strategy_page_success
 
 
 def show_launch_error_top(controller, message: str) -> None:
@@ -93,7 +94,7 @@ def verify_dpi_process_running(controller, verify_gen=None):
 
     max_retries = 25
     retry_delay_ms = 300
-    runtime_service = getattr(controller.app, "dpi_runtime_service", None)
+    runtime_service = getattr(controller.app, "launch_runtime_service", None)
     monitor_manager = getattr(controller.app, "process_monitor_manager", None)
 
     if monitor_manager is not None and hasattr(monitor_manager, "refresh_now"):
@@ -129,7 +130,7 @@ def on_dpi_process_confirmed(controller, running: bool, verify_gen=None):
 
     store = getattr(controller.app, "ui_state_store", None)
     if store is not None:
-        store.set_dpi_busy(False)
+        store.set_launch_busy(False)
 
     completed_restart_generation = int(controller._restart_active_start_generation or 0)
     if completed_restart_generation:
@@ -169,8 +170,8 @@ def on_dpi_start_finished(controller, success, error_message):
     """Обрабатывает завершение асинхронного запуска DPI."""
     completed_restart_generation = int(controller._restart_active_start_generation or 0)
     try:
-        if hasattr(controller.app, "main_window") and hasattr(controller.app.main_window, "_show_active_strategy_page_success"):
-            controller.app.main_window._show_active_strategy_page_success()
+        if hasattr(controller.app, "main_window"):
+            show_active_strategy_page_success(controller.app.main_window)
 
         if success:
             controller._dpi_start_verify_retry = 0
@@ -204,13 +205,13 @@ def on_dpi_stop_finished(controller, success, error_message):
     try:
         store = getattr(controller.app, "ui_state_store", None)
         if store is not None:
-            store.set_dpi_busy(False)
+            store.set_launch_busy(False)
 
-        if hasattr(controller.app, "main_window") and hasattr(controller.app.main_window, "_show_active_strategy_page_success"):
-            controller.app.main_window._show_active_strategy_page_success()
+        if hasattr(controller.app, "main_window"):
+            show_active_strategy_page_success(controller.app.main_window)
 
         if success:
-            is_still_running = controller.app.dpi_runtime.is_any_running(silent=True)
+            is_still_running = controller.app.launch_runtime_api.is_any_running(silent=True)
 
             if not is_still_running:
                 log("DPI остановлен асинхронно", "INFO")
@@ -237,7 +238,7 @@ def on_dpi_stop_finished(controller, success, error_message):
             log(f"Ошибка асинхронной остановки DPI: {error_message}", "❌ ERROR")
             controller.app.set_status(f"❌ Ошибка остановки: {error_message}")
 
-            is_running = controller.app.dpi_runtime.is_any_running(silent=True)
+            is_running = controller.app.launch_runtime_api.is_any_running(silent=True)
             if is_running:
                 controller._mark_runtime_running()
             else:
