@@ -177,9 +177,9 @@ class InitializationManager:
     # ───────────────────────── инициализация подсистем ───────────────────────
 
     def _init_strategy_manager(self):
-        """Stub: старый strategy manager удалён — теперь используется preset_zapret1."""
+        """Stub: старый strategy manager удалён — теперь используется direct preset UI."""
         self.app.strategy_manager = None
-        log("Legacy strategy manager отключён — используется preset_zapret1", "DEBUG")
+        log("Legacy strategy manager отключён — используется direct preset UI", "DEBUG")
         self.init_tasks_completed.add('strategy_manager')
 
     def _init_strategy_cache(self):

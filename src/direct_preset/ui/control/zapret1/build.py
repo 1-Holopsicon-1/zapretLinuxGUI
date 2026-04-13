@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ui_direct_control.shared_builders import (
+from direct_preset.ui.control.shared_builders import (
     build_direct_management_section_common,
     build_direct_status_section_common,
     build_push_setting_card_common,

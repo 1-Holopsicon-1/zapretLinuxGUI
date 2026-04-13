@@ -32,7 +32,7 @@ class DirectPresetEngineAdapter:
         return preset_store if self.engine == "winws2" else preset_store_v1
 
     def hierarchy_scope_key(self) -> str:
-        return "preset_zapret2" if self.engine == "winws2" else "preset_zapret1"
+        return "direct_preset_winws2" if self.engine == "winws2" else "direct_preset_winws1"
 
     def supports_direct_ui_mode(self) -> bool:
         return self.engine == "winws2"

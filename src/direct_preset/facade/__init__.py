@@ -3,10 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
 
-from .facade_backend import DirectPresetFacadeBackend
-
 if TYPE_CHECKING:
     from app_context import AppContext
+    from .backend import DirectPresetFacadeBackend
     from winws_runtime.flow.direct_flow import DirectFlowCoordinator
     from core.paths import AppPaths
     from core.presets.preset_file_store import PresetFileStore
@@ -62,6 +61,8 @@ class DirectPresetFacade:
         raise ValueError(f"Unsupported launch method for direct preset facade: {launch_method}")
 
     def _backend(self) -> DirectPresetFacadeBackend:
+        from .backend import DirectPresetFacadeBackend
+
         return DirectPresetFacadeBackend(
             engine=self.engine,
             launch_method=self.launch_method,

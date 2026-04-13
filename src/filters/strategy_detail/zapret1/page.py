@@ -1,4 +1,4 @@
-# preset_zapret1/ui/strategy_detail/page.py
+# direct_preset/ui/zapret1/strategy_detail/page.py
 """Zapret 1 strategy detail page with Zapret 2-style layout."""
 
 from __future__ import annotations

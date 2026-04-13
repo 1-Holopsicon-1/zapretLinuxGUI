@@ -43,7 +43,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET2_DIRECT_CONTROL: PageRouteSpec(
         page_name=PageName.ZAPRET2_DIRECT_CONTROL,
         attr_name="zapret2_direct_control_page",
-        module_name="ui_direct_control.zapret2.page",
+        module_name="direct_preset.ui.control.zapret2.page",
         class_name="Zapret2DirectControlPage",
         route_key="Zapret2DirectControlPage",
         is_top_level=True,
@@ -79,7 +79,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET2_PRESET_DETAIL: PageRouteSpec(
         page_name=PageName.ZAPRET2_PRESET_DETAIL,
         attr_name="zapret2_preset_detail_page",
-        module_name="preset_zapret2.ui.preset_detail_page",
+        module_name="direct_preset.ui.zapret2.preset_detail_page",
         class_name="Zapret2PresetDetailPage",
         route_key="Zapret2PresetDetailPage",
         is_top_level=False,
@@ -91,7 +91,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET1_DIRECT_CONTROL: PageRouteSpec(
         page_name=PageName.ZAPRET1_DIRECT_CONTROL,
         attr_name="zapret1_direct_control_page",
-        module_name="ui_direct_control.zapret1.page",
+        module_name="direct_preset.ui.control.zapret1.page",
         class_name="Zapret1DirectControlPage",
         route_key="Zapret1DirectControlPage",
         is_top_level=True,
@@ -115,7 +115,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET1_USER_PRESETS: PageRouteSpec(
         page_name=PageName.ZAPRET1_USER_PRESETS,
         attr_name="zapret1_user_presets_page",
-        module_name="preset_zapret1.ui.user_presets_page",
+        module_name="direct_preset.ui.zapret1.user_presets_page",
         class_name="Zapret1UserPresetsPage",
         route_key="Zapret1UserPresetsPage",
         is_top_level=False,
@@ -139,7 +139,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET1_PRESET_DETAIL: PageRouteSpec(
         page_name=PageName.ZAPRET1_PRESET_DETAIL,
         attr_name="zapret1_preset_detail_page",
-        module_name="preset_zapret1.ui.preset_detail_page",
+        module_name="direct_preset.ui.zapret1.preset_detail_page",
         class_name="Zapret1PresetDetailPage",
         route_key="Zapret1PresetDetailPage",
         is_top_level=False,
@@ -187,7 +187,7 @@ PAGE_ROUTE_SPECS: dict[PageName, PageRouteSpec] = {
     PageName.ZAPRET2_USER_PRESETS: PageRouteSpec(
         page_name=PageName.ZAPRET2_USER_PRESETS,
         attr_name="zapret2_user_presets_page",
-        module_name="preset_zapret2.ui.user_presets_page",
+        module_name="direct_preset.ui.zapret2.user_presets_page",
         class_name="Zapret2UserPresetsPage",
         route_key="Zapret2UserPresetsPage_Direct",
         is_top_level=False,

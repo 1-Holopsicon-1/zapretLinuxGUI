@@ -1,4 +1,4 @@
-# preset_zapret1/ui/user_presets_page.py
+# direct_preset/ui/zapret1/user_presets_page.py
 """Zapret 1 Direct: user presets management."""
 
 from __future__ import annotations
@@ -23,15 +23,15 @@ from PyQt6.QtWidgets import (
 )
 from ui.pages.base_page import BasePage
 from ui.page_dependencies import require_page_app_context
-from core.presets.ui.preset_actions_menu import show_preset_actions_menu
-from core.presets.ui.preset_rating_menu import show_preset_rating_menu
+from direct_preset.ui.common.preset_actions_menu import show_preset_actions_menu
+from direct_preset.ui.common.preset_rating_menu import show_preset_rating_menu
 from core.runtime.user_presets_runtime_service import UserPresetsRuntimeAdapter
-from core.presets.ui.direct_user_presets_page_controller import (
+from direct_preset.ui.common.direct_user_presets_page_controller import (
     DirectUserPresetsPageController,
     DirectUserPresetsPageControllerConfig,
 )
-from core.presets.ui.user_presets_page_actions import open_presets_folder_action
-from preset_zapret1.ui.user_presets_actions_workflow import (
+from direct_preset.ui.common.user_presets_page_actions import open_presets_folder_action
+from direct_preset.ui.zapret1.user_presets_actions_workflow import (
     import_preset_action,
     restore_reset_all_button_label,
     run_reset_all_presets_action,
@@ -39,13 +39,13 @@ from preset_zapret1.ui.user_presets_actions_workflow import (
     show_inline_action_rename,
     show_reset_all_result,
 )
-from preset_zapret1.ui.user_presets_build import build_user_presets_page_shell
-from preset_zapret1.ui.user_presets_dialogs import (
+from direct_preset.ui.zapret1.user_presets_build import build_user_presets_page_shell
+from direct_preset.ui.zapret1.user_presets_dialogs import (
     CreatePresetDialog,
     RenamePresetDialog,
     ResetAllPresetsDialog,
 )
-from preset_zapret1.ui.user_presets_item_actions_workflow import (
+from direct_preset.ui.zapret1.user_presets_item_actions_workflow import (
     activate_preset_action,
     delete_preset_action,
     duplicate_preset_action,
@@ -60,7 +60,7 @@ from preset_zapret1.ui.user_presets_item_actions_workflow import (
     show_rating_menu_action,
     toggle_pin_preset_action,
 )
-from preset_zapret1.ui.user_presets_page_lifecycle import (
+from direct_preset.ui.zapret1.user_presets_page_lifecycle import (
     activate_user_presets_page,
     after_user_presets_ui_built,
     apply_user_presets_language,
@@ -71,7 +71,7 @@ from preset_zapret1.ui.user_presets_page_lifecycle import (
     resync_user_presets_layout_metrics,
     schedule_user_presets_layout_resync,
 )
-from preset_zapret1.ui.user_presets_runtime_helpers import (
+from direct_preset.ui.zapret1.user_presets_runtime_helpers import (
     apply_preset_search,
     rebuild_presets_rows,
     schedule_preset_search,
@@ -207,7 +207,7 @@ class Zapret1UserPresetsPage(BasePage):
             DirectUserPresetsPageControllerConfig(
                 launch_method="direct_zapret1",
                 selection_key="winws1",
-                hierarchy_scope="preset_zapret1",
+                hierarchy_scope="direct_preset_winws1",
                 empty_not_found_key="page.z1_user_presets.empty.not_found",
                 empty_none_key="page.z1_user_presets.empty.none",
                 list_log_prefix="Z1UserPresetsPage",
@@ -220,7 +220,7 @@ class Zapret1UserPresetsPage(BasePage):
         )
 
     def _build_runtime_service(self):
-        return self._require_app_context().user_presets_runtime_service_factory("preset_zapret1")
+        return self._require_app_context().user_presets_runtime_service_factory("direct_preset_winws1")
 
     def _build_runtime_adapter(self) -> UserPresetsRuntimeAdapter:
         return UserPresetsRuntimeAdapter(
@@ -296,7 +296,7 @@ class Zapret1UserPresetsPage(BasePage):
         )
 
     def _hierarchy_scope_key(self) -> str:
-        return "preset_zapret1"
+        return "direct_preset_winws1"
 
     def _get_hierarchy_store(self):
         return self._storage_api().get_hierarchy_store()

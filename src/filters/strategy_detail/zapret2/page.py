@@ -1,4 +1,4 @@
-# preset_zapret2/ui/strategy_detail/page.py
+# direct_preset/ui/zapret2/strategy_detail/page.py
 """
 Страница детального просмотра стратегий для выбранного target'а.
 Открывается при клике на target в Zapret2StrategiesPageNew.
@@ -110,7 +110,7 @@ from filters.strategy_detail.zapret2.common import (
     tr_text as _tr_text,
 )
 from filters.strategy_detail.zapret2.mode_policy import StrategyDetailModePolicy
-from preset_zapret2.ui.preset_dialogs import PresetNameDialog
+from direct_preset.ui.zapret2.preset_dialogs import PresetNameDialog
 from filters.strategy_detail.zapret2.args_editor import (
     hide_args_editor_state,
     open_args_editor_dialog,

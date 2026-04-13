@@ -2,314 +2,48 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-import re
 import time as _time
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
-from winws_runtime.flow.direct_flow import DirectFlowCoordinator
 from direct_preset.common.source_preset_models import OutRangeSettings, SendSettings, SyndataSettings
 from direct_preset.service import BasicUiPayload, DirectPresetService, TargetDetailPayload
 from core.paths import AppPaths
 from core.presets.preset_file_store import PresetFileStore
 from core.presets.runtime_store import DirectRuntimePresetStore
 from core.presets.selection_service import PresetSelectionService
-from core.presets.template_support import resolve_reset_template as _template_support_resolve_reset_template
-from core.presets.template_support import reset_all_templates as _template_support_reset_all_templates
 from direct_preset.adapters import DirectPresetEngineAdapter, get_direct_preset_engine_adapter
+from .preset_ops import (
+    create_preset as _create_preset,
+    delete_by_file_name as _delete_by_file_name,
+    duplicate_by_file_name as _duplicate_by_file_name,
+    export_plain_text_by_file_name as _export_plain_text_by_file_name,
+    get_advanced_settings_state as _get_advanced_settings_state,
+    get_wssize_enabled as _get_wssize_enabled,
+    import_from_file as _import_from_file,
+    rename_by_file_name as _rename_by_file_name,
+    reset_all_to_templates as _reset_all_to_templates,
+    reset_to_template_by_file_name as _reset_to_template_by_file_name,
+    _resolve_reset_template,
+    set_debug_log_enabled as _set_debug_log_enabled,
+    set_wssize_enabled as _set_wssize_enabled,
+)
 from direct_preset.modes import DIRECT_UI_MODE_DEFAULT, load_current_direct_ui_mode
+from .text_ops import (
+    _collect_changed_strategy_selections,
+    _coerce_int,
+    _extract_debug_log_file,
+    _join_arg_lines,
+    _log_startup_payload_metric,
+    _normalize_direct_preset_source_text,
+    _normalize_strategy_selection_value,
+    _ports_include_443,
+    _settings_payload_to_dict,
+)
 
-from log import log
 from core.presets.models import PresetManifest
 
-
-def _normalize_strategy_selection_value(value: object) -> str:
-    return str(value or "").strip() or "none"
-
-
-def _collect_changed_strategy_selections(current: dict | None, requested: dict | None) -> dict[str, str]:
-    current_map = {
-        str(key or "").strip().lower(): _normalize_strategy_selection_value(val)
-        for key, val in (current or {}).items()
-        if str(key or "").strip()
-    }
-    changed: dict[str, str] = {}
-    for key, value in (requested or {}).items():
-        normalized_key = str(key or "").strip().lower()
-        if not normalized_key:
-            continue
-        normalized_value = _normalize_strategy_selection_value(value)
-        if current_map.get(normalized_key, "none") == normalized_value:
-            continue
-        changed[normalized_key] = normalized_value
-    return changed
-
-
-def _log_startup_payload_metric(scope: str | None, section: str, elapsed_ms: float, *, extra: str | None = None) -> None:
-    resolved_scope = str(scope or "").strip()
-    if not resolved_scope:
-        return
-    try:
-        rounded = int(round(float(elapsed_ms)))
-    except Exception:
-        rounded = 0
-    suffix = f" ({extra})" if extra else ""
-    log(f"⏱ Startup UI Section: {resolved_scope} {section} {rounded}ms{suffix}", "⏱ STARTUP")
-
-
-def _rewrite_preset_header_name(source_text: str, target_name: str) -> str:
-    text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = text.splitlines()
-    replaced = False
-
-    for idx, raw in enumerate(lines):
-        stripped = raw.strip()
-        if stripped.lower().startswith("# preset:"):
-            lines[idx] = f"# Preset: {target_name}"
-            replaced = True
-            break
-        if stripped and not stripped.startswith("#"):
-            break
-
-    if not replaced:
-        lines.insert(0, f"# Preset: {target_name}")
-
-    rewritten = "\n".join(lines).rstrip("\n")
-    return rewritten + "\n"
-
-
-def _rewrite_preset_headers(
-    source_text: str,
-    target_name: str,
-    *,
-    template_origin: str | None = None,
-    preset_kind: str | None = None,
-) -> str:
-    text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = text.splitlines()
-
-    header_end = 0
-    for idx, raw in enumerate(lines):
-        stripped = raw.strip()
-        if stripped and not stripped.startswith("#"):
-            header_end = idx
-            break
-    else:
-        header_end = len(lines)
-
-    header = lines[:header_end]
-    body = lines[header_end:]
-    out_header: list[str] = []
-    saw_preset = False
-    saw_template_origin = False
-    saw_preset_kind = False
-
-    for raw in header:
-        stripped = raw.strip()
-        lowered = stripped.lower()
-        if lowered.startswith("# preset:"):
-            out_header.append(f"# Preset: {target_name}")
-            saw_preset = True
-            continue
-        if lowered.startswith("# templateorigin:"):
-            if template_origin is not None:
-                out_header.append(f"# TemplateOrigin: {template_origin}")
-                saw_template_origin = True
-            else:
-                out_header.append(raw.rstrip("\n"))
-                saw_template_origin = True
-            continue
-        if lowered.startswith("# presetkind:"):
-            if preset_kind is not None:
-                out_header.append(f"# PresetKind: {preset_kind}")
-                saw_preset_kind = True
-            else:
-                out_header.append(raw.rstrip("\n"))
-                saw_preset_kind = True
-            continue
-        if lowered.startswith("# modified:"):
-            continue
-        if lowered.startswith("# activepreset:"):
-            continue
-        out_header.append(raw.rstrip("\n"))
-
-    if not saw_preset:
-        out_header.insert(0, f"# Preset: {target_name}")
-
-    insert_idx = 1 if out_header and out_header[0].startswith("# Preset:") else 0
-    if template_origin is not None and not saw_template_origin:
-        out_header.insert(insert_idx, f"# TemplateOrigin: {template_origin}")
-        insert_idx += 1
-
-    if preset_kind is not None and not saw_preset_kind:
-        out_header.insert(insert_idx, f"# PresetKind: {preset_kind}")
-
-    rewritten = "\n".join(out_header + body).rstrip("\n")
-    return rewritten + "\n"
-
-
-def _header_preset_kind(kind: str | None) -> str | None:
-    normalized = str(kind or "").strip().lower()
-    if normalized == "imported":
-        return "imported"
-    return None
-
-
-def _normalize_direct_preset_source_text(source_text: str) -> str:
-    text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = [
-        line
-        for line in text.splitlines()
-        if not line.strip().lower().startswith("# activepreset:")
-        and not line.strip().lower().startswith("# modified:")
-    ]
-    return "\n".join(lines).rstrip("\n") + "\n"
-
-
-def _extract_debug_log_file(source_text: str) -> str:
-    text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    for raw in text.splitlines():
-        stripped = raw.strip()
-        if not stripped.lower().startswith("--debug="):
-            continue
-        value = stripped.split("=", 1)[1].strip() if "=" in stripped else ""
-        value = value.lstrip("@").replace("\\", "/").lstrip("/")
-        return value
-    return ""
-
-
-def _build_stable_debug_log_file(preset_name: str) -> str:
-    safe_name = re.sub(r"[^\w.-]+", "_", str(preset_name or "").strip(), flags=re.UNICODE).strip("._")
-    if not safe_name:
-        safe_name = "preset"
-    return f"logs/{safe_name}_debug.log"
-
-
-def _default_debug_insert_index(lines: list[str]) -> int:
-    insert_at = 0
-    for idx, raw in enumerate(lines):
-        stripped = raw.strip()
-        if stripped.startswith("--lua-init="):
-            insert_at = idx + 1
-    if insert_at:
-        return insert_at
-
-    header_end = 0
-    for idx, raw in enumerate(lines):
-        stripped = raw.strip()
-        if stripped.startswith("#") or not stripped:
-            header_end = idx + 1
-            continue
-        break
-    return header_end
-
-
-def _rewrite_debug_log_setting(source_text: str, preset_name: str, enabled: bool) -> str:
-    text = (source_text or "").replace("\r\n", "\n").replace("\r", "\n")
-    lines = text.splitlines()
-
-    existing_value = ""
-    existing_insert_at: int | None = None
-    cleaned: list[str] = []
-    for raw in lines:
-        stripped = raw.strip()
-        if stripped.lower().startswith("--debug="):
-            if not existing_value:
-                existing_value = stripped.split("=", 1)[1].strip() if "=" in stripped else ""
-                existing_value = existing_value.lstrip("@").replace("\\", "/").lstrip("/")
-                existing_insert_at = len(cleaned)
-            continue
-        cleaned.append(raw)
-
-    if enabled:
-        debug_file = existing_value or _build_stable_debug_log_file(preset_name)
-        debug_line = f"--debug=@{debug_file}"
-        insert_at = existing_insert_at if existing_insert_at is not None else _default_debug_insert_index(cleaned)
-        if insert_at < 0:
-            insert_at = 0
-        if insert_at > len(cleaned):
-            insert_at = len(cleaned)
-        cleaned.insert(insert_at, debug_line)
-
-    return "\n".join(cleaned).rstrip("\n") + "\n"
-
-
-def _ports_include_443(value: str) -> bool:
-    for raw_part in str(value or "").split(","):
-        part = raw_part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            try:
-                start_s, end_s = part.split("-", 1)
-                start = int(start_s.strip())
-                end = int(end_s.strip())
-            except Exception:
-                continue
-            if start <= 443 <= end:
-                return True
-            continue
-        try:
-            if int(part) == 443:
-                return True
-        except Exception:
-            continue
-    return False
-
-
-def _split_arg_lines(args_text: str) -> list[str]:
-    return [str(raw or "").strip() for raw in str(args_text or "").splitlines() if str(raw or "").strip()]
-
-
-def _join_arg_lines(lines: list[str]) -> str:
-    return "\n".join(str(line or "").strip() for line in lines if str(line or "").strip()).strip()
-
-
-def _settings_payload_to_dict(value) -> dict[str, object]:
-    if value is None:
-        return {}
-    if isinstance(value, dict):
-        return dict(value)
-    to_dict = getattr(value, "to_dict", None)
-    if callable(to_dict):
-        try:
-            data = to_dict()
-            if isinstance(data, dict):
-                return dict(data)
-        except Exception:
-            pass
-
-    payload: dict[str, object] = {}
-    for field in (
-        "enabled",
-        "blob",
-        "tls_mod",
-        "autottl_delta",
-        "autottl_min",
-        "autottl_max",
-        "tcp_flags_unset",
-        "out_range",
-        "out_range_mode",
-        "send_enabled",
-        "send_repeats",
-        "send_ip_ttl",
-        "send_ip6_ttl",
-        "send_ip_id",
-        "send_badsum",
-    ):
-        if hasattr(value, field):
-            payload[field] = getattr(value, field)
-    return payload
-
-
-def _coerce_int(value, default: int) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return int(default)
-
-
-def _resolve_reset_template(launch_method: str, preset_name: str) -> str:
-    return _template_support_resolve_reset_template(launch_method, preset_name)
+if TYPE_CHECKING:
+    from winws_runtime.flow.direct_flow import DirectFlowCoordinator
 
 
 @dataclass(frozen=True)
@@ -628,123 +362,16 @@ class DirectPresetFacadeBackend:
         return bool(self.get_debug_log_file())
 
     def get_advanced_settings_state(self) -> dict[str, bool]:
-        discord_restart = True
-        try:
-            from discord.discord_restart import get_discord_restart_setting
-
-            discord_restart = bool(get_discord_restart_setting(default=True))
-        except Exception:
-            pass
-
-        manifest = self.get_selected_manifest()
-        if manifest is None:
-            return {
-                "discord_restart": discord_restart,
-                "wssize_enabled": False,
-                "debug_log_enabled": False,
-            }
-
-        debug_log_enabled = False
-        try:
-            debug_log_enabled = bool(_extract_debug_log_file(self.read_source_text_by_file_name(manifest.file_name)))
-        except Exception:
-            debug_log_enabled = False
-
-        wssize_enabled = False
-        try:
-            preset = self.get_selected_source_preset_model()
-            if preset:
-                contexts = self._service().collect_target_contexts(preset)
-                for target_key, ctx in contexts.items():
-                    if ctx.protocol_kind != "tcp":
-                        continue
-                    profile = preset.profiles[ctx.profile_index]
-                    if not any(
-                        line.strip().startswith("--filter-tcp=") and _ports_include_443(line.split("=", 1)[1].strip())
-                        for line in profile.match_lines
-                    ):
-                        continue
-                    args_text = self._service()._get_raw_args(preset, target_key)
-                    if self._adapter().wssize_enabled_from_args(args_text):
-                        wssize_enabled = True
-                        break
-        except Exception:
-            wssize_enabled = False
-
-        return {
-            "discord_restart": discord_restart,
-            "wssize_enabled": bool(wssize_enabled),
-            "debug_log_enabled": bool(debug_log_enabled),
-        }
+        return _get_advanced_settings_state(self)
 
     def set_debug_log_enabled(self, enabled: bool) -> bool:
-        manifest = self.get_selected_manifest()
-        if manifest is None:
-            return False
-        display_name = str(manifest.name or "").strip() or Path(manifest.file_name).stem
-        source_text = self.read_source_text_by_file_name(manifest.file_name)
-        rewritten = _rewrite_debug_log_setting(source_text, display_name, bool(enabled))
-        self.save_source_text_by_file_name(manifest.file_name, rewritten)
-        return True
+        return _set_debug_log_enabled(self, enabled)
 
     def get_wssize_enabled(self) -> bool:
-        preset = self.get_selected_source_preset_model()
-        if not preset:
-            return False
-
-        contexts = self._service().collect_target_contexts(preset)
-        for target_key, ctx in contexts.items():
-            if ctx.protocol_kind != "tcp":
-                continue
-            profile = preset.profiles[ctx.profile_index]
-            if not any(
-                line.strip().startswith("--filter-tcp=") and _ports_include_443(line.split("=", 1)[1].strip())
-                for line in profile.match_lines
-            ):
-                continue
-            args_text = self._service()._get_raw_args(preset, target_key)
-            if self._adapter().wssize_enabled_from_args(args_text):
-                return True
-        return False
+        return _get_wssize_enabled(self)
 
     def set_wssize_enabled(self, enabled: bool) -> bool:
-        preset = self.get_selected_source_preset_model()
-        if not preset:
-            return False
-
-        changed = False
-        touched_any_tcp_443 = False
-        target_keys = list(self._service().collect_target_contexts(preset).keys())
-
-        for target_key in target_keys:
-            normalized_key = str(target_key or "").strip().lower()
-            current_ctx = self._service().collect_target_contexts(preset).get(normalized_key)
-            if not normalized_key or current_ctx is None or current_ctx.protocol_kind != "tcp":
-                continue
-            profile = preset.profiles[current_ctx.profile_index]
-            if not any(
-                line.strip().startswith("--filter-tcp=") and _ports_include_443(line.split("=", 1)[1].strip())
-                for line in profile.match_lines
-            ):
-                continue
-
-            touched_any_tcp_443 = True
-            current_args = self._service()._get_raw_args(preset, normalized_key) or ""
-            next_args = self._adapter().rewrite_wssize_args(current_args, bool(enabled))
-            if next_args != _join_arg_lines(_split_arg_lines(current_args)):
-                if self._service()._update_raw_args(preset, normalized_key, next_args):
-                    changed = True
-
-        if not touched_any_tcp_443:
-            return False if enabled else True
-        if not changed:
-            return True
-
-        try:
-            preset.touch()
-        except Exception:
-            pass
-        return bool(self.save_preset_model(preset))
+        return _set_wssize_enabled(self, enabled)
 
     def _refresh_selected_launch_profile_from_source(self) -> None:
         selected_file_name = self.get_selected_file_name()
@@ -756,116 +383,28 @@ class DirectPresetFacadeBackend:
         return self.direct_flow_coordinator.select_preset_file_name(self.launch_method, file_name)
 
     def rename_by_file_name(self, file_name: str, new_name: str) -> PresetManifest:
-        manifest = self.get_manifest_by_file_name(file_name)
-        if manifest is None:
-            raise ValueError(f"Preset not found: {file_name}")
-        if str(manifest.kind or "").strip().lower() == "builtin":
-            raise ValueError(f"Built-in preset cannot be renamed: {manifest.name}")
-        was_selected = self.is_selected_file_name(manifest.file_name)
-        source_text = self.read_source_text_by_file_name(manifest.file_name)
-        renamed = self.preset_file_store.rename_preset(self.engine, manifest.file_name, new_name)
-        rewritten = _rewrite_preset_headers(
-            source_text,
-            new_name,
-            template_origin=manifest.template_origin,
-            preset_kind=_header_preset_kind(manifest.kind),
-        )
-        updated = self.preset_file_store.update_preset(self.engine, renamed.file_name, rewritten, None)
-        self._rename_library_meta(
-            manifest.file_name,
-            updated.file_name,
-            old_display_name=manifest.name,
-            new_display_name=updated.name,
-        )
-        if was_selected:
-            self.preset_selection_service.select_preset(self.engine, updated.file_name)
-            self._refresh_selected_launch_profile_from_source()
-        return updated
+        return _rename_by_file_name(self, file_name, new_name)
 
     def duplicate_by_file_name(self, file_name: str, new_name: str) -> PresetManifest:
-        manifest = self.get_manifest_by_file_name(file_name)
-        if manifest is None:
-            raise ValueError(f"Preset not found: {file_name}")
-        source_text = self.read_source_text_by_file_name(manifest.file_name)
-        rewritten = _rewrite_preset_headers(
-            source_text,
-            new_name,
-            template_origin=manifest.template_origin,
-            preset_kind=_header_preset_kind(manifest.kind),
-        )
-        duplicated = self.preset_file_store.create_preset(self.engine, new_name, rewritten)
-        self._copy_library_meta(
-            manifest.file_name,
-            duplicated.file_name,
-            source_display_name=manifest.name,
-            new_display_name=duplicated.name,
-        )
-        return duplicated
+        return _duplicate_by_file_name(self, file_name, new_name)
 
     def create(self, name: str, *, from_current: bool = True) -> PresetManifest:
-        source_text = self.read_selected_source_text() if from_current else _resolve_reset_template(self.launch_method, "Default")
-        rewritten = _rewrite_preset_headers(source_text, name)
-        return self.preset_file_store.create_preset(self.engine, name, rewritten)
+        return _create_preset(self, name, from_current=from_current)
 
     def import_from_file(self, src_path: Path, name: str | None = None) -> PresetManifest:
-        src = Path(src_path)
-        if not src.exists():
-            raise ValueError(f"Import source not found: {src}")
-        target_name = str(name or src.stem or "Imported").strip() or "Imported"
-        source_text = src.read_text(encoding="utf-8", errors="replace")
-        rewritten = _rewrite_preset_headers(
-            source_text,
-            target_name,
-            preset_kind="imported",
-        )
-        imported = self.preset_file_store.create_preset(self.engine, target_name, rewritten, kind="imported")
-        self._delete_library_meta(imported.file_name, display_name=imported.name)
-        return imported
+        return _import_from_file(self, src_path, name=name)
 
     def export_plain_text_by_file_name(self, file_name: str, dest_path: Path) -> Path:
-        dest = Path(dest_path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        text = self.read_source_text_by_file_name(file_name)
-        if not text.endswith("\n"):
-            text += "\n"
-        dest.write_text(text, encoding="utf-8")
-        return dest
+        return _export_plain_text_by_file_name(self, file_name, dest_path)
 
     def reset_to_template_by_file_name(self, file_name: str) -> PresetManifest:
-        manifest = self.get_manifest_by_file_name(file_name)
-        if manifest is None:
-            raise ValueError(f"Preset not found: {file_name}")
-        template_key = str(manifest.template_origin or manifest.name or "").strip()
-        template_content = _resolve_reset_template(self.launch_method, template_key)
-        if not template_content:
-            raise ValueError("Template content not found")
-        rewritten = _rewrite_preset_headers(
-            template_content,
-            manifest.name,
-            template_origin=str(manifest.template_origin or "").strip() or None,
-            preset_kind=_header_preset_kind(manifest.kind),
-        )
-        updated = self.preset_file_store.update_preset(self.engine, manifest.file_name, rewritten, None)
-        if self.is_selected_file_name(manifest.file_name):
-            self._refresh_selected_launch_profile_from_source()
-        return updated
+        return _reset_to_template_by_file_name(self, file_name)
 
     def reset_all_to_templates(self) -> tuple[int, int, list[str]]:
-        result = _template_support_reset_all_templates(self.launch_method)
-        selected_file_name = self.get_selected_file_name()
-        if selected_file_name and self.get_manifest_by_file_name(selected_file_name) is not None:
-            self._refresh_selected_launch_profile_from_source()
-        return result
+        return _reset_all_to_templates(self)
 
     def delete_by_file_name(self, file_name: str) -> None:
-        manifest = self.get_manifest_by_file_name(file_name)
-        if manifest is None:
-            raise ValueError(f"Preset not found: {file_name}")
-        if str(manifest.kind or "").strip().lower() == "builtin":
-            raise ValueError(f"Built-in preset cannot be deleted: {manifest.name}")
-        self.preset_selection_service.ensure_can_delete(self.engine, manifest.file_name)
-        self.preset_file_store.delete_preset(self.engine, manifest.file_name)
-        self._delete_library_meta(manifest.file_name, display_name=manifest.name)
+        _delete_by_file_name(self, file_name)
 
     def get_strategy_selections(self) -> dict:
         preset = self.get_selected_source_preset_model()

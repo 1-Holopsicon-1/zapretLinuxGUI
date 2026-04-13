@@ -67,9 +67,9 @@ class LaunchRuntimeService:
             canonical_readers=(
                 "main.LupiDPIApp._apply_runner_failure_update",
                 "winws_runtime.runtime.lifecycle_feedback.verify_dpi_process_running",
-                "ui_direct_control.zapret1.page.Zapret1DirectControlPage._get_current_dpi_runtime_state",
+                "direct_preset.ui.control.zapret1.page.Zapret1DirectControlPage._get_current_dpi_runtime_state",
                 "ui.pages.control_page.ControlPage._get_current_dpi_runtime_state",
-                "ui_direct_control.zapret2.page.Zapret2DirectControlPage._on_ui_state_changed",
+                "direct_preset.ui.control.zapret2.page.Zapret2DirectControlPage._on_ui_state_changed",
                 "tray.SystemTrayManager._is_launch_running/_launch_phase via AppRuntimeState",
             ),
             allowed_auxiliary_writers=(

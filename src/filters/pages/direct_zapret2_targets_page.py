@@ -11,7 +11,7 @@ from PyQt6.QtCore import pyqtSignal, QTimer, QEvent
 from direct_preset.runtime import DirectBasicUiSnapshotWorker
 from ui.page_dependencies import require_page_app_context
 from ui.pages.base_page import BasePage
-from ui_direct_control.zapret2.strategies_build import build_z2_direct_shell
+from direct_preset.ui.control.zapret2.strategies_build import build_z2_direct_shell
 from filters.runtime.targets_payload_runtime import (
     apply_payload_snapshot,
     set_payload_loading,

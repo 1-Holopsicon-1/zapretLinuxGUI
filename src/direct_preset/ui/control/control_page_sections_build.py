@@ -8,7 +8,7 @@ from PyQt6.QtGui import QIcon
 from qfluentwidgets import SettingCard
 from PyQt6.QtWidgets import QLabel
 
-from ui_direct_control.shared_builders import (
+from direct_preset.ui.control.shared_builders import (
     build_direct_management_section_common,
     build_direct_status_section_common,
     build_push_setting_card_common,

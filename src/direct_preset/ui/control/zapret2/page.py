@@ -9,15 +9,15 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 from ui.pages.base_page import BasePage
 from ui.page_dependencies import require_page_app_context
-from ui_direct_control.zapret2.build import (
+from direct_preset.ui.control.zapret2.build import (
     build_z2_direct_management_section,
     build_z2_direct_preset_section,
     build_z2_direct_status_section,
 )
-from ui_direct_control.zapret2.deferred_build import (
+from direct_preset.ui.control.zapret2.deferred_build import (
     build_z2_direct_deferred_sections,
 )
-from ui_direct_control.zapret2.runtime_helpers import (
+from direct_preset.ui.control.zapret2.runtime_helpers import (
     apply_advanced_settings_plan,
     apply_direct_language,
     apply_program_settings_snapshot,
@@ -34,14 +34,14 @@ from ui.compat_widgets import (
     set_tooltip,
 )
 from app_state.main_window_state import AppUiState, MainWindowStateStore
-from ui_direct_control.ui.control_page_shared import (
+from direct_preset.ui.control.control_page_shared import (
     ControlPageActionMixin,
     attach_program_settings_runtime,
     bind_control_ui_state_store,
     cleanup_control_page_subscriptions,
 )
 from ui.text_catalog import tr as tr_catalog
-from ui_direct_control.zapret2.controller import Zapret2DirectControlPageController
+from direct_preset.ui.control.zapret2.controller import Zapret2DirectControlPageController
 
 from qfluentwidgets import (
     CaptionLabel, StrongBodyLabel, SubtitleLabel, BodyLabel,

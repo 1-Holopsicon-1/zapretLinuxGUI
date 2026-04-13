@@ -166,9 +166,9 @@ class PresetSubpageBase(BasePage):
     def _preset_hierarchy_scope_key(self) -> str | None:
         method = self._direct_launch_method()
         if method == "direct_zapret2":
-            return "preset_zapret2"
+            return "direct_preset_winws2"
         if method == "direct_zapret1":
-            return "preset_zapret1"
+            return "direct_preset_winws1"
         return None
 
     def _breadcrumb_root_text(self) -> str:

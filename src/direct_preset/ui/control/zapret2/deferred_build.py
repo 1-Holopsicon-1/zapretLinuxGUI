@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ui_direct_control.shared_builders import (
+from direct_preset.ui.control.shared_builders import (
     build_push_setting_card_common,
 )
 from ui.compat_widgets import build_advanced_settings_section, enable_setting_card_group_auto_height

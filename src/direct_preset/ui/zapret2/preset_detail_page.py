@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.presets.ui.preset_subpage_base import PresetSubpageBase
+from direct_preset.ui.common.preset_subpage_base import PresetSubpageBase
 
 
 class Zapret2PresetDetailPage(PresetSubpageBase):

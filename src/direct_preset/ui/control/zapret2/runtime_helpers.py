@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from ui.text_catalog import tr as tr_catalog
-from ui_direct_control.zapret2.controller import Zapret2DirectControlPageController
-from ui_direct_control.ui.control_page_runtime_shared import (
+from direct_preset.ui.control.zapret2.controller import Zapret2DirectControlPageController
+from direct_preset.ui.control.control_page_runtime_shared import (
     apply_program_settings_toggles,
     apply_status_plan as apply_status_plan_shared,
     run_confirmation_dialog,

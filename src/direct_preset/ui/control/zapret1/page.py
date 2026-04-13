@@ -8,28 +8,28 @@ from PyQt6.QtCore import QTimer, pyqtSignal
 
 from ui.pages.base_page import BasePage
 from ui.page_dependencies import require_page_app_context
-from ui_direct_control.zapret1.build import (
+from direct_preset.ui.control.zapret1.build import (
     build_z1_direct_management_section,
     build_z1_direct_preset_section,
     build_z1_direct_status_section,
 )
-from ui_direct_control.zapret1.deferred_build import (
+from direct_preset.ui.control.zapret1.deferred_build import (
     build_z1_direct_deferred_sections,
 )
-from ui_direct_control.zapret1.runtime_helpers import (
+from direct_preset.ui.control.zapret1.runtime_helpers import (
     apply_program_settings_snapshot,
     apply_status_plan,
     apply_z1_direct_language,
     set_toggle_checked,
 )
-from ui_direct_control.control_runtime_controller import ControlPageController
+from direct_preset.ui.control.control_runtime_controller import ControlPageController
 from ui.compat_widgets import (
     ActionButton,
     PrimaryActionButton,
     set_tooltip,
 )
 from app_state.main_window_state import AppUiState, MainWindowStateStore
-from ui_direct_control.ui.control_page_shared import (
+from direct_preset.ui.control.control_page_shared import (
     ControlPageActionMixin,
     attach_program_settings_runtime,
     bind_control_ui_state_store,
