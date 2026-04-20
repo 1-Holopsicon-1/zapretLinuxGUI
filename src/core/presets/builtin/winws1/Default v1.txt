@@ -1,5 +1,5 @@
-# Preset: Default v1
-# TemplateOrigin: Default v1
+# Preset: Default v1 (game filter)
+# TemplateOrigin: Default v1 (game filter)
 # IconColor: #a8c5ff
 # Description: Default Zapret 1 preset
 

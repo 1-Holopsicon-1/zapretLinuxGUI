@@ -1268,7 +1268,7 @@ class HostlistPageController:
             return HostlistActionResult(
                 ok=True,
                 log_level="INFO",
-                log_message="Открыт файл other.user.txt",
+                log_message="Открыт пользовательский список доменов (lists/user/other.txt)",
                 infobar_level=None,
                 infobar_title="",
                 infobar_content="",
@@ -1290,7 +1290,7 @@ class HostlistPageController:
                 return HostlistActionResult(
                     ok=True,
                     log_level="INFO",
-                    log_message="Файл other.user.txt сброшен",
+                    log_message="Сброшен пользовательский список доменов",
                     infobar_level=None,
                     infobar_title="",
                     infobar_content="",
@@ -1322,7 +1322,7 @@ class HostlistPageController:
             return HostlistActionResult(
                 ok=True,
                 log_level="INFO",
-                log_message="Открыт файл ipset-all.user.txt",
+                log_message="Открыт пользовательский IP-список (lists/user/ipset-all.txt)",
                 infobar_level=None,
                 infobar_title="",
                 infobar_content="",
@@ -1331,7 +1331,7 @@ class HostlistPageController:
             return HostlistActionResult(
                 ok=False,
                 log_level="ERROR",
-                log_message=f"Ошибка открытия ipset-all.user.txt: {e}",
+                log_message=f"Ошибка открытия пользовательского IP-списка: {e}",
                 infobar_level="warning",
                 infobar_title="Ошибка",
                 infobar_content=f"Не удалось открыть:\n{e}",
@@ -1344,7 +1344,7 @@ class HostlistPageController:
             return HostlistActionResult(
                 ok=True,
                 log_level="INFO",
-                log_message="Открыт файл netrogat.user.txt",
+                log_message="Открыт пользовательский список исключений доменов (lists/user/netrogat.txt)",
                 infobar_level=None,
                 infobar_title="",
                 infobar_content="",
@@ -1353,7 +1353,7 @@ class HostlistPageController:
             return HostlistActionResult(
                 ok=False,
                 log_level="ERROR",
-                log_message=f"Ошибка открытия netrogat.user.txt: {e}",
+                log_message=f"Ошибка открытия пользовательского списка исключений доменов: {e}",
                 infobar_level="warning",
                 infobar_title="Ошибка",
                 infobar_content=f"Не удалось открыть:\n{e}",
@@ -1412,7 +1412,7 @@ class HostlistPageController:
             return HostlistActionResult(
                 ok=True,
                 log_level="INFO",
-                log_message="Открыт файл ipset-ru.user.txt",
+                log_message="Открыт пользовательский список IP-исключений (lists/user/ipset-ru.txt)",
                 infobar_level=None,
                 infobar_title="",
                 infobar_content="",
@@ -1421,7 +1421,7 @@ class HostlistPageController:
             return HostlistActionResult(
                 ok=False,
                 log_level="ERROR",
-                log_message=f"Ошибка открытия ipset-ru.user.txt: {e}",
+                log_message=f"Ошибка открытия пользовательского списка IP-исключений: {e}",
                 infobar_level="warning",
                 infobar_title="Ошибка",
                 infobar_content=f"Не удалось открыть:\n{e}",

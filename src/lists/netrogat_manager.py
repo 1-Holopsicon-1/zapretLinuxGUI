@@ -2,13 +2,8 @@ import os
 import re
 from typing import List, Tuple
 
-from lists.core.builders import write_combined_file
-from lists.core.files import (
-    normalize_newlines,
-    prepare_user_file,
-    read_text_file_safe,
-    write_text_file,
-)
+from lists.core.layered_runtime import LayeredListPaths, ensure_user_layer, rebuild_layered_list
+from lists.core.files import write_text_file
 from lists.core.paths import get_list_base_path, get_list_final_path, get_list_user_path
 
 from log.log import log
@@ -17,11 +12,16 @@ from log.log import log
 NETROGAT_PATH = get_list_final_path("netrogat")
 NETROGAT_BASE_PATH = get_list_base_path("netrogat")
 NETROGAT_USER_PATH = get_list_user_path("netrogat")
+NETROGAT_LIST_PATHS = LayeredListPaths(
+    base_path=NETROGAT_BASE_PATH,
+    user_path=NETROGAT_USER_PATH,
+    final_path=NETROGAT_PATH,
+)
 
 
 # Базовые домены исключений.
-# Хранятся в netrogat.base.txt (системная база) и автоматически
-# объединяются с пользовательскими записями из netrogat.user.txt.
+# Хранятся в lists/base/netrogat.txt (системная база) и автоматически
+# объединяются с пользовательскими записями из lists/user/netrogat.txt.
 DEFAULT_NETROGAT_DOMAINS = [
     # Государственные
     "gosuslugi.ru",
@@ -143,11 +143,11 @@ DEFAULT_NETROGAT_DOMAINS = [
 
 
 _NETROGAT_BASE_HEADER = """\
-# Системная база доменов-исключений (автоматически управляется приложением).
-# Этот файл НЕ редактируется из интерфейса напрямую.
+# Системная база доменов-исключений.
+# Этот файл поставляется установщиком и не редактируется из интерфейса.
 #
 # Итоговый lists/netrogat.txt формируется автоматически как:
-#   netrogat.base.txt + netrogat.user.txt
+#   lists/base/netrogat.txt + lists/user/netrogat.txt
 #
 # Формат: один домен на строку, без протокола и пути.
 # Строки, начинающиеся с #, игнорируются.
@@ -223,10 +223,6 @@ def _sanitize_user_lines(lines: List[str]) -> list[str]:
     return out
 
 
-def _count_effective_entries(path: str) -> int:
-    return len(_read_effective_domain_entries(path))
-
-
 def _get_default_domains() -> list[str]:
     defaults: list[str] = []
     seen: set[str] = set()
@@ -248,43 +244,12 @@ def _build_base_content() -> str:
     return "\n".join(lines) + "\n"
 
 
-def _ensure_netrogat_base_updated() -> tuple[bool, int]:
-    """Гарантирует корректный системный netrogat.base.txt.
-
-    Возвращает (ok, added_missing_defaults_count).
-    """
-    try:
-        os.makedirs(os.path.dirname(NETROGAT_BASE_PATH), exist_ok=True)
-
-        existing_entries = _read_effective_domain_entries(NETROGAT_BASE_PATH)
-        existing_set = set(existing_entries)
-        defaults = _get_default_domains()
-        added_missing = sum(1 for d in defaults if d not in existing_set)
-
-        expected_content = _build_base_content()
-        current_content = read_text_file_safe(NETROGAT_BASE_PATH)
-
-        if normalize_newlines(current_content or "") != normalize_newlines(expected_content):
-            write_text_file(NETROGAT_BASE_PATH, expected_content)
-            if current_content is None:
-                log(
-                    f"Создан netrogat.base.txt с {len(defaults)} доменами",
-                    "INFO",
-                )
-            else:
-                log(
-                    f"Обновлен netrogat.base.txt (доменов: {len(defaults)})",
-                    "DEBUG",
-                )
-
-        return True, added_missing
-    except Exception as e:
-        log(f"Ошибка подготовки netrogat.base.txt: {e}", "ERROR")
-        return False, 0
-
-
 def get_netrogat_base_entries() -> list[str]:
-    return _read_effective_domain_entries(NETROGAT_BASE_PATH)
+    base_entries = _read_effective_domain_entries(NETROGAT_BASE_PATH)
+    if base_entries:
+        return base_entries
+    log("Не найдена системная база lists/base/netrogat.txt", "ERROR")
+    return []
 
 
 def get_netrogat_base_set() -> set[str]:
@@ -297,59 +262,39 @@ def get_user_netrogat_entries() -> list[str]:
 
 def ensure_netrogat_user_file() -> bool:
     """Публичный helper: гарантирует наличие netrogat.user.txt."""
-    ok, _ = _ensure_netrogat_base_updated()
-    if not ok:
-        return False
-    return prepare_user_file(NETROGAT_USER_PATH, error_message="Ошибка подготовки netrogat.user.txt", log_func=log)
+    return ensure_user_layer(NETROGAT_LIST_PATHS, error_message="Ошибка подготовки netrogat.user.txt", log_func=log)
 
 
 def sync_netrogat_after_user_change() -> bool:
     """Быстрый sync после правки netrogat.user.txt."""
     try:
-        ok, _ = _ensure_netrogat_base_updated()
-        if not ok:
-            return False
-
-        if not ensure_netrogat_user_file():
-            return False
-
-        try:
-            write_combined_file(
-                NETROGAT_PATH,
-                _read_effective_domain_entries(NETROGAT_BASE_PATH),
-                _read_effective_domain_entries(NETROGAT_USER_PATH),
-            )
-        except Exception as e:
-            log(f"Ошибка генерации netrogat.txt: {e}", "ERROR")
-            return False
-        return True
-    except Exception as e:
-        log(f"Ошибка sync_netrogat_after_user_change: {e}", "ERROR")
+        return rebuild_layered_list(
+            NETROGAT_LIST_PATHS,
+            get_base_entries=get_netrogat_base_entries,
+            read_entries=_read_effective_domain_entries,
+            log_func=log,
+            user_error_message="Ошибка подготовки netrogat.user.txt",
+            final_error_label="Ошибка генерации netrogat.txt",
+        )
+    except Exception as exc:
+        log(f"Ошибка sync_netrogat_after_user_change: {exc}", "ERROR")
         return False
 
 
 def ensure_netrogat_exists() -> bool:
-    """Гарантирует валидный набор netrogat.base/user/final файлов."""
+    """Гарантирует валидный набор netrogat base/user/final файлов."""
     try:
-        ok, _ = _ensure_netrogat_base_updated()
-        if not ok:
-            return False
-
-        if not ensure_netrogat_user_file():
-            return False
-
-        try:
-            write_combined_file(
-                NETROGAT_PATH,
-                _read_effective_domain_entries(NETROGAT_BASE_PATH),
-                _read_effective_domain_entries(NETROGAT_USER_PATH),
-            )
-        except Exception as e:
-            log(f"Ошибка генерации netrogat.txt: {e}", "ERROR")
-            return False
-        return _count_effective_entries(NETROGAT_PATH) > 0
-    except Exception as e:
-        log(f"Ошибка создания netrogat файлов: {e}", "ERROR")
+        return rebuild_layered_list(
+            NETROGAT_LIST_PATHS,
+            get_base_entries=get_netrogat_base_entries,
+            read_entries=_read_effective_domain_entries,
+            log_func=log,
+            user_error_message="Ошибка подготовки netrogat.user.txt",
+            final_error_label="Ошибка генерации netrogat.txt",
+            require_non_empty=True,
+        )
+    except Exception as exc:
+        log(f"Ошибка создания netrogat файлов: {exc}", "ERROR")
         return False
 
 
@@ -400,12 +345,8 @@ def save_netrogat(domains: List[str]) -> bool:
 
 
 def ensure_netrogat_base_defaults() -> int:
-    """Восстанавливает системную базу netrogat.base.txt, возвращает число добавленных дефолтов."""
-    ok, added_missing = _ensure_netrogat_base_updated()
-    if not ok:
-        return 0
-    _write_combined_netrogat_file()
-    return added_missing
+    """Возвращает число доменов системной базы для совместимости старых use-site'ов."""
+    return len(get_netrogat_base_entries())
 
 
 def add_missing_defaults(current: List[str]) -> Tuple[List[str], int]:

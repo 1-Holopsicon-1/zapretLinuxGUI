@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .mode_logic import keep_payload_in_identity
+
 
 def compose_action_lines_for_strategy_selection(
     *,

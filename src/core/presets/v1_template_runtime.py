@@ -114,7 +114,7 @@ def overwrite_v1_templates_to_presets() -> tuple[int, int, list[str]]:
 def ensure_default_preset_exists_v1() -> bool:
     try:
         presets_dir = _builtin_presets_dir_v1()
-        if (presets_dir / "Default v1.txt").exists():
+        if (presets_dir / "Default v1 (game filter).txt").exists():
             return True
         return next((path for path in sorted(presets_dir.glob("*.txt"), key=lambda item: item.name.lower())), None) is not None
     except Exception as exc:

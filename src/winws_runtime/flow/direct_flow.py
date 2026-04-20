@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-import re
 import time
 from typing import Callable
 
 from core.paths import AppPaths
-from log.log import log
 from settings.schema import SETTINGS_DIR_NAME, SETTINGS_FILE_NAME
 
 from core.presets.cache_signatures import path_cache_signature
@@ -67,14 +64,14 @@ class DirectStartupSnapshot:
 
 
 class DirectFlowCoordinator:
-    PRESETS_DOWNLOAD_URL = "https://github.com/youtubediscord/zapret/discussions/categories/presets"
-
     _METHOD_TO_ENGINE = {
         "direct_zapret1": "winws1",
         "direct_zapret2": "winws2",
     }
-    _PRESET_HEADER_RE = re.compile(r"^\s*#\s*Preset:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
-    _TEMPLATE_ORIGIN_RE = re.compile(r"^\s*#\s*TemplateOrigin:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+    _DEFAULT_PRESET_BY_ENGINE = {
+        "winws1": "Default v1.txt",
+        "winws2": "Default v1 (game filter).txt",
+    }
 
     def __init__(
         self,
@@ -197,7 +194,9 @@ class DirectFlowCoordinator:
         method = self._normalize_method(launch_method)
         engine = self._METHOD_TO_ENGINE[method]
         selected_file_name = self._preset_selection_service.select_preset_file_name_fast(engine, file_name)
-        selected_manifest = self._remember_manifest_from_file_name(method, engine, selected_file_name)
+        selected_manifest = self._preset_file_store.get_manifest(engine, selected_file_name)
+        if selected_manifest is None:
+            raise DirectFlowError(f"Выбранный пресет не найден: {selected_file_name}")
         selected_path = self._get_source_preset_path(engine, selected_file_name)
         display_name = str(getattr(selected_manifest, "name", "") or "").strip() or Path(selected_file_name).stem
         return DirectLaunchProfile(
@@ -234,74 +233,30 @@ class DirectFlowCoordinator:
         selection = self._preset_selection_service
         self._emit_timing(timing_callback, f"{label}.selection_service", t_selection_service)
 
-        t_selected_name = time.perf_counter()
-        selected_file_name = str(selection.get_selected_file_name(engine) or "").strip()
-        self._emit_timing(timing_callback, f"{label}.selected_file_name", t_selected_name)
-        if selected_file_name:
-            t_cache_key = time.perf_counter()
-            cache_key = self._selected_manifest_cache_key(method, engine, selected_file_name)
-            self._emit_timing(timing_callback, f"{label}.cache_key", t_cache_key)
-            t_cache_lookup = time.perf_counter()
-            cached_manifest = self._selected_manifest_from_cache(method, cache_key)
-            self._emit_timing(timing_callback, f"{label}.cache_lookup", t_cache_lookup)
-            if cached_manifest is not None:
-                self._emit_timing(timing_callback, f"{label}.total", started_at)
-                return cached_manifest
-
-            t_selected_path = time.perf_counter()
-            selected_path = self._get_source_preset_path(engine, selected_file_name)
-            self._emit_timing(timing_callback, f"{label}.selected_path", t_selected_path)
-            if selected_path.exists():
-                t_manifest = time.perf_counter()
-                manifest = self._remember_manifest_from_path(
-                    method,
-                    engine,
-                    selected_path,
-                    cache_key=cache_key,
-                    timing_callback=timing_callback,
-                    timing_label=label,
-                )
-                self._emit_timing(timing_callback, f"{label}.remember_selected_manifest", t_manifest)
-                self._emit_timing(timing_callback, f"{label}.total", started_at)
-                return manifest
-
-        t_default = time.perf_counter()
-        default_path = self._get_source_preset_path(engine, "Default v1.txt")
-        if default_path.exists():
-            selected_file_name = selection.select_preset_file_name_fast(engine, default_path.name)
-            manifest = self._remember_manifest_from_file_name(method, engine, selected_file_name)
-            self._emit_timing(timing_callback, f"{label}.default_manifest", t_default)
-            self._emit_timing(timing_callback, f"{label}.total", started_at)
-            return manifest
-
-        t_list = time.perf_counter()
-        preset_paths = self._list_source_preset_paths(engine)
-        self._emit_timing(timing_callback, f"{label}.list_source_presets", t_list)
-        if not preset_paths:
+        preferred_file_name = self._DEFAULT_PRESET_BY_ENGINE.get(engine, "")
+        t_manifest = time.perf_counter()
+        manifest = selection.ensure_selected_manifest(engine, preferred_file_name=preferred_file_name)
+        self._emit_timing(timing_callback, f"{label}.selected_manifest", t_manifest)
+        if manifest is None:
             raise DirectFlowError(
                 "Пресеты не найдены. Проверьте папку presets рядом с программой "
                 "и переустановите приложение, если системные пресеты отсутствуют."
             )
 
-        t_first = time.perf_counter()
-        first_path = preset_paths[0]
-        selected_file_name = selection.select_preset_file_name_fast(engine, first_path.name)
-        selected_path = self._get_source_preset_path(engine, selected_file_name)
-        if selected_path.exists():
-            manifest = self._remember_manifest_from_path(
-                method,
-                engine,
-                selected_path,
-                timing_callback=timing_callback,
-                timing_label=label,
-            )
-            self._emit_timing(timing_callback, f"{label}.first_available_manifest", t_first)
+        t_cache_key = time.perf_counter()
+        cache_key = self._selected_manifest_cache_key(method, engine, manifest.file_name)
+        self._emit_timing(timing_callback, f"{label}.cache_key", t_cache_key)
+        t_cache_lookup = time.perf_counter()
+        cached_manifest = self._selected_manifest_from_cache(method, cache_key)
+        self._emit_timing(timing_callback, f"{label}.cache_lookup", t_cache_lookup)
+        if cached_manifest is not None:
             self._emit_timing(timing_callback, f"{label}.total", started_at)
-            return manifest
+            return cached_manifest
 
-        if not selected_file_name:
-            raise DirectFlowError("Не удалось определить выбранный пресет")
-        raise DirectFlowError(f"Выбранный пресет не найден: {selected_file_name}")
+        if cache_key is not None:
+            self._selected_manifest_cache[method] = (cache_key, manifest)
+        self._emit_timing(timing_callback, f"{label}.total", started_at)
+        return manifest
 
     @staticmethod
     def _has_required_filters(launch_method: str, text: str) -> bool:
@@ -363,142 +318,5 @@ class DirectFlowCoordinator:
             return manifest
         return None
 
-    def _remember_manifest_from_path(
-        self,
-        launch_method: str,
-        engine: str,
-        path: Path,
-        *,
-        cache_key: tuple[object, ...] | None = None,
-        timing_callback: Callable[[str, float], None] | None = None,
-        timing_label: str | None = None,
-    ) -> PresetManifest:
-        manifest_started = time.perf_counter()
-        manifest = self._manifest_from_source_path(
-            engine,
-            path,
-            timing_callback=timing_callback,
-            timing_label=timing_label,
-        )
-        label = str(timing_label or f"direct_flow.{self._normalize_method(launch_method)}.manifest")
-        self._emit_timing(timing_callback, f"{label}.manifest_from_source_path", manifest_started)
-        resolved_key = cache_key
-        if resolved_key is None:
-            resolved_key = self._selected_manifest_cache_key(launch_method, engine, path.name)
-        if resolved_key is not None:
-            self._selected_manifest_cache[self._normalize_method(launch_method)] = (resolved_key, manifest)
-        return manifest
-
-    def _remember_manifest_from_file_name(
-        self,
-        launch_method: str,
-        engine: str,
-        selected_file_name: str,
-    ) -> PresetManifest:
-        selected_path = self._get_source_preset_path(engine, selected_file_name)
-        return self._remember_manifest_from_path(
-            launch_method,
-            engine,
-            selected_path,
-            cache_key=self._selected_manifest_cache_key(launch_method, engine, selected_file_name),
-        )
-
-    @classmethod
-    def _read_header_metadata_from_source(
-        cls,
-        path: Path,
-        *,
-        fallback: str,
-    ) -> tuple[str, str | None]:
-        try:
-            lines: list[str] = []
-            with path.open("r", encoding="utf-8", errors="replace") as handle:
-                for raw in handle:
-                    stripped = raw.strip()
-                    if stripped and not stripped.startswith("#"):
-                        break
-                    lines.append(raw.rstrip("\n"))
-        except Exception:
-            return str(fallback or "Preset").strip() or "Preset", None
-
-        text = "\n".join(lines)
-        display_name = str(fallback or "Preset").strip() or "Preset"
-        match = cls._PRESET_HEADER_RE.search(text or "")
-        if match:
-            value = str(match.group(1) or "").strip()
-            if value:
-                display_name = value
-
-        template_origin = None
-        match = cls._TEMPLATE_ORIGIN_RE.search(text or "")
-        if match:
-            value = str(match.group(1) or "").strip()
-            if value:
-                template_origin = value
-
-        return display_name, template_origin
-
     def _get_source_preset_path(self, engine: str, file_name: str) -> Path:
         return self._preset_file_store.get_source_path(engine, file_name)
-
-    def _list_source_preset_paths(self, engine: str) -> list[Path]:
-        return sorted(
-            (
-                self._preset_file_store.get_source_path(engine, manifest.file_name)
-                for manifest in self._preset_file_store.list_manifests(engine)
-            ),
-            key=lambda path: path.name.lower(),
-        )
-
-    @staticmethod
-    def _file_time_to_iso(path: Path) -> str:
-        try:
-            value = float(path.stat().st_mtime)
-        except Exception:
-            value = 0.0
-        if value <= 0:
-            return ""
-        return datetime.fromtimestamp(value, tz=timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-    def _manifest_from_source_path(
-        self,
-        engine: str,
-        path: Path,
-        *,
-        timing_callback: Callable[[str, float], None] | None = None,
-        timing_label: str | None = None,
-    ) -> PresetManifest:
-        try:
-            manifest = self._preset_file_store.get_manifest(engine, path.name)
-            if manifest is not None:
-                return manifest
-        except Exception:
-            pass
-
-        label = str(timing_label or f"direct_flow.{engine}.manifest")
-        file_name = path.name
-        t_header = time.perf_counter()
-        display_name, template_origin = self._read_header_metadata_from_source(path, fallback=path.stem)
-        self._emit_timing(timing_callback, f"{label}.manifest_header_metadata", t_header)
-        t_timestamp = time.perf_counter()
-        timestamp = self._file_time_to_iso(path)
-        self._emit_timing(timing_callback, f"{label}.manifest_timestamp", t_timestamp)
-        storage_scope = self._storage_scope_for_path(engine, path)
-        kind = "builtin" if storage_scope == "builtin" else "user"
-        return PresetManifest(
-            file_name=file_name,
-            name=display_name,
-            template_origin=template_origin,
-            updated_at=timestamp,
-            kind=kind,
-            storage_scope=storage_scope,
-        )
-
-    def _storage_scope_for_path(self, engine: str, path: Path) -> str:
-        engine_paths = self._app_paths.engine_paths(engine).ensure_directories()
-        try:
-            if path.resolve().parent == engine_paths.builtin_presets_dir.resolve():
-                return "builtin"
-        except Exception:
-            pass
-        return "user"

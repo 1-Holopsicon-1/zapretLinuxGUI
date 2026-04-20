@@ -1,16 +1,12 @@
 """Менеджер IPset файлов.
 
-Файлы в папке приложения:
-- `lists/ipset-all.base.txt`  : системная база для ipset-all
-- `lists/ipset-all.user.txt`  : пользовательские записи (редактируются из GUI)
-- `lists/ipset-all.txt`       : итоговый файл (base + user)
-- `lists/ipset-ru.base.txt`   : системная база исключений для --ipset-exclude
-- `lists/ipset-ru.user.txt`   : пользовательские исключения (редактируются из GUI)
-- `lists/ipset-ru.txt`        : итоговый файл исключений (base + user)
-
-Поддерживаются следующие рабочие модели:
-- `ipset-all.base.txt` + `ipset-all.user.txt` -> `ipset-all.txt`
-- `ipset-ru.base.txt` + `ipset-ru.user.txt` -> `ipset-ru.txt`
+Файлы рядом с программой:
+- `lists/base/ipset-all.txt` : системная база для ipset-all
+- `lists/user/ipset-all.txt` : пользовательские записи
+- `lists/ipset-all.txt`      : итоговый файл (base + user)
+- `lists/base/ipset-ru.txt`  : системная база исключений для --ipset-exclude
+- `lists/user/ipset-ru.txt`  : пользовательские исключения
+- `lists/ipset-ru.txt`       : итоговый файл исключений
 """
 
 from __future__ import annotations
@@ -20,45 +16,27 @@ import os
 from urllib.parse import urlparse
 
 from log.log import log
-from lists.core.builders import write_combined_file
-from lists.core.embedded_defaults import get_ipset_all_base_text, get_ipset_ru_base_text
-from lists.core.files import (
-    normalize_newlines,
-    prepare_user_file,
-    read_text_file_safe,
-    write_text_file,
-)
-from lists.core.paths import get_list_path
-from lists.core.paths import get_lists_dir
+from lists.core.layered_runtime import LayeredListPaths, ensure_user_layer, rebuild_layered_list, reset_user_layer
+from lists.core.paths import get_list_base_path, get_list_final_path, get_list_user_path, get_lists_dir
 
 LISTS_FOLDER = get_lists_dir()
 
-IPSET_ALL_PATH = get_list_path("ipset-all.txt")
-IPSET_ALL_BASE_PATH = get_list_path("ipset-all.base.txt")
-IPSET_ALL_USER_PATH = get_list_path("ipset-all.user.txt")
-IPSET_RU_PATH = get_list_path("ipset-ru.txt")
-IPSET_RU_BASE_PATH = get_list_path("ipset-ru.base.txt")
-IPSET_RU_USER_PATH = get_list_path("ipset-ru.user.txt")
-
-
-IPSET_ALL_BUILTIN_BASE_TEXT = """
-# Cloudflare DNS
-1.1.1.1
-1.1.1.2
-1.1.1.3
-1.0.0.1
-1.0.0.2
-1.0.0.3
-"""
-
-
-_IPSET_RU_BASE_HEADER = """\
-# Системная база исключений для --ipset-exclude.
-# Этот файл управляется приложением.
-#
-# Итоговый lists/ipset-ru.txt формируется автоматически как:
-#   ipset-ru.base.txt + ipset-ru.user.txt
-"""
+IPSET_ALL_PATH = get_list_final_path("ipset-all")
+IPSET_ALL_BASE_PATH = get_list_base_path("ipset-all")
+IPSET_ALL_USER_PATH = get_list_user_path("ipset-all")
+IPSET_RU_PATH = get_list_final_path("ipset-ru")
+IPSET_RU_BASE_PATH = get_list_base_path("ipset-ru")
+IPSET_RU_USER_PATH = get_list_user_path("ipset-ru")
+IPSET_ALL_LIST_PATHS = LayeredListPaths(
+    base_path=IPSET_ALL_BASE_PATH,
+    user_path=IPSET_ALL_USER_PATH,
+    final_path=IPSET_ALL_PATH,
+)
+IPSET_RU_LIST_PATHS = LayeredListPaths(
+    base_path=IPSET_RU_BASE_PATH,
+    user_path=IPSET_RU_USER_PATH,
+    final_path=IPSET_RU_PATH,
+)
 
 
 _BASE_CACHE_PATH: str | None = None
@@ -98,15 +76,6 @@ def _cache_base(path: str, entries: list[str]) -> None:
     _BASE_CACHE_SIG = _file_sig(path)
     _BASE_CACHE_ENTRIES = list(entries)
     _BASE_CACHE_SET = set(entries)
-
-
-def _builtin_ipset_all_base_ips() -> list[str]:
-    ips: list[str] = []
-    for line in IPSET_ALL_BUILTIN_BASE_TEXT.strip().split("\n"):
-        line = line.strip()
-        if line and not line.startswith("#"):
-            ips.append(line)
-    return ips
 
 
 def _normalize_ip_entry(text: str) -> str | None:
@@ -182,19 +151,8 @@ def get_ipset_all_base_entries() -> list[str]:
             _cache_base(IPSET_ALL_BASE_PATH, base_entries)
             return list(base_entries)
 
-    embedded_entries = _read_effective_ip_entries_from_text(get_ipset_all_base_text())
-    if embedded_entries:
-        merged_entries: list[str] = []
-        seen: set[str] = set()
-        for item in [*embedded_entries, *_builtin_ipset_all_base_ips()]:
-            if not item or item in seen:
-                continue
-            seen.add(item)
-            merged_entries.append(item)
-        _cache_base(IPSET_ALL_BASE_PATH, merged_entries)
-        return list(merged_entries)
-
-    return _builtin_ipset_all_base_ips()
+    log("Не найдена системная база lists/base/ipset-all.txt", "ERROR")
+    return []
 
 
 def get_ipset_all_base_set() -> set[str]:
@@ -210,29 +168,7 @@ def get_user_ipset_entries() -> list[str]:
 
 def ensure_ipset_all_user_file() -> bool:
     """Публичный helper: гарантирует наличие ipset-all.user.txt."""
-    return prepare_user_file(IPSET_ALL_USER_PATH, error_message="Ошибка подготовки ipset-all.user.txt", log_func=log)
-
-
-def _write_ipset_all_base_file() -> bool:
-    """Перезаписывает ipset-all.base.txt из встроенной системной базы."""
-    try:
-        merged_content = normalize_newlines(get_ipset_all_base_text())
-        base_entries = _read_effective_ip_entries_from_text(merged_content)
-        base_set = set(base_entries)
-        extra_entries = [ip for ip in _builtin_ipset_all_base_ips() if ip not in base_set]
-        if extra_entries:
-            if merged_content and not merged_content.endswith("\n"):
-                merged_content += "\n"
-            if merged_content and not merged_content.endswith("\n\n"):
-                merged_content += "\n"
-            merged_content += "\n".join(extra_entries) + "\n"
-        write_text_file(IPSET_ALL_BASE_PATH, merged_content)
-        _invalidate_base_cache()
-        return True
-
-    except Exception as e:
-        log(f"Ошибка обновления ipset-all.base.txt: {e}", "ERROR")
-        return False
+    return ensure_user_layer(IPSET_ALL_LIST_PATHS, error_message="Ошибка подготовки ipset-all.user.txt", log_func=log)
 
 
 def sync_ipset_all_after_user_change() -> bool:
@@ -242,92 +178,53 @@ def sync_ipset_all_after_user_change() -> bool:
     Используется в GUI-автосохранении, чтобы не блокировать интерфейс.
     """
     try:
-        if not ensure_ipset_all_user_file():
-            return False
-
-        if not os.path.exists(IPSET_ALL_BASE_PATH) or os.path.getsize(IPSET_ALL_BASE_PATH) <= 0:
-            if not _write_ipset_all_base_file():
-                return False
-
-        try:
-            write_combined_file(IPSET_ALL_PATH, get_ipset_all_base_entries(), _read_effective_ip_entries(IPSET_ALL_USER_PATH))
-        except Exception as e:
-            log(f"Ошибка генерации ipset-all.txt: {e}", "ERROR")
-            return False
-        return True
-
-    except Exception as e:
-        log(f"Ошибка sync_ipset_all_after_user_change: {e}", "ERROR")
+        return rebuild_layered_list(
+            IPSET_ALL_LIST_PATHS,
+            get_base_entries=get_ipset_all_base_entries,
+            read_entries=_read_effective_ip_entries,
+            log_func=log,
+            user_error_message="Ошибка подготовки ipset-all.user.txt",
+            final_error_label="Ошибка генерации ipset-all.txt",
+        )
+    except Exception as exc:
+        log(f"Ошибка sync_ipset_all_after_user_change: {exc}", "ERROR")
         return False
 
 
 def rebuild_ipset_all_files() -> bool:
-    """Пересобирает ipset-all.base.txt, ipset-all.user.txt (если отсутствует) и ipset-all.txt."""
+    """Пересобирает итоговый ipset-all.txt из системной базы и user-слоя."""
     try:
-        if not ensure_ipset_all_user_file():
-            return False
-        if not _write_ipset_all_base_file():
-            return False
-        try:
-            write_combined_file(IPSET_ALL_PATH, get_ipset_all_base_entries(), _read_effective_ip_entries(IPSET_ALL_USER_PATH))
-        except Exception as e:
-            log(f"Ошибка генерации ipset-all.txt: {e}", "ERROR")
-            return False
-        return _count_effective_entries(IPSET_ALL_PATH) > 0
-
-    except Exception as e:
-        log(f"Ошибка rebuild_ipset_all_files: {e}", "ERROR")
+        return rebuild_layered_list(
+            IPSET_ALL_LIST_PATHS,
+            get_base_entries=get_ipset_all_base_entries,
+            read_entries=_read_effective_ip_entries,
+            log_func=log,
+            user_error_message="Ошибка подготовки ipset-all.user.txt",
+            final_error_label="Ошибка генерации ipset-all.txt",
+            require_non_empty=True,
+        )
+    except Exception as exc:
+        log(f"Ошибка rebuild_ipset_all_files: {exc}", "ERROR")
         return False
 
 
 def reset_ipset_all_user_file() -> bool:
     """Очищает ipset-all.user.txt и пересобирает ipset-all.txt из системной базы."""
-    try:
-        write_text_file(IPSET_ALL_USER_PATH, "")
-        ok = rebuild_ipset_all_files()
-        if ok:
-            log("ipset-all.user.txt очищен, ipset-all.txt пересобран из системной базы", "SUCCESS")
-        return ok
-
-    except Exception as e:
-        log(f"Ошибка сброса ipset-all.user.txt: {e}", "ERROR")
-        return False
-
-
-def _get_default_ipset_ru_base_entries() -> list[str]:
-    """Системная база ipset-ru (чистая установка)."""
-    return []
-
-
-def _build_ipset_ru_base_content() -> str:
-    lines: list[str] = [ln.rstrip() for ln in _IPSET_RU_BASE_HEADER.split("\n")]
-    while lines and not lines[-1]:
-        lines.pop()
-    lines.extend(_get_default_ipset_ru_base_entries())
-    return "\n".join(lines) + "\n"
-
-
-def _ensure_ipset_ru_base_updated() -> bool:
-    try:
-        embedded_content = normalize_newlines(get_ipset_ru_base_text())
-        expected = embedded_content if _read_effective_ip_entries_from_text(embedded_content) else _build_ipset_ru_base_content()
-        current = read_text_file_safe(IPSET_RU_BASE_PATH)
-
-        if normalize_newlines(current or "") != normalize_newlines(expected):
-            write_text_file(IPSET_RU_BASE_PATH, expected)
-            if current is None:
-                log("Создан ipset-ru.base.txt", "INFO")
-            else:
-                log("Обновлен ipset-ru.base.txt", "DEBUG")
-
-        return True
-    except Exception as e:
-        log(f"Ошибка подготовки ipset-ru.base.txt: {e}", "ERROR")
-        return False
+    return reset_user_layer(
+        IPSET_ALL_LIST_PATHS,
+        rebuild_fn=rebuild_ipset_all_files,
+        log_func=log,
+        reset_error_label="Ошибка сброса ipset-all.user.txt",
+        success_message="ipset-all.user.txt очищен, ipset-all.txt пересобран из системной базы",
+    )
 
 
 def get_ipset_ru_base_entries() -> list[str]:
-    return _read_effective_ip_entries(IPSET_RU_BASE_PATH)
+    base_entries = _read_effective_ip_entries(IPSET_RU_BASE_PATH)
+    if base_entries:
+        return base_entries
+    log("Не найдена системная база lists/base/ipset-ru.txt", "ERROR")
+    return []
 
 
 def get_ipset_ru_base_set() -> set[str]:
@@ -340,44 +237,38 @@ def get_user_ipset_ru_entries() -> list[str]:
 
 def ensure_ipset_ru_user_file() -> bool:
     """Публичный helper: гарантирует наличие ipset-ru.user.txt."""
-    if not _ensure_ipset_ru_base_updated():
-        return False
-    return prepare_user_file(IPSET_RU_USER_PATH, error_message="Ошибка подготовки ipset-ru.user.txt", log_func=log)
+    return ensure_user_layer(IPSET_RU_LIST_PATHS, error_message="Ошибка подготовки ipset-ru.user.txt", log_func=log)
 
 
 def sync_ipset_ru_after_user_change() -> bool:
     """Быстрый sync после правки ipset-ru.user.txt."""
     try:
-        if not _ensure_ipset_ru_base_updated():
-            return False
-        if not ensure_ipset_ru_user_file():
-            return False
-        try:
-            write_combined_file(IPSET_RU_PATH, get_ipset_ru_base_entries(), _read_effective_ip_entries(IPSET_RU_USER_PATH))
-        except Exception as e:
-            log(f"Ошибка генерации ipset-ru.txt: {e}", "ERROR")
-            return False
-        return True
-    except Exception as e:
-        log(f"Ошибка sync_ipset_ru_after_user_change: {e}", "ERROR")
+        return rebuild_layered_list(
+            IPSET_RU_LIST_PATHS,
+            get_base_entries=get_ipset_ru_base_entries,
+            read_entries=_read_effective_ip_entries,
+            log_func=log,
+            user_error_message="Ошибка подготовки ipset-ru.user.txt",
+            final_error_label="Ошибка генерации ipset-ru.txt",
+        )
+    except Exception as exc:
+        log(f"Ошибка sync_ipset_ru_after_user_change: {exc}", "ERROR")
         return False
 
 
 def rebuild_ipset_ru_files() -> bool:
-    """Пересобирает ipset-ru.base.txt, ipset-ru.user.txt и ipset-ru.txt."""
+    """Пересобирает итоговый ipset-ru.txt из системной базы и user-слоя."""
     try:
-        if not _ensure_ipset_ru_base_updated():
-            return False
-        if not ensure_ipset_ru_user_file():
-            return False
-        try:
-            write_combined_file(IPSET_RU_PATH, get_ipset_ru_base_entries(), _read_effective_ip_entries(IPSET_RU_USER_PATH))
-        except Exception as e:
-            log(f"Ошибка генерации ipset-ru.txt: {e}", "ERROR")
-            return False
-        return True
-    except Exception as e:
-        log(f"Ошибка rebuild_ipset_ru_files: {e}", "ERROR")
+        return rebuild_layered_list(
+            IPSET_RU_LIST_PATHS,
+            get_base_entries=get_ipset_ru_base_entries,
+            read_entries=_read_effective_ip_entries,
+            log_func=log,
+            user_error_message="Ошибка подготовки ipset-ru.user.txt",
+            final_error_label="Ошибка генерации ipset-ru.txt",
+        )
+    except Exception as exc:
+        log(f"Ошибка rebuild_ipset_ru_files: {exc}", "ERROR")
         return False
 
 

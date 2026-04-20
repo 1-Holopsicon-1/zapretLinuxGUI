@@ -1,16 +1,10 @@
 # lists/hostlists_manager.py
 """Менеджер hostlist-файлов.
 
-Файлы в папке приложения (рядом с Zapret.exe):
-- `lists/other.base.txt` : системная база (автоматически поддерживается приложением)
-- `lists/other.user.txt` : пользовательский файл (редактируется пользователем)
-- `lists/other.txt`      : итоговый файл для движка (base + user), генерируется автоматически
-
-Примечание:
-Поддерживается только новая модель:
-- `other.base.txt` как системная база;
-- `other.user.txt` как пользовательский файл;
-- `other.txt` как автоматически собираемый итоговый файл для движка.
+Файлы рядом с программой:
+- `lists/base/other.txt` : системная база от установщика
+- `lists/user/other.txt` : пользовательский файл (редактируется из GUI)
+- `lists/other.txt`      : итоговый файл для движка (base + user)
 """
 
 from __future__ import annotations
@@ -18,21 +12,17 @@ from __future__ import annotations
 import os
 
 from log.log import log
-from lists.core.builders import write_combined_file
-from lists.core.embedded_defaults import get_other_base_text
-from lists.core.files import (
-    prepare_user_file,
-    write_text_file,
-)
+from lists.core.layered_runtime import LayeredListPaths, rebuild_layered_list, reset_user_layer
 from lists.core.paths import get_list_base_path, get_list_final_path, get_list_user_path
 
 OTHER_PATH = get_list_final_path("other")
 OTHER_BASE_PATH = get_list_base_path("other")
 OTHER_USER_PATH = get_list_user_path("other")
-
-
-def _fallback_base_domains() -> list[str]:
-    return ["youtube.com", "googlevideo.com", "discord.com", "discord.gg"]
+OTHER_LIST_PATHS = LayeredListPaths(
+    base_path=OTHER_BASE_PATH,
+    user_path=OTHER_USER_PATH,
+    final_path=OTHER_PATH,
+)
 
 
 def _read_effective_entries(path: str) -> list[str]:
@@ -52,33 +42,18 @@ def _read_effective_entries(path: str) -> list[str]:
         return []
     return result
 
-
-def _read_effective_entries_from_text(text: str) -> list[str]:
-    result: list[str] = []
-    for raw in str(text or "").splitlines():
-        line = raw.strip().lower()
-        if not line or line.startswith("#"):
-            continue
-        result.append(line)
-    return result
-
-
 def _count_effective_entries(path: str) -> int:
     return len(_read_effective_entries(path))
 
 
 def get_base_domains() -> list[str]:
-    """Возвращает базовые домены из текущей системной базы или встроенного списка."""
+    """Возвращает базовые домены из системной базы установщика."""
     base_domains = _read_effective_entries(OTHER_BASE_PATH)
     if base_domains:
         return base_domains
 
-    embedded_domains = _read_effective_entries_from_text(get_other_base_text())
-    if embedded_domains:
-        return embedded_domains
-
-    log("WARNING: Не удалось загрузить встроенную базу other, использую аварийный минимум", "WARNING")
-    return _fallback_base_domains()
+    log("Не найдена системная база lists/base/other.txt", "ERROR")
+    return []
 
 
 def get_base_domains_set() -> set[str]:
@@ -91,58 +66,32 @@ def get_user_domains() -> list[str]:
     return _read_effective_entries(OTHER_USER_PATH)
 
 
-def build_other_base_content() -> str:
-    """Формирует каноническое содержимое системной базы other.base.txt."""
-    embedded_text = str(get_other_base_text() or "")
-    if _read_effective_entries_from_text(embedded_text):
-        return embedded_text
-
-    domains = sorted(set(_fallback_base_domains()))
-    return "\n".join(domains) + "\n"
-
-
-def _write_base_file() -> bool:
-    """Перезаписывает other.base.txt из встроенной системной базы."""
-    try:
-        write_text_file(OTHER_BASE_PATH, build_other_base_content())
-        return True
-
-    except Exception as e:
-        log(f"Ошибка обновления other.base.txt: {e}", "ERROR")
-        return False
-
-
 def rebuild_other_files() -> bool:
-    """Пересобирает other.base.txt, other.user.txt и other.txt."""
+    """Пересобирает other.txt из системной базы и пользовательских правок."""
     try:
-        if not prepare_user_file(OTHER_USER_PATH, error_message="Ошибка подготовки other.user.txt", log_func=log):
-            return False
-        if not _write_base_file():
-            return False
-        try:
-            write_combined_file(OTHER_PATH, get_base_domains(), _read_effective_entries(OTHER_USER_PATH))
-        except Exception as e:
-            log(f"Ошибка генерации other.txt: {e}", "ERROR")
-            return False
-        return _count_effective_entries(OTHER_PATH) > 0
-
-    except Exception as e:
-        log(f"Ошибка rebuild_other_files: {e}", "ERROR")
+        return rebuild_layered_list(
+            OTHER_LIST_PATHS,
+            get_base_entries=get_base_domains,
+            read_entries=_read_effective_entries,
+            log_func=log,
+            user_error_message="Ошибка подготовки other.user.txt",
+            final_error_label="Ошибка генерации other.txt",
+            require_non_empty=True,
+        )
+    except Exception as exc:
+        log(f"Ошибка rebuild_other_files: {exc}", "ERROR")
         return False
 
 
 def reset_other_user_file() -> bool:
     """Очищает other.user.txt и пересобирает other.txt из системной базы."""
-    try:
-        write_text_file(OTHER_USER_PATH, "")
-        ok = rebuild_other_files()
-        if ok:
-            log("other.user.txt очищен, other.txt пересобран из системной базы", "SUCCESS")
-        return ok
-
-    except Exception as e:
-        log(f"Ошибка сброса my hostlist: {e}", "ERROR")
-        return False
+    return reset_user_layer(
+        OTHER_LIST_PATHS,
+        rebuild_fn=rebuild_other_files,
+        log_func=log,
+        reset_error_label="Ошибка сброса my hostlist",
+        success_message="other.user.txt очищен, other.txt пересобран из системной базы",
+    )
 
 
 def ensure_hostlists_exist() -> bool:
